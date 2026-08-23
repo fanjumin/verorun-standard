@@ -1,0 +1,174 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Internal AI agent rules (never publish)
+AGENTS.md
+REGRESSIONS.md
+
+# IDE
+.vscode/
+.idea/
+.trae/
+.trae-html-share-packages/
+*.swp
+*.swo
+
+# Temp diagnostic files
+_*.py
+!__init__.py
+_*.cjs
+_*.txt
+_*.html
+!plugins/**/templates/_*.html
+_test_output.txt
+
+# Temp scripts & artifacts
+tmp/
+VeroRun*
+!veroguard/systemd/verorun-guardian*
+do_git*
+git_output*.log
+verify*
+!deploy/scripts/verify-research-payload.sh
+deploy_paramiko.py
+check_index.py
+t_git.py
+test_git.py
+out*.txt
+tmp_*.py
+tmp_*.ps1
+tmp_*.vbs
+tmp_*.bat
+ubprocess*
+*ubprocess*
+*sourcesappout*
+git_script.py
+"*s -File*"
+"*sourcesappout*"
+"*shellIntegration*"
+
+# Environment
+.env
+.env.*
+!.env.example
+*.env.local
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Temp debug/deploy scripts (local only)
+check_*.py
+debug_*.py
+deploy_*.py
+fix_cache.py
+verify_*.py
+
+# DB backups
+backups/
+data/*.db
+**/data/*.mmdb
+
+# Runtime SQLite databases (plugins own DBs are created at runtime)
+plugins/*/*.db
+plugins/*/*.db-shm
+plugins/*/*.db-wal
+
+# License server runtime DB (created at runtime, must not be committed)
+plugin_manager/license_server/data/*.db
+plugin_manager/license_server/data/*.db-shm
+plugin_manager/license_server/data/*.db-wal
+
+# Deploy artifacts (local only, rewritten by deploy scripts)
+.trae/.deploy-hash
+
+# Local one-off diagnostic / deploy / probe scripts (root only)
+/run_diag*.ps1
+/run_3step.ps1
+/run_diag_scp.ps1
+/get_jwt.bat
+/remote_commands.sh
+/_rebuild_db.sh
+/diag_result.txt
+/diagnose_admin.py
+/fix_admin.py
+/extract_js.py
+/validate_js.py
+/full_check.py
+/get_token.py
+/verify_cookie.py
+/rename_db.py
+/seed_users.py
+/end_to_end_test.py
+/check_login.py
+/check_services.py
+/check_users.py
+/test_login.py
+/test_services.py
+/test_admin_apis.py
+/test_admin_token.py
+/test_platform.py
+/test_platform_apis.py
+/test_platform_page.py
+
+# Node / Frontend
+node_modules/
+
+# Temp / sandbox
+tools/
+!veroguard/tools/
+site/
+deploy/caddy/
+docs/*
+!docs/i18n-standard.md
+!docs/plugin-manifest.schema.json
+
+# Local deploy diagnostics (not tracked — health scripts are tracked separately)
+deploy/check*.sh
+deploy/cloud_check.sh
+deploy/create_admin.py
+deploy/diag.py
+deploy/gen_token.py
+deploy/gunicorn_conf.py
+deploy/probe.sh
+deploy/restart_admin.sh
+deploy/run_*.sh
+deploy/serve_admin.sh
+deploy/setup_db*.sh
+deploy/start*.py
+deploy/start*.sh
+deploy/test_*.py
+deploy/test_*.sh
+deploy/.env_test
+
+# Local fix/diagnostic scripts
+fix_nested*.py
+preview_admin.html
+_check*.sh
+_diag.sh
+_check*.sql
+_fix*.sql
+
+# Temp artifacts
+admin/templates/partials/files.txt
+community/
+/docs/bug_root_cause_*.md
+
+# Logs, temp outputs & test result artifacts
+*.log
+*_result.txt
+*_result.json
+env_check.txt
+full_check.txt
+*guardian.log
+
+# Runtime cache (rebuildable)
+.cache/
+
+# Local docs (never commit)
+CONTRIBUTING.md
