@@ -413,7 +413,12 @@ async function pwdLogin() {
       body: JSON.stringify({ username, password, client_type: getClientType() })
     });
     const d = await r.json();
-    if (d.success) {
+    if (d.success && d.data && d.data.needs_2fa) {
+      const rd = new URLSearchParams(location.search).get('redirect') || '/admin';
+      window.location.href = '/plugin/two_factor_auth/challenge-page?challenge_token='
+        + encodeURIComponent(d.data.challenge_token || '')
+        + '&redirect=' + encodeURIComponent(rd);
+    } else if (d.success) {
       toast("{{ _('Login successful, redirecting...') }}", 'success');
       setTimeout(() => {
         const rd = new URLSearchParams(location.search).get('redirect') || '/admin';
@@ -488,7 +493,12 @@ async function codeLogin() {
       body: JSON.stringify({ username, code, client_type: getClientType() })
     });
     const d = await r.json();
-    if (d.success) {
+    if (d.success && d.data && d.data.needs_2fa) {
+      const rd = new URLSearchParams(location.search).get('redirect') || '/admin';
+      window.location.href = '/plugin/two_factor_auth/challenge-page?challenge_token='
+        + encodeURIComponent(d.data.challenge_token || '')
+        + '&redirect=' + encodeURIComponent(rd);
+    } else if (d.success) {
       toast("{{ _('Login successful, redirecting...') }}", 'success');
       setTimeout(() => {
         const rd = new URLSearchParams(location.search).get('redirect') || '/admin';

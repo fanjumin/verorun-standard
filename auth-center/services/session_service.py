@@ -71,11 +71,18 @@ def _write_user_session(user_id, token, device_name, device_type):
         conn.commit()
 
 
-def set_sso_cookie(resp, token):
-    """跨子域 SSO cookie（现有 4 份重复实现收敛到此）。"""
+def set_sso_cookie(resp, token, app_name='main'):
+    """跨子域 SSO cookie（现有 4 份重复实现收敛到此）。
+
+    app_name='admin' 时特权隔离（复审 §8.4）：不种主域共享 cookie，
+    收窄到当前（admin 子）域，避免任一子域 XSS 读到管理员令牌。
+    """
     main_domain = os.environ.get('DEPLOY_DOMAIN', '')
     is_https = os.environ.get('DEPLOY_PROTOCOL', 'https') == 'https'
-    if main_domain:
+    if app_name == 'admin':
+        resp.set_cookie('sso_token', token, path='/', max_age=604800,
+                        samesite='Lax', secure=is_https, httponly=True)
+    elif main_domain:
         resp.set_cookie('sso_token', token, domain='.' + main_domain,
                         path='/', max_age=604800, samesite='Lax',
                         secure=is_https, httponly=True)

@@ -953,7 +953,7 @@ function loadServices(){
     h+='<div class="card"><h3>'+{{ _('2FA') | tojson }}+'（2FA）</h3>';
     h+='<div class="field"><label>{{ _('Status') }}</label>';
     h+='<div id="twofaStatus" class="val">'+{{ _('Loading...') | tojson }}+'</div>';
-    h+='<div id="twofaActions"><a class="btn btn-sm btn-primary" href="/plugin/two_factor_auth/setup-page?token='+encodeURIComponent(TOKEN)+'">{{ _('Manage 2FA') }}</a></div>';
+    h+='<div id="twofaActions"><a class="btn btn-sm btn-primary" id="twofaManageBtn" href="javascript:void(0)">{{ _('Manage 2FA') }}</a></div>';
     h+='</div>';
     fetch('/plugin/two_factor_auth/status',{headers:{'Authorization':'Bearer '+TOKEN}})
       .then(function(r){return r.json()}).then(function(d){
@@ -962,6 +962,15 @@ function loadServices(){
         if(d.enabled){st.innerHTML='<span class="badge badge-green">✅ '+{{ _('Enabled') | tojson }}+'</span>';}
         else{st.innerHTML='<span class="badge badge-yellow">'+{{ _('Disabled') | tojson }}+'</span>';}
       }).catch(function(){var st=document.getElementById('twofaStatus');if(st)st.textContent='';});
+
+    // 2FA 入口：先经 /setup-token 换取 5 分钟一次性令牌，登录 JWT 永不进 URL（复审 follow-up #1）
+    var mb=document.getElementById('twofaManageBtn');
+    if(mb)mb.addEventListener('click',function(){
+      fetch('/plugin/two_factor_auth/setup-token',{method:'POST',headers:{'Authorization':'Bearer '+TOKEN}})
+        .then(function(r){return r.json()}).then(function(d){
+          if(d&&d.token)window.location.href='/plugin/two_factor_auth/setup-page?setup_token='+encodeURIComponent(d.token);
+        }).catch(function(){});
+    });
 
     h+='</div>';
     document.getElementById('mainContent').innerHTML=h;
