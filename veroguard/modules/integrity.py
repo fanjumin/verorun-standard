@@ -2,7 +2,7 @@
 """
 VeroGuard — 文件完整性校验模块（Phase 2）
 =============================================
-从加密的 manifest.json.enc 加载基准清单，
+从签名版 manifest.json + manifest.json.sig 加载基准清单（Ed25519 验签），
 SHA256 逐一比对核心文件，返回违规列表。
 
 违反级别:
@@ -15,38 +15,39 @@ import json
 import logging
 import os
 from datetime import datetime
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from .. import config
 
 
-def _derive_key(secret: str, purpose: str) -> bytes:
-    """从预共享密钥派生 AES 密钥（与 build_manifest.py 一致）"""
-    return hashlib.sha256(f"{secret}:{purpose}".encode()).digest()
-
-
 def load_manifest() -> dict:
-    """加载并解密完整性基准清单
-    VR-SEC-007: 清单缺失/解密失败视为「无法校验」，向上抛出由 run() 按 fail-closed 处理。
+    """加载并验签完整性基准清单（manifest.json + manifest.json.sig，Ed25519）
+    VR-SEC-007: 清单缺失/验签失败视为「无法校验」，向上抛出由 run() 按 fail-closed 处理。
     """
     manifest_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        'data', 'manifest.json.enc'
+        'data', 'manifest.json'
     )
+    sig_path = manifest_path + '.sig'
     if not os.path.exists(manifest_path):
         raise ValueError(f"Manifest not found: {manifest_path}")
+    if not os.path.exists(sig_path):
+        raise ValueError(f"Manifest signature not found: {sig_path}")
 
-    key = _derive_key(config.PROBE_SECRET, 'integrity_manifest')
-    with open(manifest_path, 'rb') as f:
-        nonce = f.read(12)
-        ciphertext = f.read()
+    pub_key_hex = config.RELEASE_VERIFY_KEY
+    if not pub_key_hex or pub_key_hex == "REPLACE_WITH_REAL_PUBLIC_KEY_HEX":
+        raise ValueError("RELEASE_VERIFY_KEY not configured")
 
-    aesgcm = AESGCM(key)
     try:
-        plaintext = aesgcm.decrypt(nonce, ciphertext, None)
-        return json.loads(plaintext)
-    except Exception as e:
-        raise ValueError(f"Failed to decrypt manifest: {e}")
+        pub = Ed25519PublicKey.from_public_bytes(bytes.fromhex(pub_key_hex))
+        manifest_text = open(manifest_path, encoding='utf-8').read().strip()
+        sig_bytes = bytes.fromhex(open(sig_path, encoding='utf-8').read().strip())
+        pub.verify(sig_bytes, manifest_text.encode('utf-8'))
+        return json.loads(manifest_text)
+    except (ValueError, InvalidSignature, json.JSONDecodeError) as e:
+        raise ValueError(f"Manifest signature verification failed: {e}")
 
 
 def run() -> list:
@@ -65,17 +66,6 @@ def run() -> list:
             ...
         ]
     """
-    if not config.PROBE_SECRET:
-        logging.warning("PROBE_SECRET not set — integrity check unavailable")
-        return [{
-            'file': 'integrity/unavailable',
-            'type': 'unavailable',
-            'severity': 'critical',
-            'expected_hash': '',
-            'actual_hash': '',
-            'reason': 'PROBE_SECRET not set',
-        }]
-
     try:
         manifest = load_manifest()
     except ValueError as e:

@@ -53,6 +53,7 @@ SIGNATURE_NAME = 'verorun.signature'
 
 # 隐藏水印特征
 WM_COMMENT_PATTERN = re.compile(r'#\s*vr-wm:[0-9a-f]{32}\b')
+BUILD_COMMENT_PATTERN = re.compile(r'#\s*vr-build:([^\s]+)')
 WM_META_FIELD = '_wm'
 
 # 不可辩驳的官方包特征（上传/批准时唯一硬拒集合）
@@ -116,14 +117,17 @@ def build_manifest(plugin_dir: str, identifier: str, version: str) -> Dict[str, 
 # ── 生成侧（官方发布用）──────────────────────────────────────────────
 
 def write_watermark(plugin_dir: str, identifier: str, version: str,
-                    secret: str = None) -> None:
-    """向插件**打包副本**写入官方签名 + 隐藏水印。
+                    secret: str = None, build_id: str = None) -> None:
+    """向插件**打包副本**写入官方签名 + 隐藏水印 + 版本溯源标识。
 
     Args:
         plugin_dir: 插件目录（应为打包用临时副本，不得是 plugins/ 源码目录）
         identifier: 插件标识
         version:    插件版本号
         secret:     HMAC 密钥；缺省时从环境变量读取，为空则跳过签名（仅清单/注释水印）
+        build_id:   版本溯源标识（P1-2，VR-{semver}-{commit8}）。注入
+                    manifest['build_id'] / plugin.json['_wm_build'] / 注释水印，
+                    受签名保护，泄露可反查版本+commit，篡改即拦截。
 
     Note:
         顺序保证：先注入隐藏水印，最后构建 manifest —— manifest 记录的是
@@ -138,6 +142,9 @@ def write_watermark(plugin_dir: str, identifier: str, version: str,
             with open(meta_path, 'r', encoding='utf-8') as f:
                 meta = json.load(f)
             meta[WM_META_FIELD] = _hmac_hex(secret or 'nokey', f'{identifier}:{version}')
+            if build_id:
+                meta['_wm_build'] = _hmac_hex(secret or 'nokey',
+                                              f'{identifier}:{version}:{build_id}')
             with open(meta_path, 'w', encoding='utf-8') as f:
                 json.dump(meta, f, indent=2, ensure_ascii=False)
         except (json.JSONDecodeError, OSError):
@@ -155,6 +162,8 @@ def write_watermark(plugin_dir: str, identifier: str, version: str,
             try:
                 with open(path, 'a', encoding='utf-8') as f:
                     f.write(f'\n# vr-wm:{stamp}\n')
+                    if build_id:
+                        f.write(f'# vr-build:{build_id}\n')
                 _wm_injected = True
             except OSError:
                 continue
@@ -164,6 +173,8 @@ def write_watermark(plugin_dir: str, identifier: str, version: str,
 
     # 3. 最后构建 manifest（此时文件为最终形态），写入清单 + 签名
     manifest = build_manifest(plugin_dir, identifier, version)
+    if build_id:
+        manifest['build_id'] = build_id
     canonical = json.dumps(manifest, sort_keys=True, separators=(',', ':'))
     manifest_path = os.path.join(plugin_dir, MANIFEST_NAME)
     with open(manifest_path, 'w', encoding='utf-8') as f:
@@ -194,7 +205,7 @@ def detect_official_watermark(plugin_dir: str, secret: str = None) -> Dict[str, 
         }
     """
     result = {'official': False, 'identifier': '', 'version': '',
-              'method': '', 'reason': ''}
+              'build_id': '', 'method': '', 'reason': ''}
     secret = (secret or '').strip() or _signing_secret()
 
     # ① 官方清单 + 签名
@@ -207,6 +218,7 @@ def detect_official_watermark(plugin_dir: str, secret: str = None) -> Dict[str, 
             canonical = json.dumps(manifest, sort_keys=True, separators=(',', ':'))
             identifier = str(manifest.get('identifier') or '')
             version = str(manifest.get('version') or '')
+            build_id = str(manifest.get('build_id') or '')
 
             if os.path.isfile(sig_path):
                 with open(sig_path, 'r', encoding='utf-8') as f:
@@ -214,11 +226,13 @@ def detect_official_watermark(plugin_dir: str, secret: str = None) -> Dict[str, 
                 if secret and hmac.compare_digest(
                         sig, _hmac_hex(secret, canonical)):
                     result.update({'official': True, 'identifier': identifier,
-                                   'version': version, 'method': 'signature',
+                                   'version': version, 'build_id': build_id,
+                                   'method': 'signature',
                                    'reason': '官方签名验签通过（verorun.signature）'})
                     return result
             result.update({'official': True, 'identifier': identifier,
-                           'version': version, 'method': 'manifest',
+                           'version': version, 'build_id': build_id,
+                           'method': 'manifest',
                            'reason': '存在官方打包清单 verorun.manifest'})
             return result
         except (json.JSONDecodeError, OSError):
@@ -235,7 +249,12 @@ def detect_official_watermark(plugin_dir: str, secret: str = None) -> Dict[str, 
                 with open(path, 'r', encoding='utf-8', errors='ignore') as f:
                     head = f.read(65536)
                 if WM_COMMENT_PATTERN.search(head):
-                    result.update({'official': True, 'method': 'wm_comment',
+                    _bid = ''
+                    _bm = BUILD_COMMENT_PATTERN.search(head)
+                    if _bm:
+                        _bid = _bm.group(1)
+                    result.update({'official': True, 'build_id': _bid,
+                                   'method': 'wm_comment',
                                    'reason': '命中隐藏注释水印 vr-wm:'
                                              f'（{os.path.relpath(path, plugin_dir)}）'})
                     return result
@@ -250,9 +269,11 @@ def detect_official_watermark(plugin_dir: str, secret: str = None) -> Dict[str, 
                 meta = json.load(f)
             wm = meta.get(WM_META_FIELD)
             if isinstance(wm, str) and len(wm) >= 32:
+                _build = meta.get('_wm_build')
                 result.update({'official': True,
                                'identifier': str(meta.get('identifier') or ''),
                                'version': str(meta.get('version') or ''),
+                               'build_id': str(_build) if isinstance(_build, str) else '',
                                'method': 'wm_meta',
                                'reason': 'plugin.json 含官方水印字段 _wm'})
                 return result

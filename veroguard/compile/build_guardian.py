@@ -37,7 +37,8 @@ NUITKA_ARGS = [
     '--include-package=veroguard',
     '--include-package=veroguard.modules',
     # 嵌入数据文件
-    '--include-data-file=' + os.path.join(GUARDIAN_DIR, 'data', 'manifest.json.enc') + '=data/manifest.json.enc',
+    '--include-data-file=' + os.path.join(GUARDIAN_DIR, 'data', 'manifest.json') + '=data/manifest.json',
+    '--include-data-file=' + os.path.join(GUARDIAN_DIR, 'data', 'manifest.json.sig') + '=data/manifest.json.sig',
     # 输出
     f'--output-dir={OUTPUT_DIR}',
     f'--output-filename=verorun-guardian.bin',

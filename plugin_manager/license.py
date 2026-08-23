@@ -21,9 +21,19 @@ import base64
 import socket
 import threading
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
 from urllib.request import Request, urlopen
 from urllib.error import URLError
+
+try:
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    _CRYPTO_OK = True
+except ImportError:
+    InvalidSignature = None
+    Ed25519PublicKey = None
+    _CRYPTO_OK = False
 
 from .models_store import (
     LicenseRecord, LicenseType, LicenseStatus,
@@ -142,14 +152,132 @@ def verify_offline_token(token: str, plugin_id: str, site_id: str) -> Tuple[bool
 from .region import get_api_base
 
 
+# ── 官方版签名凭证（Task 6：官方版仅内部使用，凭证随私有仓库分发）──
+# Ed25519 公钥（hex），与 deploy/scripts/sign_release.py 同款。
+# official_token.json(.sig) 由发版机以 RELEASE_SIGN_KEY 签发并提交到 verorun-code
+# 私有仓库；客户仓库永远没有，即使伪造 VR_EDITION=official 也无法通过验签，
+# 官方版判定退化为普通客户版（走正常付费校验）。
+RELEASE_VERIFY_KEY = "a467ea79346e26f8c4fb75ecc07b400b3af86f7c9a7aab9878bb2754b8107ef4"
+OFFICIAL_TOKEN_NAME = "official_token.json"
+OFFICIAL_TOKEN_SIG_NAME = "official_token.json.sig"
+
+
+def _project_root() -> Path:
+    """推断项目根目录：plugin_manager/license.py 的上级的上级。"""
+    return Path(__file__).resolve().parents[1]
+
+
+def _verify_official_token() -> bool:
+    """校验官方版签名凭证（official_token.json + .sig，Ed25519 验签）。
+
+    判定条件缺一不可：
+      1. 凭证文件存在（随 verorun-code 私有仓库分发，客户无法获取）
+      2. Ed25519 验签通过（内置公钥；客户无私钥无法伪造）
+      3. edition == 'official'、version == 1 且未过期
+    任一失败 → 不承认官方版（fail-closed，不静默放行）。
+    """
+    if not _CRYPTO_OK:
+        return False
+    token_path = _project_root() / OFFICIAL_TOKEN_NAME
+    sig_path = _project_root() / OFFICIAL_TOKEN_SIG_NAME
+    if not token_path.exists() or not sig_path.exists():
+        return False
+    try:
+        token = json.loads(token_path.read_text(encoding='utf-8'))
+        sig = bytes.fromhex(sig_path.read_text(encoding='utf-8').strip())
+        pub = Ed25519PublicKey.from_public_bytes(bytes.fromhex(RELEASE_VERIFY_KEY))
+        canonical = json.dumps(token, sort_keys=True, separators=(",", ":"))
+        pub.verify(sig, canonical.encode('utf-8'))
+    except (ValueError, InvalidSignature, json.JSONDecodeError, OSError):
+        return False
+    if token.get('version') != 1 or token.get('edition') != 'official':
+        return False
+    expires_at = token.get('expires_at', '')
+    if not expires_at:
+        return False
+    try:
+        if datetime.now(timezone.utc) > datetime.fromisoformat(expires_at):
+            return False
+    except ValueError:
+        return False
+    return True
+
+
 def _is_official_edition() -> bool:
-    """官方版判定：VR_EDITION=official（由官方独立部署脚本写入 .env）
+    """官方版判定：VR_EDITION=official（本地标志）∧ 官方签名凭证有效（强校验）。
 
     官方版拥有全部插件权限，无需单独激活 License。
-    客户版（customer）走正常付费校验。本地标志仅为加速判断，
-    官方身份由私有仓库分发 + 独立部署脚本保证（客户无法获取）。
+    客户版（customer）走正常付费校验。即使客户在 .env 写入
+    VR_EDITION=official，缺少 verorun-code 私有仓库中的签名凭证
+    仍会被判定为非官方版（fail-closed）。
     """
-    return os.environ.get('VR_EDITION', '').strip().lower() == 'official'
+    if os.environ.get('VR_EDITION', '').strip().lower() != 'official':
+        return False
+    return _verify_official_token()
+
+
+def _parse_semver(v: str) -> tuple:
+    """解析 semver 'x.y.z' 为可比较元组；无法解析时返回 (0,0,0)。"""
+    parts = []
+    for seg in str(v).strip().split('.')[:3]:
+        digits = ''.join(ch for ch in seg if ch.isdigit())
+        parts.append(int(digits) if digits else 0)
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts)
+
+
+# 签名清单 semver 缓存：{semver, mtime}，清单文件未变化时复用
+_MANIFEST_SEMVER_CACHE: dict = {}
+
+
+def _signed_manifest_semver() -> Optional[str]:
+    """读取并验签完整性清单 manifest.json，返回签名确认的 semver（版本真相）。
+
+    版本真相必须来自 Ed25519 验签的清单，防止客户篡改 VERSION 文件绕过防回滚。
+    验签失败/清单缺失 → 返回 None（由调用方按 fail-closed 处理）。
+    带 mtime 缓存：进程内首次读取后，清单文件未变化则复用。
+    """
+    global _MANIFEST_SEMVER_CACHE
+    mf = _project_root() / 'veroguard' / 'data' / 'manifest.json'
+    sig_file = mf.with_suffix(mf.suffix + '.sig')
+    if not mf.exists() or not sig_file.exists():
+        return None
+    try:
+        mtime = mf.stat().st_mtime
+    except OSError:
+        return None
+    if _MANIFEST_SEMVER_CACHE.get('mtime') == mtime:
+        return _MANIFEST_SEMVER_CACHE.get('semver')
+    if not _CRYPTO_OK:
+        return None
+    try:
+        manifest = json.loads(mf.read_text(encoding='utf-8'))
+        sig = bytes.fromhex(sig_file.read_text(encoding='utf-8').strip())
+        pub = Ed25519PublicKey.from_public_bytes(bytes.fromhex(RELEASE_VERIFY_KEY))
+        canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":"))
+        pub.verify(sig, canonical.encode('utf-8'))
+        semver = manifest.get('semver')
+        if not semver:
+            return None
+        _MANIFEST_SEMVER_CACHE.update({'semver': semver, 'mtime': mtime})
+        return semver
+    except (ValueError, InvalidSignature, json.JSONDecodeError, OSError):
+        return None
+
+
+def _version_in_scope(min_version: str, max_version: str, current: str) -> bool:
+    """版本区间校验（防回滚核心）。
+
+    当前版本 < min_version（降级）→ False
+    当前版本 > max_version（超范围）→ False（max 为空不限制）
+    """
+    cur = _parse_semver(current)
+    if min_version and cur < _parse_semver(min_version):
+        return False
+    if max_version and cur > _parse_semver(max_version):
+        return False
+    return True
 
 
 def _get_license_url() -> str:
@@ -268,7 +396,13 @@ class LicenseManager:
         expires_at = data.get('expires_at', '')
         offline_token = data.get('offline_token', '')
 
-        # 持久化
+        # 持久化（2.4 防回滚：记录激活时版本为 min_version）
+        _meta = {}
+        _cur_v = data.get('min_version') or _signed_manifest_semver()
+        if _cur_v:
+            _meta['min_version'] = _cur_v
+        if data.get('max_version'):
+            _meta['max_version'] = data['max_version']
         record = LicenseRecord(
             plugin_id=plugin_id,
             license_key=license_key,
@@ -279,6 +413,7 @@ class LicenseManager:
             activated_at=datetime.now().isoformat(),
             expires_at=expires_at or None,
             offline_token=offline_token,
+            metadata=_meta,
             last_validated=datetime.now().isoformat(),
         )
         self._save_license(record)
@@ -298,6 +433,11 @@ class LicenseManager:
         expires = (datetime.now() + timedelta(days=7)).isoformat()
         offline_token = generate_offline_token(plugin_id, license_key,
                                                 expires, site_id)
+        # 2.4 防回滚：离线激活同样记录激活时版本
+        _meta = {}
+        _cur_v = _signed_manifest_semver()
+        if _cur_v:
+            _meta['min_version'] = _cur_v
         record = LicenseRecord(
             plugin_id=plugin_id,
             license_key=license_key,
@@ -307,6 +447,7 @@ class LicenseManager:
             activated_at=datetime.now().isoformat(),
             expires_at=expires,
             offline_token=offline_token,
+            metadata=_meta,
             grace_until=(datetime.now() + timedelta(hours=72)).isoformat(),
             last_validated=datetime.now().isoformat(),
         )
@@ -318,6 +459,25 @@ class LicenseManager:
         }
 
     # ── 验证 License ──────────────────────────────────────────────────
+
+    def _version_scope_result(self, record) -> Optional[dict]:
+        """版本区间校验（2.4 防回滚）：越界返回失败 dict，通过返回 None。"""
+        meta = record.metadata or {}
+        min_v = meta.get('min_version') or ''
+        max_v = meta.get('max_version') or ''
+        if not min_v and not max_v:
+            return None
+        cur_v = _signed_manifest_semver()
+        if cur_v is None:
+            # fail-closed：存在版本约束但无法确认版本真相
+            return {'valid': False, 'status': 'version_out_of_scope',
+                    'expires_at': record.expires_at or '',
+                    'error': 'version unverifiable'}
+        if not _version_in_scope(min_v, max_v, cur_v):
+            return {'valid': False, 'status': 'version_out_of_scope',
+                    'expires_at': record.expires_at or '',
+                    'error': 'version out of scope'}
+        return None
 
     def validate(self, plugin_id: str) -> dict:
         """验证插件 License
@@ -353,6 +513,11 @@ class LicenseManager:
                                 'expires_at': record.expires_at}
                 except ValueError:
                     pass
+
+            # 2.4 防回滚：版本区间校验（越界返回失败 dict）
+            _scope = self._version_scope_result(record)
+            if _scope:
+                return _scope
 
             # 在线验证（SPI，可降级）
             # 附带本地商店登记的包哈希，供 License 服务端做「同包多站点复用」检测
@@ -394,6 +559,10 @@ class LicenseManager:
                                 'error': 'grace period expired'}
                 except ValueError:
                     pass
+            # 2.4 防回滚：宽容期同样校验版本区间
+            _scope = self._version_scope_result(record)
+            if _scope:
+                return _scope
             return {'valid': True, 'status': 'grace',
                     'expires_at': record.expires_at or ''}
 
@@ -448,6 +617,11 @@ class LicenseManager:
         - metadata 带 bundle_id / bundle_order_no，供生命周期批量同步
         - 幂等覆盖：一个插件仅保留一条 License（_save_license 先删后插）
         """
+        # 2.4 防回滚：版本包授权同样记录激活时版本
+        _meta = {'bundle_id': bundle_id, 'bundle_order_no': order_no}
+        _cur_v = _signed_manifest_semver()
+        if _cur_v:
+            _meta['min_version'] = _cur_v
         record = LicenseRecord(
             plugin_id=plugin_id,
             license_key=f'{bundle_id}:{order_no}',
@@ -460,7 +634,7 @@ class LicenseManager:
             order_id=order_no,
             subscription_id=str(subscription_id or ''),
             auto_renew=True,
-            metadata={'bundle_id': bundle_id, 'bundle_order_no': order_no},
+            metadata=_meta,
         )
         self._save_license(record)
         return record.to_dict()

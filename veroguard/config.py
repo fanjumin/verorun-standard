@@ -66,13 +66,26 @@ FILES_TO_ROLLBACK = [
 # ── 完整性校验 ─────────────────────────────────
 INTEGRITY_CHECK_INTERVAL = int(os.getenv('GUARDIAN_INTEGRITY_INTERVAL', '300'))
 
+# 完整性 fail-closed（检测即阻断）：
+#   GUARDIAN_INTEGRITY_BLOCK=1 时，连续 BLOCK_THRESHOLD 次 critical 违规进入受限态；
+#   进入受限态后，连续 BLOCK_RECOVER 次干净检查自动恢复（防误杀 + 自愈）。
+INTEGRITY_BLOCK_ON_CRITICAL = os.getenv('GUARDIAN_INTEGRITY_BLOCK', '1') == '1'
+INTEGRITY_BLOCK_THRESHOLD   = int(os.getenv('GUARDIAN_INTEGRITY_BLOCK_THRESHOLD', '2'))
+INTEGRITY_BLOCK_RECOVER     = int(os.getenv('GUARDIAN_INTEGRITY_BLOCK_RECOVER', '3'))
+
 # ── 心跳上报 ───────────────────────────────────
 # 注意：心跳上报依赖官方端 VeroGuard 服务（api.verorun.cn / api.verorun.com）。
-# 本地/LAN 部署（无官方端）时心跳不可用；完整性校验清单需由部署脚本
-# 在安装后通过 veroguard/tools/build_manifest.py 生成。
+# 本地/LAN 部署（无官方端）时心跳不可用；完整性校验清单 manifest.json/.sig
+# 由发版流程生成并随代码分发，服务器端禁止本地重生成（无 RELEASE_SIGN_KEY）。
 HEARTBEAT_INTERVAL = int(os.getenv('GUARDIAN_HEARTBEAT_INTERVAL', '300'))
 PROBE_SECRET       = os.getenv('PROBE_SECRET', '')
 DEPLOYMENT_CODE    = os.getenv('DEPLOYMENT_CODE', '')
+
+# ── 发布签名公钥（Ed25519，与 deploy/scripts/sign_release.py 同款）──
+# 完整性清单 manifest.json/.sig 的验签公钥；私钥 RELEASE_SIGN_KEY 仅存 CI/发版机，永不入库。
+RELEASE_VERIFY_KEY = "a467ea79346e26f8c4fb75ecc07b400b3af86f7c9a7aab9878bb2754b8107ef4"
+
+
 def _get_remote_url() -> str:
     """获取 VeroGuard 远程端点（区域感知）。
     环境变量 GUARDIAN_REMOTE_URL 覆盖优先（向后兼容）。

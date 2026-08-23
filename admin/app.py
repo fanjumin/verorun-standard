@@ -18,6 +18,7 @@ from flask import Flask, request, jsonify, render_template, send_from_directory,
 from werkzeug.middleware.proxy_fix import ProxyFix
 from models import init_db, get_db
 from services.deployment_config import DeployConfig, deploy
+from services.session_service import issue_auth_session
 from routes.auth import auth_bp
 from routes.admin import admin_bp
 from routes.cms_admin import cms_admin_bp
@@ -132,24 +133,6 @@ def i18n_set_lang():
         return resp
     return jsonify({'ok': True, 'lang': get_lang()})
 
-
-# ══ Content Security Policy (CSP) ══
-@app.after_request
-def add_security_headers(response):
-    response.headers['X-Content-Type-Options'] = 'nosniff'
-    response.headers['X-Frame-Options'] = 'SAMEORIGIN'
-    response.headers['X-XSS-Protection'] = '1; mode=block'
-    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
-    response.headers['Content-Security-Policy'] = (
-        "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net https://static.cloudflareinsights.com; "
-        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-        "img-src 'self' data: blob: https:; "
-        "font-src 'self' data: https://cdn.jsdelivr.net; "
-        "connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://api.github.com http://agent.verorun.com; "
-        "frame-ancestors 'self';"
-    )
-    return response
 
 # 添加项目根目录到模板搜索路径（统一页脚 _footer.html）
 import jinja2

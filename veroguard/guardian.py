@@ -78,6 +78,9 @@ def main():
     last_heartbeat = 0
     failures = 0
     cooldown_until = 0
+    integrity_failures = 0     # 连续 critical 违规计数（fail-closed 触发阈值）
+    integrity_blocked = False  # 是否处于完整性受限态
+    integrity_clean_streak = 0 # 受限态后连续干净检查计数（自动恢复）
 
     while True:
         now = time.time()
@@ -108,9 +111,45 @@ def main():
             last_health_check = now
 
         # ── 通道 2: 完整性校验 (300s) ──
+        # VR-SEC-xxx: 检测即阻断（fail-closed）— critical 连续违规进入受限态
         if now - last_integrity_check >= config.INTEGRITY_CHECK_INTERVAL:
             violations = integrity.run()
-            if violations:
+            critical = [v for v in violations
+                        if v.get('severity') == 'critical']
+            if critical:
+                integrity_failures += 1
+                integrity_clean_streak = 0
+                if (config.INTEGRITY_BLOCK_ON_CRITICAL
+                        and not integrity_blocked
+                        and integrity_failures >= config.INTEGRITY_BLOCK_THRESHOLD):
+                    integrity_blocked = True
+                    integrity_failures = 0
+                    logging.critical(
+                        "Critical integrity violation confirmed — entering restricted mode: %s",
+                        [v.get('file') for v in critical])
+                    executor._cmd_lock_full(
+                        'integrity-fail-closed',
+                        {'reason': 'critical integrity violation',
+                         'violations': [v.get('file') for v in critical]})
+                    health.write_status('integrity', {
+                        'status': 'blocked',
+                        'last_check': datetime.now().isoformat(),
+                        'blocked_at': datetime.now().isoformat(),
+                        'violations': critical,
+                    })
+                    health.send_webhook(
+                        'CRITICAL integrity violation — system locked (fail-closed)',
+                        'critical')
+                else:
+                    health.write_status('integrity', {
+                        'status': 'violated',
+                        'last_check': datetime.now().isoformat(),
+                        'checked_files': 'N/A',
+                        'violations': violations,
+                    })
+            elif violations:
+                # 仅 high/warning 违规：报告不阻断
+                integrity_failures = 0
                 health.write_status('integrity', {
                     'status': 'violated',
                     'last_check': datetime.now().isoformat(),
@@ -118,6 +157,16 @@ def main():
                     'violations': violations,
                 })
             else:
+                if integrity_blocked:
+                    integrity_clean_streak += 1
+                    if integrity_clean_streak >= config.INTEGRITY_BLOCK_RECOVER:
+                        integrity_blocked = False
+                        integrity_clean_streak = 0
+                        logging.warning("Integrity restored — exiting restricted mode")
+                        health.send_webhook(
+                            'Integrity restored — system unlocked', 'info')
+                else:
+                    integrity_clean_streak = 0
                 health.write_status('integrity', {
                     'status': 'clean',
                     'last_check': datetime.now().isoformat(),
