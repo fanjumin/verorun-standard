@@ -147,7 +147,7 @@ def login_with_code():
     except Exception:
         return api_err('Query failed', 500)
 
-    # 统一登录签发通道（2FA 插件通过 auth.pre_issue_token 过滤器拦截）
+    # 统一登录签发通道
     from services.session_service import issue_auth_session
     result = issue_auth_session(
         user['id'], user['phone'] or '', app_name='douyin_miniprogram',
@@ -162,10 +162,6 @@ def login_with_code():
             'agent_avatar_url': user['agent_avatar_url'] or '',
         },
         device_name='Douyin Mini Program', device_type='mobile')
-    if result['blocked']:
-        if result.get('error'):
-            return api_err(result['error'], 503)
-        return api_ok({'needs_2fa': True, **result['block_info']})
     token = result['token']
 
     return api_ok({

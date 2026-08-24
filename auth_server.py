@@ -257,7 +257,8 @@ def captcha_consume():
 
 @app.context_processor
 def inject_globals():
-    return dict(_=_t, lang=get_lang(), translations=get_all_translations(get_lang()))
+    return dict(_=_t, lang=get_lang(), translations=get_all_translations(get_lang()),
+                deploy=deploy, edition=os.environ.get('VR_EDITION', ''))
 
 
 # ══ i18n 语言协商 + 语言切换（i18n-standard §5）══

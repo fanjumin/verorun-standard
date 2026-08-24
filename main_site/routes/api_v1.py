@@ -535,8 +535,7 @@ def chat_stream():
             cleaned_reply = full_reply
             was_escalated = False
             try:
-                sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'plugins', 'chatbot'))
-                from routes import parse_escalation_from_reply, create_ticket_from_chat
+                from plugins.chatbot.routes import parse_escalation_from_reply, create_ticket_from_chat
                 cleaned_reply, ticket_data = parse_escalation_from_reply(full_reply)
                 if ticket_data and cfg.get('auto_escalate', '1') != '0':
                     was_escalated = True

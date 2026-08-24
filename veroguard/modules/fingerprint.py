@@ -14,8 +14,10 @@ import uuid
 def get_primary_mac() -> str:
     """获取主网卡 MAC 地址"""
     try:
+        # VR-SEC (V5): 原 `mac != uuid.getnode()` 二次调用恒相等，主路径永不生效；
+        # 改为校验有效 MAC（非 0、非全 1），与 license.py `_get_mac_address` 一致
         mac = uuid.getnode()
-        if mac != uuid.getnode():
+        if mac and mac != 0xFFFFFFFFFFFF:
             return f'{mac:012x}'
     except Exception:
         pass

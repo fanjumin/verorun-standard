@@ -1,51 +1,37 @@
 """auth-center/services/session_service.py
 通用登录签发通道：所有登录方式（密码/短信/手机注册/邮箱注册/OAuth/抖音小程序）统一经过此函数。
 
-设计原则（插件化铁律）：
-- 本文件不包含任何 2FA 专属逻辑（无 TOTP/恢复码/challenge）。
-- 插件通过 `auth.pre_issue_token` 过滤器拦截签发：核心只调钩子 → 若被阻断则原样透传 block_info → 否则签发 token。
-- 插件未启用时钩子链为空，ctx 不变，直接签发，登录零影响。
+2FA 扩展点（不承载任何 2FA 业务逻辑）：签发前调用通用 filter 钩子
+`auth.before_issue_session`。插件（如 two_factor_auth）可注册该钩子决定
+是否暂停签发（返回 {'blocked': True, ...} → 抛出 TwoFactorRequired）。
+无插件订阅时 filter 原样返回，行为与不调用时完全一致（插件未启用即零影响）。
 """
 import os
 import hashlib
+from flask import current_app
 from services.jwt_service import create_token
 
 
-def _get_registry():
-    """获取 HookRegistry；插件系统未初始化时返回 None（fail-open）。"""
-    try:
-        from plugin_manager.hooks import get_hook_registry
-        return get_hook_registry()
-    except Exception:
-        return None
+class TwoFactorRequired(Exception):
+    """登录签发被插件预检拦截（如要求第二因子），由 app 级 errorhandler 转成响应。"""
+
+    def __init__(self, challenge_token=None, redirect='/'):
+        super().__init__('two-factor authentication required')
+        self.challenge_token = challenge_token
+        self.redirect = redirect or '/'
 
 
 def issue_auth_session(user_id, phone, app_name, is_admin=False, role='user',
-                       user_info=None, device_name='Web Login', device_type='web'):
-    """统一登录签发入口。
+                       user_info=None, device_name='Web Login', device_type='web',
+                       scenario='login'):
+    """统一登录签发入口。返回 {'blocked': False, 'token': <jwt>, 'user': {...}}。
 
-    返回 dict（三种形态）：
-      - {'blocked': False, 'token': <jwt>, 'user': {...}}      已签发
-      - {'blocked': True, 'block_info': {...}}                 插件拦截（如 2FA challenge）
-      - {'blocked': True, 'block_info': {...}, 'error': ...}   插件拦截但无法提供服务（fail-closed）
+    若插件 filter `auth.before_issue_session` 返回 {'blocked': True, ...}，
+    抛出 TwoFactorRequired，由 app 级 errorhandler 返回 needs_2fa 响应。
+    scenario='refresh'（token 续期）时插件不应要求第二因子。
     """
-    registry = _get_registry()
-    ctx = {'issue': True, 'user_id': user_id, 'app_name': app_name,
-           'is_admin': bool(is_admin), 'role': role, 'phone': phone}
-    if registry is not None:
-        ctx = registry.apply_filters('auth.pre_issue_token', ctx, user_id=user_id)
-
-    if not ctx.get('issue', True):
-        # 插件拦截：除标准字段外，插件写入的任何附加信息原样透传。
-        # 核心不解析 challenge_token/methods 等字段含义，只负责搬运。
-        block_info = {k: v for k, v in ctx.items()
-                      if k not in ('issue', 'user_id', 'app_name',
-                                   'is_admin', 'role', 'phone')}
-        error = block_info.pop('error', None)
-        if error:
-            return {'blocked': True, 'block_info': block_info, 'error': error}
-        return {'blocked': True, 'block_info': block_info}
-
+    _run_login_precheck(scenario, user_id, phone, app_name, is_admin, role,
+                        user_info, device_name, device_type)
     token = create_token(user_id, phone=phone, app_name=app_name,
                          is_admin=is_admin, role=role)
     _write_user_session(user_id, token, device_name, device_type)
@@ -53,6 +39,31 @@ def issue_auth_session(user_id, phone, app_name, is_admin=False, role='user',
             'user': {'id': user_id, 'phone': phone,
                      'is_admin': bool(is_admin), 'role': role,
                      **(user_info or {})}}
+
+
+def _run_login_precheck(scenario, user_id, phone, app_name, is_admin, role,
+                        user_info, device_name, device_type):
+    """执行通用登录预检 filter。
+
+    插件注册的 filter 返回 {'blocked': True, ...} 时抛出 TwoFactorRequired；
+    其余异常一律 fail-open（记录日志、原样继续签发），绝不停在登录。
+    """
+    try:
+        from plugin_manager.hooks import get_hook_registry
+        blocked = get_hook_registry().apply_filters(
+            'auth.before_issue_session', None,
+            scenario=scenario, user_id=user_id, phone=phone, app_name=app_name,
+            is_admin=is_admin, role=role, user_info=user_info,
+            device_name=device_name, device_type=device_type)
+        if blocked and blocked.get('blocked'):
+            raise TwoFactorRequired(
+                challenge_token=blocked.get('challenge_token'),
+                redirect=blocked.get('redirect', '/'))
+    except TwoFactorRequired:
+        raise
+    except Exception:
+        current_app.logger.exception(
+            'auth.before_issue_session filter failed; fallback issue session')
 
 
 def _write_user_session(user_id, token, device_name, device_type):

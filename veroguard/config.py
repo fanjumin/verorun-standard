@@ -81,6 +81,13 @@ HEARTBEAT_INTERVAL = int(os.getenv('GUARDIAN_HEARTBEAT_INTERVAL', '300'))
 PROBE_SECRET       = os.getenv('PROBE_SECRET', '')
 DEPLOYMENT_CODE    = os.getenv('DEPLOYMENT_CODE', '')
 
+# ── 远程命令安全（VR-SEC V4）────────────────────
+# VG_OPS_CONFIRM: 破坏性命令（shutdown/self_destruct）本地二次确认的运维密钥，
+# 与 PROBE_SECRET 分离；未配置时破坏性命令一律拒绝（fail-closed）。
+VG_OPS_CONFIRM    = os.getenv('VG_OPS_CONFIRM', '')
+COMMAND_AUDIT_LOG = os.getenv('GUARDIAN_COMMAND_AUDIT_LOG',
+                              '/var/log/verorun-command-audit.log')
+
 # ── 发布签名公钥（Ed25519，与 deploy/scripts/sign_release.py 同款）──
 # 完整性清单 manifest.json/.sig 的验签公钥；私钥 RELEASE_SIGN_KEY 仅存 CI/发版机，永不入库。
 RELEASE_VERIFY_KEY = "a467ea79346e26f8c4fb75ecc07b400b3af86f7c9a7aab9878bb2754b8107ef4"

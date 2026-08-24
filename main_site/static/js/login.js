@@ -30,15 +30,6 @@ document.addEventListener('captcha-success', function(e) {
 
 // ── Init ──
 document.addEventListener('DOMContentLoaded', function() {
-  // OAuth 回跳携带 needs_2fa=1&challenge_token=... 时直接进入插件 2FA 校验页
-  var qp = new URLSearchParams(location.search);
-  if (qp.get('needs_2fa') === '1' && qp.get('challenge_token')) {
-    var _rd = qp.get('redirect') || window.location.origin;
-    window.location.href = '/plugin/two_factor_auth/challenge-page?challenge_token='
-      + encodeURIComponent(qp.get('challenge_token'))
-      + '&redirect=' + encodeURIComponent(_rd);
-    return;
-  }
   fetchLoginMethods();
 });
 
@@ -419,14 +410,6 @@ function startCd(s, method) {
   cdTimer = setInterval(tick, 1000);
 }
 
-// ── 2FA challenge page redirect (plugin-provided UI) ──
-function gotoChallenge(challengeToken) {
-  var rd = new URLSearchParams(location.search).get('redirect') || window.location.origin;
-  window.location.href = '/plugin/two_factor_auth/challenge-page?challenge_token='
-    + encodeURIComponent(challengeToken || '')
-    + '&redirect=' + encodeURIComponent(rd);
-}
-
 // ── SMS: Login ──
 async function smsLogin(method) {
   var p = rawPhone(method);
@@ -445,11 +428,14 @@ async function smsLogin(method) {
       body: JSON.stringify({ phone: p, code: c, captcha_id: capToken })
     });
     var d = await r.json();
+    if (d.data && d.data.needs_2fa === true) {
+      var rd2fa = new URLSearchParams(location.search).get('redirect') || window.location.origin;
+      window.location.href = '/plugin/two_factor_auth/challenge-page?challenge_token=' +
+        encodeURIComponent(d.data.challenge_token) + '&redirect=' +
+        encodeURIComponent(d.data.redirect || rd2fa);
+      return;
+    }
     if (d.success) {
-      if (d.data && d.data.needs_2fa) {
-        gotoChallenge(d.data.challenge_token);
-        return;
-      }
       localStorage.setItem('tm_token', d.data.token);
       localStorage.setItem('sso_token', d.data.token);
       localStorage.setItem('token', d.data.token);
@@ -494,11 +480,14 @@ async function pwdLogin(method) {
       body: JSON.stringify({ username: a, password: pw, captcha_id: capToken })
     });
     var d = await r.json();
+    if (d.data && d.data.needs_2fa === true) {
+      var rd2fa = new URLSearchParams(location.search).get('redirect') || window.location.origin;
+      window.location.href = '/plugin/two_factor_auth/challenge-page?challenge_token=' +
+        encodeURIComponent(d.data.challenge_token) + '&redirect=' +
+        encodeURIComponent(d.data.redirect || rd2fa);
+      return;
+    }
     if (d.success) {
-      if (d.data && d.data.needs_2fa) {
-        gotoChallenge(d.data.challenge_token);
-        return;
-      }
       localStorage.setItem('tm_token', d.data.token);
       localStorage.setItem('sso_token', d.data.token);
       localStorage.setItem('token', d.data.token);

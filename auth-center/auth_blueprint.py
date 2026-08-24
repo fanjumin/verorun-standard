@@ -12,6 +12,7 @@ for p in (models_dir, auth_dir):
 sys.path.insert(0, models_dir)
 sys.path.insert(0, auth_dir)
 from models import init_db, get_db, DB_PATH
+from services.session_service import TwoFactorRequired
 from routes.auth import auth_bp
 from routes.user import user_bp
 try:
@@ -50,4 +51,16 @@ def register_auth(app, exclude_blueprints=None):
         if name not in exclude:
             app.register_blueprint(bp)
     # ─── 插件系统由 PluginManager 统一管理 ───
+
+    # 2FA 扩展点：登录签发被插件预检拦截（TwoFactorRequired）时，
+    # 统一转为 needs_2fa 响应，前端据此跳转插件挑战页。app 级 errorhandler
+    # 对所有已挂载 blueprint（含插件 OAuth 路由）生效。
+    @app.errorhandler(TwoFactorRequired)
+    def _handle_two_factor_required(e):
+        from flask import jsonify
+        return jsonify({'success': True, 'data': {
+            'needs_2fa': True,
+            'challenge_token': e.challenge_token,
+            'redirect': e.redirect or '/',
+        }})
     return app

@@ -29,7 +29,7 @@ _test_output.txt
 
 # Temp scripts & artifacts
 tmp/
-VeroRun*
+/VeroRun*
 !veroguard/systemd/verorun-guardian*
 do_git*
 git_output*.log

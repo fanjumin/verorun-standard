@@ -512,13 +512,6 @@ def admin_login_action():
             _admin_login_attempts.pop(attempt_key, None)
         _res = issue_auth_session(user['id'], phone=user.get('phone'), app_name='admin',
                                   is_admin=True, role=admin_role)
-        if _res.get('blocked'):
-            if _res.get('error'):
-                return jsonify({'success': False, 'error': '2FA unavailable, please retry later'}), 503
-            return jsonify({'success': True, 'data': {
-                'needs_2fa': True,
-                'challenge_token': _res.get('block_info', {}).get('challenge_token'),
-            }})
         token = _res['token']
         _log_admin_action(user['id'], 'login_success_code', ip, f'user={username} client={client_type}')
 
@@ -588,13 +581,6 @@ def admin_login_action():
         pass
     _res = issue_auth_session(user['id'], phone=user['phone'], app_name='admin',
                               is_admin=True, role=admin_role)
-    if _res.get('blocked'):
-        if _res.get('error'):
-            return jsonify({'success': False, 'error': '2FA unavailable, please retry later'}), 503
-        return jsonify({'success': True, 'data': {
-            'needs_2fa': True,
-            'challenge_token': _res.get('block_info', {}).get('challenge_token'),
-        }})
     token = _res['token']
     _log_admin_action(user['id'], 'login_success', ip, f'user={username} client={client_type}')
 

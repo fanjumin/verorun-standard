@@ -185,7 +185,6 @@ function admRender() {
       h += '<button class="btn bo" onclick="admToggleExpand('+a.id+')">{{ _('Cancel') }}</button>';
       if(isSelf) {
         h += '<button class="btn bo" style="margin-left:auto" onclick="admChangePhone('+a.id+')">📱 {{ _('Change Phone No.') }}</button>';
-        h += '<button class="btn bo" onclick="admOpenTwoFactor()">🔐 {{ _('Two-Factor') }}</button>';
       }
       h += '</div>';
       
@@ -208,19 +207,6 @@ function admRender() {
     h += '</div>'; // end cd
   });
   document.getElementById("admList").innerHTML = h;
-}
-
-// ── 两步验证设置（复审：允许管理员自助设置 2FA，登录 JWT 不进 URL）──
-function admOpenTwoFactor(){
-  fetch('/plugin/two_factor_auth/setup-token',{method:'POST',headers:{'Authorization':'Bearer '+T}})
-    .then(function(r){return r.json()})
-    .then(function(d){
-      if(d && d.token){
-        window.location.href = '/plugin/two_factor_auth/setup-page?setup_token='+encodeURIComponent(d.token);
-      }else{
-        alert("{{ _('Two-Factor unavailable') }}");
-      }
-    }).catch(function(){ alert("{{ _('Two-Factor unavailable') }}"); });
 }
 
 // ── Toggle card expand/collapse ──

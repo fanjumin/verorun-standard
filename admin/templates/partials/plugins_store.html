@@ -3,9 +3,9 @@ window.l_plugins_store=function(){
   document.getElementById("pt").textContent="{{ _('Plugin Store') }}";
   var mc=document.getElementById("mc");
   mc.innerHTML='<div style="display:flex;gap:8px;align-items:center;margin-bottom:16px;border-bottom:1px solid var(--bd);padding-bottom:8px">'+
-    '<button class="btn bp" id="storeTabBrowse" onclick="switchStoreTab(\'browse\')">{{ _('Browse') }}</button>'+
+    '<button class="btn bp" id="storeTabBrowse" onclick="switchStoreTab(\'browse\')">{{ _('Plugin Store') }}</button>'+
     '<button class="btn bo" id="storeTabSubs" onclick="switchStoreTab(\'subs\')">{{ _('My Subscriptions') }}</button>'+
-    '<button class="btn bo" id="storeTabAdmin" onclick="switchStoreTab(\'admin\')" style="display:'+((typeof _isSuperAdmin!=='undefined'&&_isSuperAdmin)?'':'none')+'">{{ _('Store Admin') }}</button>'+
+    '<button class="btn bo" id="storeTabAdmin" onclick="switchStoreTab(\'admin\')" style="display:'+((typeof _isSuperAdmin!=='undefined'&&_isSuperAdmin)?'':'none')+'">{{ _('Store Management') }}</button>'+
     '</div><div id="storeTabContent"></div>';
   switchStoreTab('browse');
 };
@@ -59,10 +59,12 @@ function renderStoreList(container){
       /* ★ 改动1：卡片缩略图 — icon_url 优先，否则规范渐变 Banner（方案 §2.4） */
       var iconHtml='';
       if(p.icon_url){
-        iconHtml='<div onclick="showPluginDetail(\''+escAttr(p.identifier)+'\')" style="cursor:pointer;width:100%;height:120px;overflow:hidden;border-radius:6px 6px 0 0;margin:-1rem -1rem 0.5rem -1rem;width:calc(100% + 2rem)">'+
-          '<img src="'+escAttr(p.icon_url)+'" style="width:100%;height:100%;object-fit:cover" '+
-          'onerror="_imgIconFallback(this,\''+escAttr(p.identifier)+'\',\''+escAttr(p.category)+'\')"'+
-          '></div>';
+        iconHtml='<div onclick="showPluginDetail(\''+escAttr(p.identifier)+'\')" style="cursor:pointer;position:relative;width:100%;height:120px;overflow:hidden;border-radius:6px 6px 0 0;margin:-1rem -1rem 0.5rem -1rem;width:calc(100% + 2rem)">'+
+          '<img src="'+escAttr(p.icon_url)+'" style="width:100%;height:100%;object-fit:cover;display:block" '+
+          'onerror="_imgIconFallback(this,\''+escAttr(p.identifier)+'\',\''+escAttr(p.category)+'\')">'+
+          '<div style="position:absolute;left:0;right:0;bottom:0;height:60%;background:linear-gradient(to top,rgba(0,0,0,.38),transparent);pointer-events:none"></div>'+
+          _pluginTaglineHtml(p)+
+          '</div>';
       }else{
         iconHtml=_pluginBanner(p,120,true);
       }
@@ -88,25 +90,45 @@ function renderStoreList(container){
   }).catch(function(){mc.innerHTML='<div class="em">{{ _('Network error') }}</div>'});
 }
 function storeInstallPlugin(id){
-  if(!confirm("{{ _('Install plugin?') }} "+esc(id)+" ?"))return;
-  fetch("/admin/plugins/store/"+encodeURIComponent(id)+"/install",{method:"POST",headers:{"Authorization":"Bearer "+T}}).then(function(r){return r.json()}).then(function(d){
-    if(d.success){showToast(esc(id)+" {{ _('Installed') }}","success")}
-    else{showToast(d.error||"{{ _('Install failed') }}","error")}
-  }).catch(function(){showToast("{{ _('Network error') }}","error")});
+  showConfirm("{{ _('Install Plugin') }}","{{ _('Install plugin?') }} <b>"+esc(id)+"</b>",function(){
+    fetch("/admin/plugins/store/"+encodeURIComponent(id)+"/install",{method:"POST",headers:{"Authorization":"Bearer "+T}}).then(function(r){return r.json()}).then(function(d){
+      if(d.success){
+        if(d.data&&d.data.needs_restart){
+          showToast(esc(id)+" {{ _('Enabled') }} — {{ _('Restarting service') }}","success");
+          setTimeout(function(){location.reload()},3500);
+        }else{
+          showToast(esc(id)+" {{ _('Installed') }}","success");
+          renderStoreList&&renderStoreList();
+        }
+      }
+      else{showToast(d.error||"{{ _('Install failed') }}","error")}
+    }).catch(function(){showToast("{{ _('Network error') }}","error")});
+  },"{{ _('Install') }}");
 }
 
 /* ── Store upgrade (online update) ─────────────────── */
 function storeUpgradePlugin(id){
-  if(!confirm("{{ _('Upgrade to latest version?') }} "+esc(id)+" ?"))return;
-  fetch("/admin/plugins/store/"+encodeURIComponent(id)+"/upgrade",{method:"POST",headers:{"Authorization":"Bearer "+T}}).then(function(r){return r.json()}).then(function(d){
-    if(!d.success){showToast(d.error||"{{ _('Upgrade failed') }}","error");return}
-    var oldV=d.data.old_version||'';
-    var newV=d.data.new_version||'';
-    var msg=esc(id)+" v"+oldV+" → v"+newV;
-    if(d.data.needs_restart){msg+=" ({{ _('Restarting service') }})"}
-    showToast(msg,"success");
-    setTimeout(function(){renderStoreList&&renderStoreList()},1500);
-  }).catch(function(){showToast("{{ _('Network error') }}","error")});
+  showConfirm("{{ _('Upgrade Plugin') }}","{{ _('Upgrade to latest version?') }} <b>"+esc(id)+"</b>",function(){
+    fetch("/admin/plugins/store/"+encodeURIComponent(id)+"/upgrade",{method:"POST",headers:{"Authorization":"Bearer "+T}}).then(function(r){return r.json()}).then(function(d){
+      if(!d.success){showToast(d.error||"{{ _('Upgrade failed') }}","error");return}
+      var oldV=d.data.old_version||'';
+      var newV=d.data.new_version||'';
+      var msg=esc(id)+" v"+oldV+" → v"+newV;
+      if(d.data.needs_restart){msg+=" ({{ _('Restarting service') }})"}
+      showToast(msg,"success");
+      setTimeout(function(){renderStoreList&&renderStoreList()},1500);
+    }).catch(function(){showToast("{{ _('Network error') }}","error")});
+  },"{{ _('Upgrade') }}");
+}
+
+/* ── Store uninstall (remove installed plugin) ─────────────── */
+function storeUninstallPlugin(id){
+  showConfirm("{{ _('Uninstall Plugin') }}","{{ _('Are you sure you want to uninstall') }} <b>"+esc(id)+"</b>?",function(){
+    fetch("/admin/plugins/"+encodeURIComponent(id)+"/uninstall",{method:"POST",headers:{"Authorization":"Bearer "+T,"Content-Type":"application/json"},body:JSON.stringify({confirm:true})}).then(function(r){return r.json()}).then(function(d){
+      if(d.success){showToast(esc(id)+" {{ _('Uninstalled') }}","success");closePluginDetail();renderStoreList&&renderStoreList()}
+      else{showToast(d.error||"{{ _('Uninstall failed') }}","error")}
+    }).catch(function(){showToast("{{ _('Network error') }}","error")});
+  },"{{ _('Uninstall') }}");
 }
 
 /* ── License Management ── */
@@ -355,6 +377,29 @@ function renderSubscriptionList(container){
       });
       h+='</table>';
     }
+
+    /* ★ 已安装插件合并展示：官方版直接安装/免费安装均无订阅记录，需单独列出 */
+    var installed=d.data.installed||[];
+    if(installed.length>0){
+      h+='<div style="margin-top:24px;padding-top:12px;border-top:1px solid var(--bd)">'+
+        '<div style="font-size:14px;font-weight:600;margin-bottom:8px">{{ _('Installed Plugins') }}</div>'+
+        '<table style="width:100%;font-size:13px">'+
+        '<tr><th style="text-align:left;padding:8px 12px">{{ _('Plugin') }}</th>'+
+        '<th style="text-align:center;padding:8px 12px">{{ _('Version') }}</th>'+
+        '<th style="text-align:center;padding:8px 12px">{{ _('Status') }}</th>'+
+        '<th style="text-align:center;padding:8px 12px">{{ _('Actions') }}</th></tr>';
+      installed.forEach(function(p){
+        var badge = d.data.official
+          ? '<span class="bdg" style="background:rgba(123,101,235,.15);color:#7b65eb">{{ _('Official') }}</span>'
+          : '<span class="bdg" style="background:rgba(88,166,255,.12);color:#58a6ff">{{ _('Installed') }}</span>';
+        h+='<tr>'+
+          '<td style="padding:10px 12px;font-weight:600">'+esc(p.name)+'</td>'+
+          '<td style="padding:10px 12px;text-align:center;color:var(--dim)">v'+esc(p.version)+'</td>'+
+          '<td style="padding:10px 12px;text-align:center">'+badge+'</td>'+
+          '<td style="padding:10px 12px;text-align:center"><button class="btn bo bs" style="color:#f85149;border-color:rgba(248,81,73,.4)" onclick="storeUninstallPlugin(\''+escAttr(p.identifier)+'\')">{{ _('Uninstall') }}</button></td></tr>';
+      });
+      h+='</table></div>';
+    }
     mc.innerHTML=h;
   }).catch(function(){mc.innerHTML='<div class="em">{{ _('Network error') }}</div>'});
 }
@@ -513,14 +558,18 @@ function _catIcon(cat,size){
 }
 /* 生成 Banner：渐变底 + 居中图标 + 左上角宣传语，整卡可点进详情
    card=true 时按卡片缩略图做边缘出血（负 margin），其余上下文为普通块 */
-function _pluginBanner(p,h,card){
+function _pluginTaglineHtml(p){
   var tag=esc(p.tagline||'');
-  var grad=_catGrad(p.category||'system');
+  if(!tag)return '';
   var fs=escAttr(p.tagline_font_size||'12px');
   var tc=escAttr(p.tagline_color||'#ffffff');
+  return '<span style="position:absolute;top:8px;left:12px;right:12px;color:'+tc+';font-size:'+fs+';font-weight:600;text-shadow:0 1px 2px rgba(0,0,0,.28);white-space:pre-line;line-height:1.3;overflow:hidden">'+tag+'</span>';
+}
+function _pluginBanner(p,h,card){
+  var grad=_catGrad(p.category||'system');
   var bleed=card?'margin:-1rem -1rem 0.5rem -1rem;width:calc(100% + 2rem)':'width:100%';
   return '<div onclick="showPluginDetail(\''+escAttr(p.identifier)+'\')" style="cursor:pointer;position:relative;width:100%;height:'+(h||120)+'px;border-radius:6px;'+bleed+';overflow:hidden;background:'+grad+';display:flex;align-items:center;justify-content:center;user-select:none">'
-    +(tag?'<span style="position:absolute;top:8px;left:12px;right:12px;color:'+tc+';font-size:'+fs+';font-weight:600;text-shadow:0 1px 2px rgba(0,0,0,.28);white-space:pre-line;line-height:1.3;overflow:hidden">'+tag+'</span>':'')
+    +_pluginTaglineHtml(p)
     +_catIcon(p.category||'system',46)
     +'</div>';
 }
@@ -529,8 +578,16 @@ function _pluginBanner(p,h,card){
 var detailModal=null;
 function showPluginDetail(pid){
   if(detailModal){detailModal.remove();detailModal=null}
-  var ov=document.createElement("div");ov.className="modal-overlay";ov.style.cssText="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center";
-  var box=document.createElement("div");box.className="modal-box";box.style.cssText="background:rgba(13,13,24,0.82);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid var(--border);border-radius:12px;padding:24px;max-width:640px;width:90%;max-height:80vh;overflow-y:auto;position:relative";
+  var ov=document.createElement("div");ov.className="modal-overlay store-modal-scope";ov.style.cssText="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center";
+  /* 弹窗背景固定为深色半透明，文字必须在所有主题下保持浅色可读（浅色主题 --text 为黑色） */
+  var st=document.createElement("style");st.textContent=
+    '.store-modal-scope{--text:#e6edf3;--dim:#8b949e;--muted:#9aa0a6;--bg-secondary:#161b22;--border:rgba(255,255,255,.14);color:var(--text)}'+
+    '.store-modal-scope .btn{color:var(--text)}.store-modal-scope .btn:hover{color:#fff}'+
+    '.store-modal-scope .tab-item{color:var(--muted)}.store-modal-scope .tab-item.active{color:var(--text)}'+
+    '.store-modal-scope a{color:#58a6ff}'+
+    '.store-modal-scope .bdg.on{color:#3fb950}.store-modal-scope .bdg.off{color:#f85149}.store-modal-scope .bdg.pd{color:#d29922}';
+  ov.appendChild(st);
+  var box=document.createElement("div");box.className="modal-box";box.style.cssText="background:rgba(13,13,24,0.60);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid var(--border);border-radius:12px;padding:24px;max-width:640px;width:90%;max-height:80vh;overflow-y:auto;position:relative";
   box.innerHTML='<div class="lo"><div class="s"></div>{{ _('Loading') }}...</div>';
   ov.appendChild(box);
   document.body.appendChild(ov);
@@ -564,6 +621,7 @@ function showPluginDetail(pid){
       '<div style="display:flex;gap:12px;align-items:flex-start">'+
       detailIconHtml+
       '<div><div style="font-size:18px;font-weight:600">'+esc(p.name)+' <span style="font-size:12px;color:var(--dim)">'+vHtml+'</span></div>'+
+      (p.tagline?'<div style="margin-top:4px;font-size:'+escAttr(p.tagline_font_size||'12px')+';color:'+escAttr(p.tagline_color||'#8b949e')+';opacity:.92">'+esc(p.tagline)+'</div>':'')+
       '<div style="margin-top:4px">'+renderStars(avgRating,reviewTotal)+'</div>'+
       '<div style="margin-top:4px"><span class="bdg '+priceClass+'">'+priceLabel+'</span> <span class="bdg off">'+esc(p.category||'')+'</span>'+
       (p.installed?' <span class="bdg" style="background:rgba(88,166,255,.12);color:#58a6ff">{{ _('Installed') }}</span>':'')+
@@ -599,7 +657,8 @@ function showPluginDetail(pid){
     /* ★ 改动4：详情弹窗底部安装/购买按钮 */
     var actionHtml='<div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--bd);display:flex;justify-content:flex-end;gap:8px">';
     if(p.installed){
-      actionHtml+='<span class="bdg" style="background:rgba(88,166,255,.12);color:#58a6ff;padding:6px 16px">✅ {{ _('Installed') }}</span>';
+      actionHtml+='<span class="bdg" style="background:rgba(88,166,255,.12);color:#58a6ff;padding:6px 16px">✅ {{ _('Installed') }}</span>'+
+        '<button class="btn bo bs" style="color:#f85149;border-color:rgba(248,81,73,.4)" onclick="storeUninstallPlugin(\''+escAttr(p.identifier)+'\')">{{ _('Uninstall') }}</button>';
     }else if(p.has_update){
       actionHtml+='<button class="btn bp bs" onclick="storeUpgradePlugin(\''+escAttr(p.identifier)+'\')">🔄 {{ _('Upgrade') }}</button>';
     }else if(p.price_type==='free'){
@@ -734,7 +793,7 @@ function sortReviews(sort,pid){
 
 /* ── Store Admin (CRUD) ── */
 window.l_plugins_store_admin=function(){
-  document.getElementById("pt").textContent="{{ _('Store Admin') }}";
+  document.getElementById("pt").textContent="{{ _('Store Management') }}";
   renderStoreAdminList();
 };
 function renderStoreAdminList(container){

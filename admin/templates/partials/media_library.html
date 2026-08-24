@@ -1,4 +1,4 @@
-﻿window.l_media_library=function(){
+window.l_media_library=function(){
   document.getElementById("pt").textContent="{{ _('Media Library') }}";
   loadMediaLibrary();
 };
@@ -127,7 +127,7 @@ function mlDelete(id,name){
 
 // ── 自定义确认弹窗 ────────────────────────────────
 var _confirmCallback=null;
-function showConfirm(title,text,cb){
+function showConfirm(title,text,cb,okLabel){
   _confirmCallback=cb;
   var overlay=document.getElementById("confirmOverlay");
   if(!overlay){
@@ -157,6 +157,7 @@ function showConfirm(title,text,cb){
   }
   document.getElementById("confirmTitle").textContent=title;
   document.getElementById("confirmText").innerHTML=text;
+  document.getElementById("confirmOk").textContent=okLabel||'{{ _("Delete") }}';
   overlay.style.display="";
 }
 // 🧹 {{ _('Data Cleaning Agent') }}

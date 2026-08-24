@@ -20,7 +20,7 @@ import hmac
 import base64
 import socket
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
 from urllib.request import Request, urlopen
@@ -167,6 +167,28 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+# ── 官方凭证吊销（VR-SEC：防旧凭证泄露后继续生效）──────────────────
+# 吊销列表：veroguard/data/revoked_official_tokens.json
+#   {"revoked_issued_at": ["2026-08-23T12:17:24+00:00"], "updated_at": "..."}
+# 由发版方维护并随安全更新分发；文件缺失/损坏时视为空列表（不阻断本地判官方）。
+REVOKED_TOKEN_LIST = _project_root() / 'veroguard' / 'data' / 'revoked_official_tokens.json'
+
+
+def _load_revoked_issued_at() -> set:
+    """读取本地官方凭证吊销列表（issued_at 字符串集合）。"""
+    try:
+        data = json.loads(REVOKED_TOKEN_LIST.read_text(encoding='utf-8'))
+        return set(data.get('revoked_issued_at', []))
+    except (OSError, json.JSONDecodeError):
+        return set()
+
+
+def _is_official_token_revoked(token: dict) -> bool:
+    """官方凭证吊销判定：凭证 issued_at 命中吊销列表即视为吊销。"""
+    issued_at = str(token.get('issued_at') or '')
+    return bool(issued_at) and issued_at in _load_revoked_issued_at()
+
+
 def _verify_official_token() -> bool:
     """校验官方版签名凭证（official_token.json + .sig，Ed25519 验签）。
 
@@ -199,6 +221,9 @@ def _verify_official_token() -> bool:
         if datetime.now(timezone.utc) > datetime.fromisoformat(expires_at):
             return False
     except ValueError:
+        return False
+    # VR-SEC: 吊销检查——凭证命中吊销列表即判定无效（防泄露凭证继续生效）
+    if _is_official_token_revoked(token):
         return False
     return True
 
@@ -286,6 +311,9 @@ def _get_license_url() -> str:
     """
     override = os.environ.get('REMOTE_LICENSE_URL', '')
     if override:
+        # VR-SEC: mock:// 前缀不能被 rstrip('/') 剥掉（否则 startswith('mock://') 永远为假）
+        if override.startswith('mock://'):
+            return override
         return override.rstrip('/')
     return f"{get_api_base().rstrip('/v1')}/license"
 
@@ -299,7 +327,11 @@ def _call_remote(method: str, path: str, data: dict = None) -> dict:
     base = _get_license_url()
     url = f'{base.rstrip("/")}/{path.lstrip("/")}'
     if base.startswith('mock://'):
-        # Mock 模式
+        # VR-SEC (V8): mock 仅允许 dev 环境，其余环境一律拒绝（fail-closed）
+        # 与 plugin_manager/routes.py 的 channel=='mock' 判定保持一致
+        if os.environ.get('DEPLOY_ENV', '').strip().lower() != 'dev':
+            return {'success': False,
+                    'error': 'mock license URL disabled outside dev environment'}
         return _mock_remote(method, path, data)
 
     body = json.dumps(data).encode() if data else None
@@ -549,6 +581,10 @@ class LicenseManager:
                     'expires_at': record.expires_at or ''}
 
         if record.license_status == LicenseStatus.GRACE:
+            # VR-SEC (V8): 宽容期设备绑定——许可记录绑定本机 site_id，跨机复制即失效
+            if record.site_id and record.site_id != get_site_id():
+                return {'valid': False, 'status': 'site_mismatch',
+                        'error': 'license bound to another site'}
             # 检查离线宽容期
             if record.grace_until:
                 try:

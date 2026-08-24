@@ -192,7 +192,7 @@ def sms_register():
             (user_id, 'main', 'free'))
         conn.commit()
 
-    # 统一登录签发通道（新用户无 user_totp 行，插件闸门自然放行，行为不变）
+    # 统一登录签发通道
     from services.session_service import issue_auth_session
     user_agent = request.headers.get('User-Agent', '')
     ip_address = request.remote_addr or ''
@@ -202,10 +202,6 @@ def sms_register():
         user_id, phone, app_name='main',
         user_info={'username': username, 'display_name': display_name or username},
         device_name=device_name, device_type=device_type)
-    if result['blocked']:
-        if result.get('error'):
-            return api_err(result['error'], 503)
-        return api_ok({'needs_2fa': True, **result['block_info']})
 
     # ── Hook: user registered ──
     try:
@@ -283,7 +279,7 @@ def sms_login():
                     role = prof['role']
         except Exception:
             pass
-    # 统一登录签发通道（2FA 插件通过 auth.pre_issue_token 过滤器拦截）
+    # 统一登录签发通道
     from services.session_service import issue_auth_session, set_sso_cookie
     ua = request.headers.get('User-Agent', '')
     ip_addr = request.remote_addr or ''
@@ -294,10 +290,6 @@ def sms_login():
         is_admin=is_admin_val, role=role,
         user_info={'nickname': nickname_val},
         device_name=dev_name, device_type=dev_type)
-    if result['blocked']:
-        if result.get('error'):
-            return api_err(result['error'], 503)
-        return api_ok({'needs_2fa': True, **result['block_info']})
     token = result['token']
     resp = make_response(jsonify({'success': True, 'data': {
         'token': token,
@@ -419,20 +411,15 @@ def refresh_token():
     payload = validate_token(old_token)
     if not payload:
         return api_err('Invalid or expired token', 401)
-    # 方案 A：refresh 同样经过统一签发通道，由插件过滤器（auth.pre_issue_token）
-    # 决定是否放行；已启用 2FA 的用户 refresh 被拒，返回 401 要求重新登录。
-    # 核心不包含任何 2FA 逻辑，仅透传插件的放行/拦截决策。
+    # refresh 同样经过统一登录签发通道（scenario='refresh'，2FA 插件不拦截续期）
     from services.session_service import issue_auth_session
     result = issue_auth_session(
         payload['user_id'], payload.get('phone'),
         app_name=payload.get('app_name', 'main'),
         is_admin=payload.get('is_admin', False),
         role=payload.get('role', 'user'),
-        device_name='Token Refresh', device_type='web')
-    if result['blocked']:
-        if result.get('error'):
-            return api_err(result['error'], 503)
-        return api_err('Session expired, please login again', 401)
+        device_name='Token Refresh', device_type='web',
+        scenario='refresh')
     return api_ok({'token': result['token']})
 
 
@@ -572,7 +559,7 @@ def email_register():
             (user_id, 'main', 'free'))
         conn.commit()
 
-    # 统一登录签发通道（新用户无 user_totp 行，插件闸门自然放行，行为不变）
+    # 统一登录签发通道
     from services.session_service import issue_auth_session
     user_agent = request.headers.get('User-Agent', '')
     ip_address = request.remote_addr or ''
@@ -582,10 +569,6 @@ def email_register():
         user_id, None, app_name='main',
         user_info={'email': email, 'username': username, 'display_name': display_name or username},
         device_name=device_name, device_type=device_type)
-    if result['blocked']:
-        if result.get('error'):
-            return api_err(result['error'], 503)
-        return api_ok({'needs_2fa': True, **result['block_info']})
 
     # ── Hook: user registered ──
     try:

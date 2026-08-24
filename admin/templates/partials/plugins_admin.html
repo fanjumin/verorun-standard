@@ -97,7 +97,7 @@ window.__I18N_PLUGINS__ = {
   "Plugin Center": "{{ _('Plugin Center') }}",
   "Licenses": "{{ _('Licenses') }}",
   "Subscriptions": "{{ _('Subscriptions') }}",
-  "Store Admin": "{{ _('Store Admin') }}"
+  "Store Management": "{{ _('Store Management') }}"
 };
 function _(key){return window.__I18N_PLUGINS__[key]||key;}
 
@@ -131,7 +131,7 @@ function _renderPluginUI(mc){
   h+='<button class="tab-btn' + (_pluginTab==='pending'?' active':'') + '" onclick="_switchTab(\'pending\')">' + _('Pending') + '</button>';
   h+='<button class="tab-btn' + (_pluginTab==='licenses'?' active':'') + '" onclick="_switchTab(\'licenses\')">' + _('Licenses') + '</button>';
   h+='<button class="tab-btn' + (_pluginTab==='subscriptions'?' active':'') + '" onclick="_switchTab(\'subscriptions\')">' + _('Subscriptions') + '</button>';
-  if(_isSuperAdmin){h+='<button class="tab-btn' + (_pluginTab==='store_admin'?' active':'') + '" onclick="_switchTab(\'store_admin\')">' + _('Store Admin') + '</button>';}
+  if(_isSuperAdmin){h+='<button class="tab-btn' + (_pluginTab==='store_admin'?' active':'') + '" onclick="_switchTab(\'store_admin\')">' + _('Store Management') + '</button>';}
   h+='</div>';
   h+='<div style="display:flex;gap:8px">';
   if(_pluginTab==='installed'){

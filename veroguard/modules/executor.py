@@ -12,8 +12,10 @@ VeroGuard — 远程命令执行模块（Phase 4）
   self_destruct  — 删除守护进程文件并停止服务
   update_config  — 更新运行参数
 """
+import json
 import logging
 import os
+import secrets
 import subprocess
 import time as _time
 
@@ -24,6 +26,39 @@ ALLOWED_ACTIONS = {
     'warn', 'lock_ai', 'lock_full',
     'shutdown', 'self_destruct', 'update_config',
 }
+
+# ── 破坏性命令（需本地运维密钥二次确认）──
+DESTRUCTIVE_ACTIONS = {'shutdown', 'self_destruct'}
+
+
+def _verify_ops_token(action: str, params: dict) -> bool:
+    """破坏性命令本地二次确认：params.ops_token 须与本地 VG_OPS_CONFIRM 一致。
+
+    未配置 VG_OPS_CONFIRM → 一律拒绝（fail-closed，比默认放行安全）。
+    与 PROBE_SECRET 分离，攻击者即使能注入心跳响应也无法触发自毁/停服。
+    """
+    if action not in DESTRUCTIVE_ACTIONS:
+        return True
+    expected = config.VG_OPS_CONFIRM
+    if not expected:
+        return False
+    return secrets.compare_digest(str(params.get('ops_token', '')), expected)
+
+
+def _audit_log(action: str, command_id: str, params: dict, outcome: str):
+    """破坏性命令审计日志（追加写入，只增不改）"""
+    try:
+        os.makedirs(os.path.dirname(config.COMMAND_AUDIT_LOG), exist_ok=True)
+        with open(config.COMMAND_AUDIT_LOG, 'a', encoding='utf-8') as f:
+            f.write(json.dumps({
+                'ts': _time.strftime('%Y-%m-%dT%H:%M:%S'),
+                'action': action,
+                'command_id': command_id,
+                'params': params,
+                'outcome': outcome,
+            }, ensure_ascii=False) + '\n')
+    except Exception as e:
+        logging.error("Audit log write failed: %s", e)
 
 
 def execute(cmd: dict) -> dict:
@@ -46,6 +81,19 @@ def execute(cmd: dict) -> dict:
             "status": "failed",
             "result": f"Unknown action: {action}",
         }
+
+    # VR-SEC (V4): 破坏性命令二次确认（运维通道分离）
+    if action in DESTRUCTIVE_ACTIONS:
+        if not _verify_ops_token(action, params):
+            _audit_log(action, command_id, params, 'REJECTED: ops_token invalid')
+            logging.warning("Destructive command %s rejected: ops_token invalid",
+                            action)
+            return {
+                "command_id": command_id,
+                "status": "failed",
+                "result": "ops_token verification failed",
+            }
+        _audit_log(action, command_id, params, 'APPROVED')
 
     handler = _ACTION_HANDLERS.get(action)
     if not handler:

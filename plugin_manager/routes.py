@@ -1100,7 +1100,8 @@ def store_install(identifier: str):
 
     # 获取下载地址（含版本兼容校验）
     app_version = getattr(mgr.app, 'version', '')
-    download_url = mgr.store_client.get_download_url(identifier, app_version)
+    download_url, fallback_url = mgr.store_client.get_download_urls(
+        identifier, app_version)
     if not download_url:
         # 区分：无下载 URL vs 版本不兼容
         detail_version = detail.get('min_app_version', '')
@@ -1127,17 +1128,60 @@ def store_install(identifier: str):
     # 安装插件
     try:
         info = mgr.install(identifier)
-        return _json_result(True, data={
-            'identifier': identifier,
-            'status': 'installed',
-            'version': info.version,
-        })
     except Exception as e:
         traceback.print_exc()
         return _json_result(False, error=f'Install failed: {e}', code=500)
 
+    # 安装后自动启用（管理员代装流程）：启用成功后路由需重启服务生效
+    enabled = False
+    enable_error = None
+    try:
+        mgr.enable(identifier)
+        enabled = True
+    except Exception as e:
+        traceback.print_exc()
+        enable_error = f'Enable failed: {e}'
+
+    data = {
+        'identifier': identifier,
+        'status': info.status.value if hasattr(info.status, 'value') else str(info.status),
+        'version': info.version,
+        'auto_enabled': enabled,
+    }
+    if enabled:
+        # 新启用插件的路由需重启后挂载（Flask 运行期无法动态注册蓝图）
+        data['needs_restart'] = True
+        _schedule_service_restart()
+    else:
+        data['enable_error'] = enable_error
+    return _json_result(True, data=data)
+
 
 # ── 商店在线升级 ──────────────────────────────────
+
+def _schedule_service_restart(delay: float = 3.0):
+    """后台延迟重启所有挂载插件路由的服务，使新启用/升级插件的路由生效。
+
+    Flask 运行期无法动态注册蓝图，插件路由统一在启动时挂载；
+    安装/启用/升级后必须重启 admin/main/auth 三个服务。
+    用 systemd-run 创建独立 transient unit 执行重启，脱离 admin 服务自身
+    cgroup——否则重启 admin 时会连带终止当前进程（含本 sudo 子进程），
+    导致后续服务不重启。sudo systemd-run 免密已在服务器配置。
+    """
+    def _restart():
+        time.sleep(delay)
+        try:
+            subprocess.Popen(
+                ['sudo', 'systemd-run', '--collect', '--no-block',
+                 'systemctl', 'restart',
+                 'verorun-admin', 'verorun-main', 'verorun-auth'],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except Exception as e:
+            print(f'[PluginManager] ⚠️ restart services failed: {e}')
+    threading.Thread(target=_restart, daemon=True).start()
 
 @bp.route('/store/<identifier>/upgrade', methods=['POST'])
 def store_upgrade(identifier: str):
@@ -1172,20 +1216,9 @@ def store_upgrade(identifier: str):
         traceback.print_exc()
         return _json_result(False, error=f'Upgrade failed: {e}', code=500)
 
-    # 需要重启时：后台延迟 3 秒重启 admin 服务（sudo 免密已配置）
+    # 需要重启时：后台延迟重启所有挂载插件路由的服务（sudo 免密已配置）
     if result.get('needs_restart'):
-        def _restart():
-            time.sleep(3)
-            try:
-                subprocess.Popen(
-                    ['sudo', 'systemctl', 'restart', 'verorun-admin'],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    start_new_session=True,
-                )
-            except Exception as e:
-                print(f'[PluginManager] ⚠️ restart verorun-admin failed: {e}')
-        threading.Thread(target=_restart, daemon=True).start()
+        _schedule_service_restart()
 
     return _json_result(True, data=result)
 
@@ -2280,7 +2313,30 @@ def list_subscriptions():
 
     sm = get_subscription_manager()
     subs = [s.to_dict() for s in sm.list_subscriptions()]
-    return _json_result(True, data={'subscriptions': subs})
+
+    # ── 官方版直接安装/免费安装的插件均无订阅记录，合并进"我的订阅"展示 ──
+    installed = []
+    subscribed_ids = {s.get('plugin_id') for s in subs}
+    try:
+        mgr = _get_manager()
+        if mgr:
+            for info in mgr.list_plugins():
+                if info.identifier in subscribed_ids:
+                    continue
+                if info.status.value in ('uninstalled', 'unknown'):
+                    continue
+                installed.append(_info_to_dict(info))
+    except Exception as e:
+        print(f'[routes] list_subscriptions merge installed failed: {e}')
+
+    # 官方版标记：前端据此显示"官方授权"徽标
+    try:
+        from .license import _is_official_edition
+        is_official = bool(_is_official_edition())
+    except Exception:
+        is_official = False
+
+    return _json_result(True, data={'subscriptions': subs, 'installed': installed, 'official': is_official})
 
 
 # ── 30. 取消订阅 ─────────────────────────────────────────

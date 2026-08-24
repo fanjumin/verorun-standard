@@ -36,8 +36,8 @@ if _platform_dir not in sys.path:
     sys.path.insert(0, _platform_dir)
 sys.modules.pop('routes', None)
 
-from routes.api_v1 import api_v1_bp
-from routes.internal_api import internal_api_bp
+from main_site.routes.api_v1 import api_v1_bp
+from main_site.routes.internal_api import internal_api_bp
 # mini_program_bp 已解耦至插件 plugins/mini_app_builder/public_api.py（v2.0.0），
 # 由 PluginManager mount_all_routes() 挂载（见下方 ── PluginManager ── 段）
 

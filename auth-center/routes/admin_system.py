@@ -283,6 +283,12 @@ def _check_domain_quota(user_id):
                 limit = max(limit, 20)
         except Exception as e:
             print(f'[DomainQuota] plugin subscription check failed: {e}', flush=True)
+            # 查询失败会使当前事务进入 aborted 状态，必须回滚，否则后续查询
+            # 全部抛 InFailedSqlTransaction，导致整个接口 500。
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         used = conn.execute(
             "SELECT COUNT(*) as c FROM site_domains"
         ).fetchone()['c']

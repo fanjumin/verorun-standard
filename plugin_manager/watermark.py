@@ -58,7 +58,9 @@ WM_META_FIELD = '_wm'
 
 # 不可辩驳的官方包特征（上传/批准时唯一硬拒集合）
 # 修复 M2/M3：仅「签名验签通过」硬拒；manifest/注释水印/_wm/白名单降级进队列复核
-WM_HARD = ('signature',)
+# VR-SEC (V7)：新增「清单哈希确凿篡改（tampered）」为硬拒——manifest 存在但签名缺失/
+# 无效时逐文件比对哈希，不一致即篡改，属不可辩驳；哈希一致的无签名包仍按 manifest 进复核队列。
+WM_HARD = ('signature', 'tampered')
 
 # 受扫描的源码文件后缀
 _SOURCE_EXTS = ('.py', '.json')
@@ -230,10 +232,20 @@ def detect_official_watermark(plugin_dir: str, secret: str = None) -> Dict[str, 
                                    'method': 'signature',
                                    'reason': '官方签名验签通过（verorun.signature）'})
                     return result
+            # VR-SEC (V7): 清单存在但签名缺失/无效时，校验清单哈希 vs 实际文件。
+            # 不匹配 → 确凿篡改（tampered，硬拒）；匹配 → 官方无签名构建（manifest，复核队列）。
+            integrity = verify_manifest(plugin_dir)
+            if not integrity.get('valid'):
+                result.update({'official': True, 'identifier': identifier,
+                               'version': version, 'build_id': build_id,
+                               'method': 'tampered',
+                               'reason': '官方清单哈希校验失败，文件已被篡改'
+                                         f'（{", ".join(integrity.get("mismatched", [])[:5])}）'})
+                return result
             result.update({'official': True, 'identifier': identifier,
                            'version': version, 'build_id': build_id,
                            'method': 'manifest',
-                           'reason': '存在官方打包清单 verorun.manifest'})
+                           'reason': '存在官方打包清单 verorun.manifest（哈希一致）'})
             return result
         except (json.JSONDecodeError, OSError):
             pass

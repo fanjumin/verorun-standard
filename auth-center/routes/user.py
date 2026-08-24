@@ -530,20 +530,13 @@ def password_login():
                     role = prof['role']
             except Exception:
                 pass
-    # 统一登录签发通道（2FA 插件通过 auth.pre_issue_token 过滤器拦截）
+    # 统一登录签发通道
     result = issue_auth_session(
         user['id'], user['phone'], app_name='main',
         is_admin=user['is_admin'], role=role,
         user_info={'nickname': user['display_name'] or user['username'] or '',
                    'password_changed_at': user.get('password_changed_at') or ''},
         device_name='Password Login', device_type='web')
-    if result['blocked']:
-        if result.get('error'):
-            return jsonify({'success': False, 'error': result['error']}), 503
-        return jsonify({'success': True, 'data': {
-            'needs_2fa': True,
-            **result['block_info'],
-        }})
     token = result['token']
     resp = make_response(jsonify({'success': True, 'data': {
         'token': token,
