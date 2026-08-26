@@ -1,7 +1,5 @@
 # VeroRun Standard Edition
 
-**VeroRun 标准版 —— 唯一的公开内核发行版。**
-
 本仓库由 `sync-to-standard` CI 流水线自动生成，内容为 VeroRun 公共内核（**不包含任何插件**）。请勿手动推送本仓库。
 
 ---
