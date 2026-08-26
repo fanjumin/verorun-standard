@@ -460,6 +460,14 @@ class PluginManager:
                 except Exception as e:
                     self._guard_failure(info, 'preload-activate')
                     print(f'[PluginManager] ⚠️ {pid}: preload activate failed: {e}')
+            # 启动时幂等补挂载统一网关注册（插件标准 §4）：ACTIVE 插件不重复
+            # 走 enable()，此处确保重启后插件能力仍聚合在所选核心角色。
+            if info.status == PluginStatus.ACTIVE:
+                try:
+                    from agent_matrix.models import attach_plugin_capabilities
+                    attach_plugin_capabilities(pid, info.metadata or {})
+                except Exception as e:
+                    print(f'[PluginManager] ⚠️ {pid}: 启动网关注册补挂载失败: {e}')
             try:
                 # 注册路由（如插件提供 Blueprint；P0-1 权限门控）
                 if self._capability_allowed(info, 'register_routes') and hasattr(instance, 'register_routes'):
@@ -603,6 +611,25 @@ class PluginManager:
             except Exception as _e:
                 print(f'[PluginManager] ⚠️ {identifier}: integrity check skipped: {_e}')
 
+            # ── 统一网关注册强制校验（插件标准 §2.2/§4）────────────
+            # 官方插件必须声明 agent_role（9 核心角色之一），否则拒绝启用。
+            try:
+                from agent_matrix.models import get_core_role_slugs
+                _core_roles = get_core_role_slugs()
+            except ImportError:
+                _core_roles = ['athena', 'content', 'business', 'builder',
+                               'finance', 'ops', 'service', 'vision', 'creative']
+            if (info.metadata or {}).get('agent_role') not in _core_roles:
+                info.last_error = ('missing/invalid agent_role: '
+                                   f'{(info.metadata or {}).get("agent_role")!r} '
+                                   '（须为 9 个核心角色之一）')
+                info.status = PluginStatus.ERROR
+                self._save_to_db(info)
+                raise PluginStateError(
+                    identifier, 'missing_agent_role',
+                    'enable failed: plugin.json 必须声明 agent_role（9 个核心角色之一）'
+                )
+
             # 执行插件 setup()
             # 降级策略：setup() 失败不置 ERROR、不抛异常（如 chatbot 在运行期
             # 调 register_blueprint 会被 Flask 拒绝），保持 ENABLED 并记录
@@ -632,14 +659,15 @@ class PluginManager:
             self._emit('plugin.enabled', plugin_id=identifier)
             print(f'[PluginManager] ✅ {identifier} enabled')
 
-            # ── 注册插件 Agent 到 agent_matrix（§4）──────────────────
+            # ── 统一网关注册（§4）：插件能力聚合到所选核心角色 ──────
             _meta = info.metadata or {}
-            if _meta.get('agents') or _meta.get('declare_roles'):
-                try:
-                    from agent_matrix.models import register_plugin_agents
-                    register_plugin_agents(identifier, info.path, _meta)
-                except Exception as e:
-                    print(f'[PluginManager] ⚠️ {identifier}: Agent 注册失败, 跳过 ({type(e).__name__}: {e})')
+            try:
+                from agent_matrix.models import attach_plugin_capabilities
+                attach_plugin_capabilities(identifier, _meta)
+            except ImportError as e:
+                print(f'[PluginManager] ⚠️ {identifier}: agent_matrix.models 不可用, 跳过网关注册 ({e})')
+            except Exception as e:
+                print(f'[PluginManager] ⚠️ {identifier}: 网关注册失败 ({type(e).__name__}: {e})')
 
             # ── 敏感权限软检查（软执行：仅警告，不阻断）────────────
             sensitive = [p for p in (_meta.get('permissions') or [])
@@ -789,14 +817,13 @@ class PluginManager:
             self._emit('plugin.disabled', plugin_id=identifier)
             print(f'[PluginManager] ✅ {identifier} disabled')
 
-            # ── 注销插件 Agent（§4）─────────────────────────────
+            # ── 注销插件 Agent（§4）：从核心角色移除聚合能力 ─────
             _meta = info.metadata or {}
-            if _meta.get('agents') or _meta.get('declare_roles'):
-                try:
-                    from agent_matrix.models import unregister_plugin_agents
-                    unregister_plugin_agents(identifier, _meta)
-                except ImportError as e:
-                    print(f'[PluginManager] ⚠️ {identifier}: agent_matrix.models 不可用, 跳过 Agent 清理 ({e})')
+            try:
+                from agent_matrix.models import detach_plugin_capabilities
+                detach_plugin_capabilities(identifier, _meta)
+            except ImportError as e:
+                print(f'[PluginManager] ⚠️ {identifier}: agent_matrix.models 不可用, 跳过 Agent 清理 ({e})')
 
             return info
 
@@ -831,12 +858,11 @@ class PluginManager:
 
                 # 兜底：注销插件声明的 Agent（即使插件从未 enable 过）
                 _meta = info.metadata or {}
-                if _meta.get('agents') or _meta.get('declare_roles'):
-                    try:
-                        from agent_matrix.models import unregister_plugin_agents
-                        unregister_plugin_agents(identifier, _meta)
-                    except ImportError:
-                        pass
+                try:
+                    from agent_matrix.models import detach_plugin_capabilities
+                    detach_plugin_capabilities(identifier, _meta)
+                except ImportError:
+                    pass
 
                 # 从数据库中移除记录
                 self._delete_from_db(identifier)

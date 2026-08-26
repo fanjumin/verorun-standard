@@ -200,11 +200,20 @@ def import_from_github(raw_url: str) -> Tuple[Optional[dict], List[str]]:
 
     # 必填字段校验
     missing = [f for f in ('identifier', 'name', 'version', 'description',
-                           'author', 'min_app_version') if not manifest.get(f)]
+                           'author', 'min_app_version', 'agent_role', 'capabilities')
+               if not manifest.get(f)]
     if missing:
         return None, [f'plugin.json missing required fields: {", ".join(missing)}']
     if not _IDENTIFIER_RE.match(manifest.get('identifier', '')):
         return None, ['identifier must match ^[a-z0-9_]+$']
+
+    # 统一网关注册强制校验：agent_role 必须为 9 个核心角色之一（插件标准 §2.2）
+    _CORE_ROLES = ['athena', 'content', 'business', 'builder',
+                   'finance', 'ops', 'service', 'vision', 'creative']
+    if manifest.get('agent_role') not in _CORE_ROLES:
+        return None, [f'plugin.json agent_role must be one of the 9 core roles: {", ".join(_CORE_ROLES)}']
+    if not isinstance(manifest.get('capabilities'), list) or not manifest.get('capabilities'):
+        return None, ['plugin.json capabilities must be a non-empty array of strings']
 
     if not _SEMVER_RE.match(manifest.get('version', '')):
         warnings.append('version is not x.y.z format, kept as-is, please review manually')

@@ -13,6 +13,11 @@
   "description": "Slider Captcha — Puzzle generation + behavior analysis + rate limiting",
   "author": "VeroRun",
   "min_app_version": "0.10.0",
+  "agent_role": "ops",
+  "capabilities": [
+    "captcha.generate",
+    "captcha.validate"
+  ],
   "category": "system",
   "icon": "keys",
   "tags": [

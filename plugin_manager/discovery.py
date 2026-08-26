@@ -179,6 +179,17 @@ class PluginDiscovery:
             tags=meta.get('tags', []),
             dashboard_meta=meta.get('dashboard', {}),
         )
+        # ★ v1.6 统一网关注册强制校验（插件标准 §2.2/§4）：
+        # agent_role 必须为 9 个核心角色之一，否则记录校验错误（enable 将拒绝）。
+        try:
+            from agent_matrix.models import get_core_role_slugs
+            _core_roles = get_core_role_slugs()
+        except ImportError:
+            _core_roles = ['athena', 'content', 'business', 'builder',
+                           'finance', 'ops', 'service', 'vision', 'creative']
+        _ar = meta.get('agent_role', '')
+        if _ar not in _core_roles:
+            info.last_error = f'missing/invalid agent_role: {_ar!r}（须为 9 个核心角色之一）'
         if info.admin_url and str(info.admin_url).startswith('/'):
             print(f'[PluginDiscovery] WARNING: {identifier} uses deprecated admin_url field. Use menu.items[].key + l_<key>() instead.')
         return info

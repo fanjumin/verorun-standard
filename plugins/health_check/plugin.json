@@ -37,24 +37,11 @@
     ],
     "listens": []
   },
-  "agents": [
-    {
-      "identifier": "health_ai_fixer",
-      "name": "Health AI Fixer",
-      "description": "LLM-powered health check result analysis and repair suggestion engine",
-      "role_type": "sub",
-      "domain": "health",
-      "prompt_file": "agents/health_ai_fixer_prompt.md",
-      "model_policy": {
-        "strategy": "inherit"
-      },
-      "capabilities": [
-        "health_analysis",
-        "fix_suggestion",
-        "root_cause_analysis"
-      ],
-      "enabled_by_default": false
-    }
+  "agent_role": "ops",
+  "capabilities": [
+    "health_analysis",
+    "fix_suggestion",
+    "root_cause_analysis"
   ],
   "dashboard": {
     "stats": [

@@ -12,6 +12,13 @@
   "description": "Analytics Middleware & Dashboard — Server-side Cookieless Analytics",
   "author": "VeroRun",
   "min_app_version": "0.10.0",
+  "agent_role": "content",
+  "capabilities": [
+    "analytics.track",
+    "analytics.report",
+    "analytics.geo",
+    "analytics.funnel"
+  ],
   "category": "system",
   "icon": "analytics",
   "icon_url": "",

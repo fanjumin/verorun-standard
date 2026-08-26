@@ -563,6 +563,17 @@ def seed_default_agents():
             else:
                 # UPDATE existing system role — sync metadata only, preserve AI config
                 # NEVER overwrite provider/model_name/api_key_ref on existing agents
+                # 合并保留插件聚合的能力/模块（统一网关注册 §4），避免重启覆盖
+                cur = conn.execute(
+                    "SELECT capabilities, managed_modules FROM agent_matrix WHERE slug=%s",
+                    (slug,)
+                ).fetchone()
+                yaml_caps = _json_list(a.get('capabilities', '[]'))
+                yaml_mods = _json_list(a.get('managed_modules', '[]'))
+                db_caps = _json_list(cur['capabilities'] if cur else [])
+                db_mods = _json_list(cur['managed_modules'] if cur else [])
+                merged_caps = _merge_unique(yaml_caps, [c for c in db_caps if c not in yaml_caps])
+                merged_mods = _merge_unique(yaml_mods, [m for m in db_mods if m not in yaml_mods])
                 conn.execute("""
                     UPDATE agent_matrix SET
                         name=%s, description=%s, domain=%s,
@@ -572,10 +583,10 @@ def seed_default_agents():
                 """, (
                     a.get('name', ''), a.get('description', ''),
                     a.get('domain', 'general'),
-                    a.get('managed_modules', '[]'),
+                    json.dumps(merged_mods, ensure_ascii=False),
                     a.get('auto_approve', 0),
                     a.get('allowed_tools', '[]'),
-                    a.get('capabilities', '[]'),
+                    json.dumps(merged_caps, ensure_ascii=False),
                     slug
                 ))
 
@@ -775,6 +786,113 @@ def unregister_plugin_agents(plugin_id: str, metadata: dict) -> int:
         conn.commit()
         print(f'[PluginRoles] Unregister {len(slugs)} plugin agents (from {plugin_id})')
     return len(slugs)
+
+
+# ============================================================
+# 统一网关注册（插件标准 §2.2/§4）— 插件能力聚合到核心角色
+# 强制要求：plugin.json 必须声明 agent_role（9 核心角色之一）+ capabilities。
+# 聚合目标为核心角色行（is_system=1），不新建独立 Agent 行。
+# ============================================================
+
+# 系统预设核心角色（agent_matrix/roles/*.yaml 种子，is_system=1）
+CORE_ROLE_SLUGS = ('athena', 'content', 'business', 'builder', 'finance', 'ops', 'service', 'vision', 'creative')
+
+
+def get_core_role_slugs() -> list:
+    """返回系统预设核心角色 slug 列表（供校验使用）。"""
+    return list(CORE_ROLE_SLUGS)
+
+
+def _json_list(value) -> list:
+    """兼容 list / JSON 字符串 / None，安全转为 list。"""
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            v = json.loads(value or '[]')
+            return v if isinstance(v, list) else []
+        except (ValueError, TypeError):
+            return []
+    return []
+
+
+def _merge_unique(base: list, extra: list) -> list:
+    """去重并集，保持顺序。"""
+    seen = set()
+    result = []
+    for item in list(base) + list(extra):
+        if item not in seen:
+            seen.add(item)
+            result.append(item)
+    return result
+
+
+def _declared_agent_role(metadata: dict) -> str:
+    """提取并校验插件声明的 agent_role，非法返回 ''。"""
+    role = (metadata or {}).get('agent_role', '')
+    if role not in CORE_ROLE_SLUGS:
+        return ''
+    return role
+
+
+def attach_plugin_capabilities(plugin_id: str, metadata: dict) -> int:
+    """将插件能力聚合到所选核心角色（幂等，插件标准 §4）。
+
+    校验失败（无合法 agent_role / 目标核心角色不存在）返回 -1，不抛异常。
+    返回受影响的核心角色数（成功为 1）。
+    """
+    role = _declared_agent_role(metadata or {})
+    if not role:
+        print(f'[PluginRoles] WARNING: {plugin_id} 缺少合法 agent_role '
+              f'（须为 {list(CORE_ROLE_SLUGS)} 之一），跳过网关注册')
+        return -1
+    caps = _json_list((metadata or {}).get('capabilities', []))
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id, capabilities, managed_modules FROM agent_matrix WHERE slug=%s AND is_system=1",
+            (role,)
+        ).fetchone()
+        if not row:
+            print(f'[PluginRoles] WARNING: {plugin_id} 目标核心角色 {role} 不存在（is_system=1），跳过')
+            return -1
+        new_caps = _merge_unique(_json_list(row['capabilities']), caps)
+        new_mods = _merge_unique(_json_list(row['managed_modules']), [plugin_id])
+        conn.execute(
+            "UPDATE agent_matrix SET capabilities=%s, managed_modules=%s, updated_at=NOW() WHERE id=%s",
+            (json.dumps(new_caps, ensure_ascii=False),
+             json.dumps(new_mods, ensure_ascii=False),
+             row['id'])
+        )
+        conn.commit()
+    print(f'[PluginRoles] Attach plugin capabilities: {plugin_id} → {role} ({len(caps)} caps)')
+    return 1
+
+
+def detach_plugin_capabilities(plugin_id: str, metadata: dict) -> int:
+    """从核心角色移除插件聚合的能力与模块标记（幂等，插件标准 §4）。"""
+    role = _declared_agent_role(metadata or {})
+    if not role:
+        return 0
+    caps = _json_list((metadata or {}).get('capabilities', []))
+    cap_set = set(caps)
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id, capabilities, managed_modules FROM agent_matrix WHERE slug=%s AND is_system=1",
+            (role,)
+        ).fetchone()
+        if not row:
+            return 0
+        new_caps = [c for c in _json_list(row['capabilities']) if c not in cap_set]
+        new_mods = [m for m in _json_list(row['managed_modules']) if m != plugin_id]
+        conn.execute(
+            "UPDATE agent_matrix SET capabilities=%s, managed_modules=%s, updated_at=NOW() WHERE id=%s",
+            (json.dumps(new_caps, ensure_ascii=False),
+             json.dumps(new_mods, ensure_ascii=False),
+             row['id'])
+        )
+        conn.commit()
+    print(f'[PluginRoles] Detach plugin capabilities: {plugin_id} ← {role}')
+    return 1
 
 
 def list_agents(role_type=None, domain=None, active_only=False):

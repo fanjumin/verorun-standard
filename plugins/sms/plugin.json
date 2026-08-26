@@ -20,6 +20,12 @@
   "description": "SMS Service — phone verification code sending with Aliyun/Twilio providers",
   "author": "VeroRun",
   "min_app_version": "0.10.0",
+  "agent_role": "service",
+  "capabilities": [
+    "sms.send",
+    "sms.code.generate",
+    "sms.verify"
+  ],
   "dependencies": {},
   "admin_url": "",
   "admin_label": "SMS Settings",
