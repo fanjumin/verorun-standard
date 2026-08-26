@@ -470,7 +470,7 @@ class WechatProvider(PaymentProvider):
     def _get_gateway_appid(self) -> str:
         """尝试从新版订阅网关模块获取 app_id"""
         try:
-            from plugins.subscription.gateways.wechat import _get_wechat_v3_config
+            from plugins.payment.gateways.wechat import _get_wechat_v3_config
             return _get_wechat_v3_config().get('app_id', '')
         except Exception:
             return ''
@@ -481,7 +481,7 @@ class WechatProvider(PaymentProvider):
 
         notify_url = f'{self._config["notify_base"]}/admin/plugins/payment/notify/wechat' if self._config.get('notify_base') else ''
 
-        from plugins.subscription.gateways.wechat import call_native_pay
+        from plugins.payment.gateways.wechat import call_native_pay
         result = call_native_pay(
             order_no=order.order_no,
             description=order.subject,
@@ -519,7 +519,7 @@ class WechatProvider(PaymentProvider):
         if self._is_stub:
             return MockProvider().refund(order_no)
 
-        from plugins.subscription.gateways.wechat import refund_order as wx_refund
+        from plugins.payment.gateways.wechat import refund_order as wx_refund
         amt = amount_fen or 0
         result = wx_refund(order_no, amt)
         return PaymentResult(

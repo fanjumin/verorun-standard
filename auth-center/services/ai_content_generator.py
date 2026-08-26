@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""AI Content Generator — text via DashScope Qwen, image via 通义万相.
-   Two separate API keys stored in system_config.
-   Free tier: qwen-turbo (100万 tokens/月), wanx2.1-t2i-turbo.
+"""AI Content Generator — text and image generation via unified AI gateway.
+
+Text:  agent_matrix.UnifiedLLM.chat()（供应商/模型由 system_config 配置）。
+Image: agent_matrix.UnifiedLLM.image()（配图网关，替代直连 DashScope）。
 """
 
 import logging, json, os, requests, time, ipaddress, socket
@@ -186,130 +187,22 @@ def _parse_output(text, content_type='article'):
 
 
 # =============================================
-# 配图生成 — Wan2.7-Image (DashScope Async API)
+# 配图生成 — 统一 AI 网关（agent_matrix.UnifiedLLM.image）
 # =============================================
 
-WANX_URL = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/image-generation/generation'
-TASK_URL = 'https://dashscope.aliyuncs.com/api/v1/tasks'
-
-
-def _get_image_key():
-    """Get DashScope API Key from encrypted provider_api_keys table, with plaintext fallback."""
-    try:
-        from services.crypto import decrypt
-        with get_db() as conn:
-            row = conn.execute(
-                "SELECT key_value_enc FROM provider_api_keys WHERE provider=%s AND is_active=TRUE LIMIT 1",
-                ('dashscope',)
-            ).fetchone()
-            if row and row['key_value_enc']:
-                return decrypt(row['key_value_enc'])
-    except Exception:
-        pass
-    # Fallback: old system_config plaintext
-    key = _get_key('dashscope_api_key')
-    if not key:
-        raise ValueError('通义万相 Key 未配置，请在系统设置中配置')
-    return key
-
-
 def generate_image(prompt, size='1024x1024', reference_image_url=None):
-    """Generate image via wan2.7-image (async API). Supports style_ref(img2img)."""
-    api_key = _get_image_key()
-    size_map = {'1024x1024': '1024*1024', '1280x720': '1280*720', '720x1280': '720*1280'}
-    ds_size = size_map.get(size, '1024*1024')
+    """Generate image via the unified AI gateway (UnifiedLLM.image()).
 
-    headers = {
-        'Authorization': f'Bearer {api_key}',
-        'Content-Type': 'application/json',
-        'X-DashScope-Async': 'enable',
-    }
-
-    body = {
-        'model': 'wan2.7-image-pro',
-        'input': {
-            'messages': [
-                {
-                    'role': 'user',
-                    'content': [
-                        {'type': 'text', 'text': prompt},
-                    ],
-                }
-            ],
-        },
-        'parameters': {'size': ds_size, 'n': 1},
-    }
-
-    # 图生图：通过 style_ref 参数传入参考图
-    if reference_image_url:
-        body['parameters']['style_ref'] = reference_image_url
-
-    # Submit async task
-    resp = requests.post(WANX_URL, headers=headers, json=body, timeout=30)
-    result = resp.json()
-
-    task_id = result.get('output', {}).get('task_id', '')
-    if not task_id:
-        raise ValueError(f'图片生成提交失败: {result.get("message", str(result))}')
-
-    # Poll for result
-    poll_headers = {'Authorization': f'Bearer {api_key}'}
-    for i in range(30):
-        time.sleep(2)
-        poll = requests.get(f'{TASK_URL}/{task_id}', headers=poll_headers, timeout=15)
-        sr = poll.json()
-        status = sr.get('output', {}).get('task_status', '')
-        logger.info(f'  图片生成 poll {i+1}: {status}')
-
-        if status == 'SUCCEEDED':
-            # DashScope v3 response: output.choices[0].message.content[0].image
-            choices = sr.get('output', {}).get('choices', [])
-            if choices:
-                content = choices[0].get('message', {}).get('content', [])
-                if (
-                    isinstance(content, list) and len(content) > 0
-                    and isinstance(content[0], dict)
-                    and content[0].get('image')
-                ):
-                    return content[0]['image']
-                # Also try flat text URL inside content
-                if isinstance(content, list) and len(content) > 0:
-                    text = content[0].get('text', '')
-                    if text and text.startswith('http'):
-                        return text
-            # Fallback: old API format (output.results[0].url)
-            results = sr.get('output', {}).get('results', [])
-            if results and results[0].get('url'):
-                return results[0]['url']
-            # Fallback: b64_json
-            if results and results[0].get('b64_json'):
-                import base64
-                img_data = base64.b64decode(results[0]['b64_json'])
-                local_path = f'/tmp/gen_img_{task_id[:8]}.png'
-                with open(local_path, 'wb') as f:
-                    f.write(img_data)
-                logger.info(f'Image saved to {local_path}')
-                return f'file://{local_path}'
-            logger.error(f'图片生成成功但无法解析响应: {json.dumps(sr.get("output", {}), ensure_ascii=False)[:500]}')
-            raise ValueError('图片生成成功但无法解析响应URL')
-
-        elif status in ('FAILED',):
-            err_msg = sr.get('output', {}).get('message', status)
-            # Check for partial results with error (legacy format)
-            results = sr.get('output', {}).get('results', [])
-            if results and results[0].get('url'):
-                return results[0]['url']
-            # Check new format for partial results
-            choices = sr.get('output', {}).get('choices', [])
-            if choices:
-                content = choices[0].get('message', {}).get('content', [])
-                if isinstance(content, list) and len(content) > 0:
-                    img_url = content[0].get('image', '')
-                    if img_url:
-                        return img_url
-            raise ValueError(f'图片生成失败: {err_msg}')
-
-    raise ValueError('图片生成超时')
+    供应商/模型/key 解析全部交由网关完成，本模块不再直连 DashScope。
+    支持图生图（reference_image_url 传入参考图）。
+    """
+    from agent_matrix.engine import get_gateway
+    return get_gateway().image(
+        prompt=prompt,
+        size=size,
+        reference_image_url=reference_image_url,
+        module='content_generator',
+    )
 
 
 def generate_cover_image(title, topic=''):

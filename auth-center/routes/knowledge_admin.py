@@ -223,6 +223,13 @@ def kb_create():
     scope = data.get('scope', 'system')
     source = data.get('source', 'manual')
 
+    # 系统知识库写入仅超级管理员（与 cleaner / 用户端 API 权限对齐）
+    if scope == 'system':
+        from services.kb_permission import check_kb_permission
+        allowed, perr = check_kb_permission('system', None, 'write', admin)
+        if not allowed:
+            return perr
+
     try:
         with get_db() as db:
             db.execute(
@@ -269,6 +276,22 @@ def kb_update(entry_id):
 
     if not fields:
         return _error(_('No valid fields to update'))
+
+    # 系统知识库条目（当前或目标 scope=system）仅超级管理员可修改
+    target_system = (data.get('scope') == 'system')
+    try:
+        with get_db() as db:
+            cur = db.execute(
+                "SELECT scope FROM knowledge_blocks WHERE id=%s AND " + _dw(),
+                (entry_id,)
+            ).fetchone()
+            if target_system or (cur and cur['scope'] == 'system'):
+                from services.kb_permission import check_kb_permission
+                allowed, perr = check_kb_permission('system', None, 'write', admin)
+                if not allowed:
+                    return perr
+    except Exception as e:
+        return _error(str(e), 500)
     fields.append("updated_at=NOW()")
     params.append(entry_id)
 
@@ -459,6 +482,16 @@ def kb_delete(entry_id):
 
     try:
         with get_db() as db:
+            cur = db.execute(
+                "SELECT scope FROM knowledge_blocks WHERE id=%s AND " + _dw(),
+                (entry_id,)
+            ).fetchone()
+            if cur and cur['scope'] == 'system':
+                # 系统知识库禁止删除（与 kb_permission 语义一致）
+                from services.kb_permission import check_kb_permission
+                allowed, perr = check_kb_permission('system', None, 'delete', admin)
+                if not allowed:
+                    return perr
             db.execute(
                 "UPDATE knowledge_blocks SET deleted_at=NOW() WHERE id=%s AND " + _dw(),
                 (entry_id,)

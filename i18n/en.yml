@@ -51,7 +51,6 @@ AI Applications: AI Applications
 AI Cleaning: AI Cleaning
 AI Continuous Monitoring + Keyword Suggestions + Ranking Tracking: AI Continuous Monitoring + Keyword Suggestions + Ranking Tracking
 AI Continuous SEO: AI Continuous SEO
-AI Copywriting (Tongyi Qianwen): AI Copywriting (Tongyi Qianwen)
 AI Copywriting Generation (API configuration required): AI Copywriting Generation (API configuration required)
 AI Description Optimization Failed: AI Description Optimization Failed
 AI Engine Not Initialized: AI Engine Not Initialized
@@ -83,7 +82,6 @@ AI response is empty: AI response is empty
 AI response is missing required fields: AI response is missing required fields
 AI returned empty content: AI returned empty content
 AI will generate professional marketing copy for you: AI will generate professional marketing copy for you
-AI-generated Image (Tongyi Wanxiang): AI-generated Image (Tongyi Wanxiang)
 AI-powered Website Building · Let your business attract customers online 24/7: AI-powered Website Building · Let your business attract customers online 24/7
 ALIBABA_APP_KEY not configured: ALIBABA_APP_KEY not configured
 ALIBABA_APP_SECRET not configured: ALIBABA_APP_SECRET not configured
@@ -296,7 +294,6 @@ Daily: Daily
 Daily Analysis Report: Daily Analysis Report
 Daily Content Collection and Processing: Daily Content Collection and Processing
 Daily call count for the key has been reset: Daily call count for the key has been reset
-DashScope (Tongyi Qianwen): DashScope (Tongyi Qianwen)
 DashScope Text Key is not configured: DashScope Text Key is not configured
 Data Package: Data Package
 Data analysis: Data analysis
@@ -1262,7 +1259,6 @@ Title and URL are required: Title and URL are required
 Title cannot be empty: Title cannot be empty
 Token Refreshed: Token Refreshed
 Token is invalid or expired: Token is invalid or expired
-Tongyi Wanxiang Key: Tongyi Wanxiang Key
 Too frequent actions: Too frequent actions
 Top 5 Browsers: Top 5 Browsers
 Top 5 Operating Systems: Top 5 Operating Systems
@@ -1295,6 +1291,7 @@ Unknown ads operation: Unknown ads operation
 Unknown user: Unknown user
 Unprocessed: Unprocessed
 Untitled topic: Untitled topic
+Untitled Workflow: Untitled Workflow
 Update successful: Update successful
 Updated: Updated
 Updated data cannot be empty: Updated data cannot be empty
@@ -1396,6 +1393,116 @@ Workflow has been paused: Workflow has been paused
 Workflow has been restored: Workflow has been restored
 Workflow has been updated: Workflow has been updated
 Workflow name cannot be empty: Workflow name cannot be empty
+# ── Workflow editor keys (editor-only, stays in global yml) ──
+'Workflow': 'Workflow'
+'Workflow Editor': 'Workflow Editor'
+'← Back to List': '← Back to List'
+'Select a node to configure': 'Click a node on the canvas to configure it'
+'Select a node to configure hint': 'Dropped nodes open the config panel automatically; click any node to switch'
+'Save as Template': 'Save as Template'
+'Flow Control': 'Flow Control'
+'Output Actions': 'Output Actions'
+'Human Interaction': 'Human Interaction'
+'Advanced': 'Advanced'
+'Data Collection': 'Data Collection'
+'AI Process': 'AI Process'
+'Condition': 'Condition'
+'Wait': 'Wait'
+'Notify': 'Notify'
+'HTTP Request': 'HTTP Request'
+'Market Check': 'Market Check'
+'Sub Workflow': 'Sub Workflow'
+'Modified': 'Modified'
+'Nodes: {count}': 'Nodes: {count}'
+'Edges: {count}': 'Edges: {count}'
+'Node Config': 'Node Config'
+'Nodes: 0': 'Nodes: 0'
+'Edges: 0': 'Edges: 0'
+'Workflow saved successfully': 'Workflow saved successfully'
+'Failed to save workflow': 'Failed to save workflow'
+'Failed to load workflow': 'Failed to load workflow'
+'Workflow started successfully': 'Workflow started successfully'
+'Workflow execution failed': 'Workflow execution failed'
+'Cycle detected, cannot create this connection': 'Cycle detected, cannot create this connection'
+'Please complete all required fields': 'Please complete all required fields'
+'Please add at least one node': 'Please add at least one node'
+'Cannot connect a node to itself': 'Cannot connect a node to itself'
+'This connection already exists': 'This connection already exists'
+'Workflow loaded': 'Workflow loaded'
+'Save anyway?': 'Save anyway?'
+'Delete confirm message': 'Are you sure you want to delete "{name}"?'
+'Template Workflow': 'Template Workflow'
+'Agent Type': 'Agent Type'
+'Agent ID': 'Agent ID'
+'Prompt Template': 'Prompt Template'
+'Data Sources': 'Data Sources'
+'Max Per Source': 'Max Per Source'
+'Keywords': 'Keywords'
+'Processing Instruction': 'Processing Instruction'
+'Output Fields': 'Output Fields'
+'Condition Expression': 'Condition Expression'
+'Wait Time (seconds)': 'Wait Time (seconds)'
+'Publish Platforms': 'Publish Platforms'
+'Publishing Management': 'Publishing Management'
+'Title Template': 'Title Template'
+'Notification Channels': 'Notification Channels'
+'Notification Title': 'Notification Title'
+'Message Template': 'Message Template'
+'Webhook URL': 'Webhook URL'
+'Email To': 'Email To'
+'Approver Role': 'Approver Role'
+'Approver User IDs': 'Approver User IDs'
+'Approval Timeout (minutes, 0=global 72h)': 'Approval Timeout (minutes, 0=global 72h)'
+'Approval Message': 'Approval Message'
+'Require Approval on Error': 'Require Approval on Error'
+'Script Name': 'Script Name'
+'Language': 'Language'
+'Script Args': 'Script Args'
+'URL': 'URL'
+'Headers (JSON)': 'Headers (JSON)'
+'Request Body': 'Request Body'
+'Stock Symbol': 'Stock Symbol'
+'Metric': 'Metric'
+'Operator': 'Operator'
+'Threshold': 'Threshold'
+'Target Workflow ID': 'Target Workflow ID'
+'Get source data': 'Get source data'
+'AI agent call': 'AI agent call'
+'Data processing': 'Data processing'
+'Branch logic': 'Branch logic'
+'Time delay': 'Time delay'
+'Auto publish': 'Auto publish'
+'Send notification': 'Send notification'
+'Human approval': 'Human approval'
+'Custom script': 'Custom script'
+'HTTP call': 'HTTP call'
+'Market data check': 'Market data check'
+'Nested workflow': 'Nested workflow'
+'No configurable fields for this node type.': 'No configurable fields for this node type.'
+'Editor not ready': 'Editor not ready'
+'Daily Content Collection': 'Daily Content Collection'
+'Schedule RSS collection → AI processing → human review → notify admin': 'Schedule RSS collection → AI processing → human review → notify admin'
+'Collect Content Sources': 'Collect Content Sources'
+'Interpret and analyze collected content, output Chinese summary': 'Interpret and analyze collected content, output Chinese summary'
+'Human Review': 'Human Review'
+'Notify Admin': 'Notify Admin'
+'Scheduled Static Site Generation': 'Scheduled Static Site Generation'
+'Check newly published articles → incremental static page generation → notify': 'Check newly published articles → incremental static page generation → notify'
+'Check New Articles': 'Check New Articles'
+'Generate Static Pages Incrementally': 'Generate Static Pages Incrementally'
+'Notify Completion': 'Notify Completion'
+'Static site updated': 'Static site updated'
+'Social Auto Publish': 'Social Auto Publish'
+'Check publish conditions → push to WeChat/Weibo/Toutiao → notify result': 'Check publish conditions → push to WeChat/Weibo/Toutiao → notify result'
+'Should Publish to Social': 'Should Publish to Social'
+'Publish to Social Media': 'Publish to Social Media'
+'Notify Result': 'Notify Result'
+'Social publish completed': 'Social publish completed'
+'Collect new articles → AI cleaning → push to knowledge base → notify': 'Collect new articles → AI cleaning → push to knowledge base → notify'
+'Fetch New Articles': 'Fetch New Articles'
+'Notify Sync Completed': 'Notify Sync Completed'
+'Knowledge base updated with new content': 'Knowledge base updated with new content'
+'Workflow started (instance #{id})': 'Workflow started (instance #{id})'
 Write Email: Write Email
 Write Text: Write Text
 Write an intelligent article for me...: Write an intelligent article for me...
@@ -3839,7 +3946,6 @@ Please enter a GitHub repo URL: Please enter a GitHub repo URL
 'Log': 'Log'
 'Start Time': 'Start Time'
 'Trigger': 'Trigger'
-'Workflow': 'Workflow'
 'Admin Panel': 'Admin Panel'
 'Checking': 'Checking'
 'Latest': 'Latest'
@@ -3868,3 +3974,70 @@ Please enter a GitHub repo URL: Please enter a GitHub repo URL
 'Module': 'Module'
 'optional': 'optional'
 'unlimited': 'unlimited'
+# ── Knowledge & Cleaner module ──
+'Failed to delete knowledge block': 'Failed to delete knowledge block'
+'Failed to fetch knowledge base': 'Failed to fetch knowledge base'
+'Failed to fetch version': 'Failed to fetch version'
+'Failed to save knowledge block': 'Failed to save knowledge block'
+'id is required': 'id is required'
+'id, title and content are required': 'id, title and content are required'
+'Knowledge block created': 'Knowledge block created'
+'Knowledge block deleted': 'Knowledge block deleted'
+'Knowledge block not found': 'Knowledge block not found'
+'Knowledge block updated': 'Knowledge block updated'
+'query is required': 'query is required'
+'Secret knowledge can only be set by super admin': 'Secret knowledge can only be set by super admin'
+'System knowledge base cannot be deleted': 'System knowledge base cannot be deleted'
+'System knowledge base can only be modified by super admin': 'System knowledge base can only be modified by super admin'
+'System knowledge base online update can only be performed by super admin': 'System knowledge base online update can only be performed by super admin'
+'System knowledge base updated': 'System knowledge base updated'
+'Unknown knowledge base scope': 'Unknown knowledge base scope'
+'Update failed': 'Update failed'
+'Update package verification failed, checksum mismatch': 'Update package verification failed, checksum mismatch'
+'version and blocks are required': 'version and blocks are required'
+'You can only operate on your own knowledge base entries': 'You can only operate on your own knowledge base entries'
+# ── Knowledge & Cleaner UI ──
+'Added to Cleaning Queue': 'Added to Cleaning Queue'
+'Are you sure you want to delete this entry?': 'Are you sure you want to delete this entry?'
+'Auto-clean into Structured KB Entries': 'Auto-clean into Structured KB Entries'
+'Batch clean all pending items?': 'Batch clean all pending items?'
+'Batch Clean All': 'Batch Clean All'
+'Batch cleanup failed': 'Batch cleanup failed'
+'Cleaning': 'Cleaning'
+'Cleaning Queue': 'Cleaning Queue'
+'Cleaned Knowledge Auto-synced to Mini Program': 'Cleaned Knowledge Auto-synced to Mini Program'
+'Cleanup failed': 'Cleanup failed'
+'Content is required': 'Content is required'
+'Content Preview': 'Content Preview'
+'CS & This Site': 'CS & This Site'
+'CS Agent': 'CS Agent'
+'Edit Knowledge Entry': 'Edit Knowledge Entry'
+'Execute': 'Execute'
+'Industry Analysis etc.': 'Industry Analysis etc.'
+'Industry Background etc.': 'Industry Background etc.'
+'keyword1, keyword2': 'keyword1, keyword2'
+'Keywords (comma separated)': 'Keywords (comma separated)'
+'Knowledge Base': 'Knowledge Base'
+'New Knowledge Entry': 'New Knowledge Entry'
+'No knowledge entries found': 'No knowledge entries found'
+'Only super admin can modify system knowledge base': 'Only super admin can modify system knowledge base'
+'Paste Article': 'Paste Article'
+'Paste Raw Content': 'Paste Raw Content'
+'Prev': 'Prev'
+'Priority (0-100)': 'Priority (0-100)'
+'Queue List': 'Queue List'
+'Raw Content': 'Raw Content'
+'Record not found': 'Record not found'
+'Scope': 'Scope'
+'Search title / content / keywords...': 'Search title / content / keywords...'
+'Submit Area': 'Submit Area'
+'Submit for Cleaning': 'Submit for Cleaning'
+'Submit Raw Content': 'Submit Raw Content'
+'System KB': 'System KB'
+'System KB entries cannot be deleted': 'System KB entries cannot be deleted'
+'System knowledge base entries cannot be deleted': 'System knowledge base entries cannot be deleted'
+'Title is required': 'Title is required'
+'total': 'total'
+'User KB': 'User KB'
+'Whitepaper': 'Whitepaper'
+'Data Cleaning': 'Data Cleaning'

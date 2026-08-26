@@ -270,7 +270,7 @@ def _call_llm(system_prompt: str, user_prompt: str):
 # Core function: directly callable by Agent Matrix
 # =============================================
 
-def process_clean_content(raw_content: str, admin_id: int = 0, scope: str = 'user') -> dict:
+def process_clean_content(raw_content: str, admin_id: int = 0, scope: str = 'user', queue_id: int = None) -> dict:
     """Clean a raw content entry, write to knowledge_blocks
 
     Args:
@@ -312,13 +312,15 @@ Existing KB titles (for dedup reference):
 
 Clean and output JSON per rules above."""
 
-    # Write to queue
-    with get_db() as conn:
-        qid = conn.execute(
-            'INSERT INTO knowledge_queue (source, raw_content, admin_id) VALUES (%s,%s,%s) RETURNING id',
-            ('matrix', raw_content, admin_id)
-        ).fetchone()['id']
-        conn.commit()
+    # Write to queue: 若指定 queue_id（后台重跑/批量重跑），复用原队列行，避免重复入队
+    qid = queue_id
+    if qid is None:
+        with get_db() as conn:
+            qid = conn.execute(
+                "INSERT INTO knowledge_queue (source, raw_content, admin_id, status) VALUES (%s,%s,%s,'cleaning') RETURNING id",
+                ('matrix', raw_content, admin_id)
+            ).fetchone()['id']
+            conn.commit()
 
     # Call LLM
     result = _call_llm(system_prompt, user_prompt)
@@ -472,6 +474,39 @@ _kb_logger = logging.getLogger('knowledge_maintenance')
 _kb_scheduler = None
 
 
+def _single_instance_run(lock_key: int, job_id: str, fn):
+    """Run a maintenance job on a single gunicorn worker.
+
+    Uses a PostgreSQL session-level advisory lock held on a dedicated
+    connection for the whole job. Other workers calling the same job get
+    pg_try_advisory_lock=False and simply skip, preventing double execution
+    under multi-worker gunicorn.
+    """
+    try:
+        with get_db() as conn:
+            ok = conn.execute(
+                "SELECT pg_try_advisory_lock(%s) AS ok", (lock_key,)
+            ).fetchone()['ok']
+            if not ok:
+                _kb_logger.info(f'[KB Scheduler] {job_id} skipped (another worker running)')
+                return
+            try:
+                fn()
+            finally:
+                conn.execute("SELECT pg_advisory_unlock(%s)", (lock_key,))
+                conn.commit()
+    except Exception as e:
+        _kb_logger.warning(f'[KB Scheduler] {job_id} single-instance run failed: {e}')
+
+
+def _run_time_decay_single():
+    _single_instance_run(7101, 'time-decay', _run_time_decay)
+
+
+def _run_redundancy_single():
+    _single_instance_run(7102, 'redundancy', _run_redundancy_check)
+
+
 def _run_time_decay():
     """
     Time decay: runs weekly.
@@ -565,6 +600,64 @@ def _run_redundancy_check():
         _kb_logger.error(f'[Redundancy] Failed: {e}')
 
 
+def _claim_pending(limit: int = 5):
+    """Atomically claim pending queue rows for cleaning (multi-worker safe).
+
+    Uses FOR UPDATE SKIP LOCKED so concurrent workers never process the same row.
+    Bumps created_at to NOW() so it doubles as a "last activity" timestamp for
+    stale-recovery (rows stuck in 'cleaning' for >10min are reset to pending).
+    Returns list of dicts [{id, raw_content, admin_id}, ...].
+    """
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                """UPDATE knowledge_queue SET status='cleaning', created_at=NOW()
+                   WHERE id IN (
+                       SELECT id FROM knowledge_queue
+                       WHERE status='pending' ORDER BY id ASC LIMIT %s FOR UPDATE SKIP LOCKED
+                   ) RETURNING id, raw_content, admin_id""",
+                (limit,)
+            ).fetchall()
+            conn.commit()
+            return [dict(r) for r in rows]
+    except Exception as e:
+        _kb_logger.warning(f'[CleanerWorker] Claim failed: {e}')
+        return []
+
+
+def _process_pending_queue():
+    """Background worker: drain knowledge_queue (pending → cleaning → done/failed).
+
+    Also recovers rows stuck in 'cleaning' for over 10 minutes (e.g. worker crash).
+    Runs every few seconds via APScheduler interval job; safe under multi-worker
+    gunicorn because claiming is atomic (FOR UPDATE SKIP LOCKED).
+    """
+    try:
+        # Recover stale cleaning rows (created_at is bumped to claim time;
+        # a row still 'cleaning' >10min after its last claim is surely stuck)
+        with get_db() as conn:
+            conn.execute(
+                """UPDATE knowledge_queue SET status='pending'
+                   WHERE status='cleaning' AND created_at::timestamptz < NOW() - interval '10 minutes'""")
+            conn.commit()
+    except Exception as e:
+        _kb_logger.warning(f'[CleanerWorker] Stale recovery failed: {e}')
+
+    for row in _claim_pending():
+        try:
+            process_clean_content(row['raw_content'], admin_id=row['admin_id'] or 0,
+                                  scope='user', queue_id=row['id'])
+        except Exception as e:
+            try:
+                with get_db() as conn:
+                    conn.execute(
+                        "UPDATE knowledge_queue SET status='failed', error_msg=%s WHERE id=%s",
+                        (str(e)[:500], row['id']))
+                    conn.commit()
+            except Exception:
+                pass
+
+
 def init_kb_scheduler():
     """
     Initialize knowledge base maintenance scheduler.
@@ -574,6 +667,7 @@ def init_kb_scheduler():
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
         from apscheduler.triggers.cron import CronTrigger
+        from apscheduler.triggers.interval import IntervalTrigger
 
         if _kb_scheduler is not None:
             return  # Already initialized
@@ -583,21 +677,30 @@ def init_kb_scheduler():
             job_defaults={'misfire_grace_time': 3600},
         )
 
-        # Time decay: every Sunday 3:00 AM
+        # Time decay: every Sunday 3:00 AM (single-instance across workers)
         _kb_scheduler.add_job(
-            _run_time_decay,
+            _run_time_decay_single,
             CronTrigger(day_of_week='sun', hour=3, minute=0),
             id='kb_time_decay',
             name='Knowledge Time Decay',
             replace_existing=True,
         )
 
-        # Redundancy check: 1st of every month 4:00 AM
+        # Redundancy check: 1st of every month 4:00 AM (single-instance across workers)
         _kb_scheduler.add_job(
-            _run_redundancy_check,
+            _run_redundancy_single,
             CronTrigger(day=1, hour=4, minute=0),
             id='kb_redundancy',
             name='Knowledge Redundancy Check',
+            replace_existing=True,
+        )
+
+        # Cleaner queue worker: drain pending cleaning tasks every 5 seconds
+        _kb_scheduler.add_job(
+            _process_pending_queue,
+            IntervalTrigger(seconds=5),
+            id='kb_cleaner_worker',
+            name='Cleaner Queue Worker',
             replace_existing=True,
         )
 
@@ -607,7 +710,7 @@ def init_kb_scheduler():
             h = logging.StreamHandler()
             h.setFormatter(logging.Formatter('[%(asctime)s] %(levelname)s %(message)s'))
             _kb_logger.addHandler(h)
-        _kb_logger.info('[KnowledgeMaintenance] Scheduler started (weekly decay + monthly redundancy)')
+        _kb_logger.info('[KnowledgeMaintenance] Scheduler started (weekly decay + monthly redundancy + cleaner worker; maintenance jobs single-instance)')
 
     except ImportError:
         print('[KnowledgeMaintenance] APScheduler not available, skip')
@@ -631,17 +734,25 @@ def submit_content():
     if not raw:
         return jsonify({'success': False, 'error': _('Content cannot be empty')}), 400
 
-    # 如果目标为系统KB，需要超级管理员权限
+    # 如果目标为系统KB，需要超级管理员权限；系统KB保持同步清洗（仅超管、罕见）
     if scope == 'system':
         from services.kb_permission import check_kb_permission
         allowed, err2 = check_kb_permission('system', None, 'write', payload)
         if not allowed:
             return err2
+        result = process_clean_content(raw, admin_id=payload['user_id'], scope=scope)
+        if not result['success']:
+            return jsonify({'success': False, 'error': result['error']}), 500
+        return jsonify({'success': True, 'data': result, 'message': result.get('message', _('Cleaning completed'))})
 
-    result = process_clean_content(raw, admin_id=payload['user_id'], scope=scope)
-    if not result['success']:
-        return jsonify({'success': False, 'error': result['error']}), 500
-    return jsonify({'success': True, 'data': result, 'message': result.get('message', _('Cleaning completed'))})
+    # 用户知识库：入队异步清洗，立即返回（后台 worker 每 5 秒排空队列）
+    with get_db() as conn:
+        qid = conn.execute(
+            "INSERT INTO knowledge_queue (source, raw_content, admin_id, status) VALUES (%s,%s,%s,%s) RETURNING id",
+            ('admin', raw, payload['user_id'], 'pending')
+        ).fetchone()['id']
+        conn.commit()
+    return jsonify({'success': True, 'data': {'id': qid, 'status': 'pending'}, 'message': _('Added to Cleaning Queue')})
 
 
 @cleaner_bp.route('/list', methods=['GET'])
@@ -672,11 +783,10 @@ def run_clean(qid):
             return jsonify({'success': False, 'error': _('Queue item does not exist')}), 404
         if row['status'] == 'cleaning':
             return jsonify({'success': False, 'error': _('Cleaning in progress, please wait')}), 400
-
-    result = process_clean_content(row['raw_content'], admin_id=payload['user_id'])
-    if not result['success']:
-        return jsonify({'success': False, 'error': result['error']}), 500
-    return jsonify({'success': True, 'data': result, 'message': result.get('message', _('Cleaning completed'))})
+        # 重新入队，由后台 worker 异步清洗
+        conn.execute("UPDATE knowledge_queue SET status='pending', error_msg='' WHERE id=%s", (qid,))
+        conn.commit()
+    return jsonify({'success': True, 'data': {'id': qid, 'status': 'pending'}, 'message': _('Added to Cleaning Queue')})
 
 
 @cleaner_bp.route('/run-all', methods=['POST'])
@@ -685,27 +795,13 @@ def run_all():
     if err:
         return err
     with get_db() as conn:
-        rows = conn.execute("SELECT id, raw_content FROM knowledge_queue WHERE status='pending' ORDER BY id ASC").fetchall()
+        n = conn.execute("SELECT COUNT(*) AS c FROM knowledge_queue WHERE status='pending'").fetchone()['c']
 
-    if not rows:
+    if not n:
         return jsonify({'success': True, 'data': [], 'message': _('No items to clean')})
 
-    results = []
-    for r in rows:
-        res = process_clean_content(r['raw_content'], admin_id=payload['user_id'])
-        results.append({
-            'id': r['id'],
-            'status': 'done' if res['success'] else 'failed',
-            'kb_id': res.get('kb_id', ''),
-            'title': res.get('title', ''),
-            'error': res.get('error', ''),
-        })
-
-    done = sum(1 for r in results if r['status'] == 'done')
-    return jsonify({
-        'success': True, 'data': results,
-        'message': f'Completed {done}/{len(results)} Items'
-    })
+    # 后台 worker 自动排空 pending 队列，此处仅确认已入队
+    return jsonify({'success': True, 'data': {'pending': n}, 'message': _('Added to Cleaning Queue')})
 
 
 @cleaner_bp.route('/config', methods=['GET'])

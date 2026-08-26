@@ -35,7 +35,7 @@ def create_shop_payment(order_id: str, total_amount: float, subject: str = '商�
         {'success': bool, 'qr_code': str, 'order_id': str, 'amount': str, ...}
         未配置时返回失败（fail-closed，不再 mock 假成功）
     """
-    from plugins.subscription.gateways.alipay import create_alipay_order
+    from plugins.payment.gateways.alipay import create_alipay_order
 
     amount_fen = int(round(total_amount * 100))
     notify_base = _resolve_notify_base()
@@ -65,7 +65,7 @@ def create_shop_payment(order_id: str, total_amount: float, subject: str = '商�
 
 def verify_notify(data: dict) -> bool:
     """验证支付宝异步通知签名，委托 plugins/subscription/gateways/alipay.py"""
-    from plugins.subscription.gateways.alipay import verify_alipay_notify
+    from plugins.payment.gateways.alipay import verify_alipay_notify
     is_valid, _ = verify_alipay_notify(data, {})
     return is_valid
 

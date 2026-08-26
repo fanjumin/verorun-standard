@@ -39,19 +39,22 @@
 }
 .toolbar-back:hover { color: var(--text); background: var(--border); }
 .toolbar-title-input {
-  background: transparent;
-  border: none;
-  border-bottom: 1px solid transparent;
+  background: var(--bg-card);
+  border: 1px solid var(--gold);
+  border-radius: var(--radius-sm);
   color: var(--text);
   font-size: 15px;
   font-weight: 600;
   font-family: var(--font-cn);
-  padding: 4px 8px;
+  padding: 5px 10px;
   width: 260px;
   outline: none;
-  transition: border-color .15s;
+  transition: border-color .15s, background .15s;
 }
-.toolbar-title-input:focus { border-bottom-color: var(--indigo); }
+.toolbar-title-input:focus {
+  border-color: var(--gold);
+  background: var(--bg-card);
+}
 .toolbar-title-input::placeholder { color: var(--text-muted); }
 .toolbar-status {
   font-size: 11px;
@@ -70,8 +73,8 @@
 
 /* 左侧面板 */
 #editor-left {
-  width: 220px;
-  min-width: 220px;
+  width: 180px;
+  min-width: 180px;
   background: var(--bg-elevated);
   border-right: 1px solid var(--border);
   overflow-y: auto;
@@ -135,8 +138,8 @@
 
 /* 右侧面板 */
 #editor-right {
-  width: 300px;
-  min-width: 300px;
+  width: 240px;
+  min-width: 240px;
   background: var(--bg-elevated);
   border-left: 1px solid var(--border);
   overflow-y: auto;
@@ -193,9 +196,25 @@
   box-shadow: var(--shadow-glow);
   border-color: var(--blue);
 }
-/* React Flow 默认节点白底 → 透明 */
+/* React Flow 默认节点白底 → 透明（完整覆盖，清除黑框/多余内边距/固定宽度残留） */
 .react-flow__node-default {
   background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  width: auto !important;
+  color: inherit !important;
+  font-size: inherit !important;
+  text-align: inherit !important;
+}
+/* 选中黑框清除：所有节点类型（default/condition/market_check）统一处理，虚线保留 */
+.react-flow__node.selectable.selected,
+.react-flow__node.selectable:focus,
+.react-flow__node.selectable:focus-visible,
+.react-flow__node-default.selectable.selected,
+.react-flow__node-condition.selectable.selected,
+.react-flow__node-market_check.selectable.selected {
+  box-shadow: none !important;
+  outline: none !important;
 }
 /* 拖拽中状态 */
 .rf-node.dragging,

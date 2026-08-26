@@ -9,6 +9,7 @@ from datetime import datetime
 from flask import Blueprint, request, jsonify, Response, stream_with_context
 from models import get_db
 from services.jwt_service import validate_token
+from i18n import _
 
 # 创建蓝图
 api_v1_bp = Blueprint('api_v1', __name__, url_prefix='/api/v1')
@@ -873,7 +874,7 @@ def save_knowledge():
                     store_embedding(kb_id, title, content)
                 except Exception:
                     pass
-                return api_ok({'id': kb_id, 'message': '知识块已创建'})
+                return api_ok({'id': kb_id, 'message': _('Knowledge block created')})
     except Exception as e:
         import logging
         logging.error(f"[API] 保存知识块失败: {e}")
@@ -890,7 +891,7 @@ def delete_knowledge():
     kb_id = data.get('id')
     
     if not kb_id:
-        return api_err('id是必需的', 400)
+        return api_err(_('id is required'), 400)
     
     # 知识块删除逻辑
     try:
@@ -899,26 +900,26 @@ def delete_knowledge():
         from services.kb_permission import check_kb_permission
         
         with get_db() as db:
-            row = db.execute("SELECT id, scope, owner_id FROM knowledge_blocks WHERE id=%s", (kb_id,)).fetchone()
+            row = db.execute("SELECT id, scope, owner_id FROM knowledge_blocks WHERE id=%s AND deleted_at IS NULL", (kb_id,)).fetchone()
             if not row:
-                return api_err('知识块不存在', 404)
+                return api_err(_('Knowledge block not found'), 404)
             
             row = dict(row)
             allowed, err = check_kb_permission(row['scope'], row['owner_id'], 'delete', payload)
             if not allowed:
                 return err
             
-            result = db.execute("DELETE FROM knowledge_blocks WHERE id=%s", (kb_id,)).rowcount
+            result = db.execute("UPDATE knowledge_blocks SET deleted_at=NOW() WHERE id=%s AND deleted_at IS NULL", (kb_id,)).rowcount
             db.commit()
             
             if result > 0:
-                return api_ok({'id': kb_id, 'message': '知识块已删除'})
+                return api_ok({'id': kb_id, 'message': _('Knowledge block deleted')})
             else:
-                return api_err('知识块不存在', 404)
+                return api_err(_('Knowledge block not found'), 404)
     except Exception as e:
         import logging
-        logging.error(f"[API] 删除知识块失败: {e}")
-        return api_err(f'删除知识块失败: {str(e)}', 500)
+        logging.error(f"[API] {_('Failed to delete knowledge block')}: {e}")
+        return api_err(f"{_('Failed to delete knowledge block')}: {str(e)}", 500)
 
 
 # =============================================
@@ -984,7 +985,7 @@ def system_kb_update():
     content = json.dumps(blocks, sort_keys=True, ensure_ascii=False)
     computed = hashlib.sha256(content.encode()).hexdigest()
     if checksum and computed != checksum:
-        return api_err('更新包校验失败，checksum不匹配', 400)
+        return api_err(_('Update package verification failed, checksum mismatch'), 400)
 
     try:
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'auth-center'))
@@ -1023,10 +1024,10 @@ def system_kb_update():
             return api_ok({
                 'version': version,
                 'blocks_count': len(blocks),
-                'message': '系统知识库更新成功'
+                'message': _('System knowledge base updated')
             })
     except Exception as e:
-        return api_err(f'更新失败: {str(e)}', 500)
+        return api_err(f"{_('Update failed')}: {str(e)}", 500)
 
 
 @api_v1_bp.route('/rag/search', methods=['POST'])
@@ -1039,7 +1040,7 @@ def rag_search():
     category = data.get('category')
     
     if not query:
-        return api_err('query是必需的', 400)
+        return api_err(_('query is required'), 400)
     
     try:
         # 从 knowledge_blocks 表中检索匹配的知识块
@@ -1162,7 +1163,7 @@ def save_feedback():
     if not content:
         return api_err('content是必需的', 400)
     if not query:
-        return api_err('query是必需的', 400)
+        return api_err(_('query is required'), 400)
     if not ai_reply:
         return api_err('aiReply是必需的', 400)
     

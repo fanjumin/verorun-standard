@@ -10,7 +10,7 @@ import os
 # ── 健康监控 ───────────────────────────────────
 TARGETS = [
     "http://127.0.0.1:8085/health",
-    "http://127.0.0.1:8081/health",
+    "http://127.0.0.1:8082/health",
     "http://127.0.0.1:8084/health",
     "http://127.0.0.1:8083/health",
 ]
@@ -18,7 +18,7 @@ TARGETS = [
 # 修正：使用 install.sh 创建的实际 systemd 服务名
 SERVICE_MAP = {
     "http://127.0.0.1:8085/health": "verorun-health",
-    "http://127.0.0.1:8081/health": "verorun-main",
+    "http://127.0.0.1:8082/health": "verorun-main",
     "http://127.0.0.1:8084/health": "verorun-admin",
     "http://127.0.0.1:8083/health": "verorun-auth",
 }

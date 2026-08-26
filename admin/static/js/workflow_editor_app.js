@@ -327,12 +327,16 @@ function FlowEditor() {
       id: 'node_' + Date.now(),
       type: nodeType,
       position: position,
-      data: defaults
+      data: defaults,
+      selected: true
     };
     pushUndo();
     setNodes(function (nds) {
       return nds.concat(newNode);
     });
+    // P3: 拖入后自动选中，立即在右侧打开该节点的配置面板
+    setSelectedNode(newNode);
+    window.editor.renderConfigPanel(newNode);
   }, [rfInstance]);
 
   // 节点/边变化时更新状态栏

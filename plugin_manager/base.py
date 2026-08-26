@@ -57,9 +57,10 @@ def clear_plugin_yaml_cache(plugin_name: str = None):
 
 
 def localize_plugin_dict(p: dict, locale: str = None) -> dict:
-    """按当前语言翻译插件显示名/菜单 label（in-place 修改 p 并返回）。
+    """按当前语言翻译插件显示名/菜单 label/仪表盘 stats 标题（in-place 修改 p 并返回）。
 
-    依据 plugin.json 中的 name_i18n_key / menu.label_i18n_key 字段，
+    依据 plugin.json 中的 name_i18n_key / menu.label_i18n_key /
+    dashboard.stats[].title_i18n_key 字段，
     从插件 i18n/{locale}.yml 查找翻译；未设置 key 或未找到翻译时
     保留原值，对旧插件完全向后兼容。
     """
@@ -87,6 +88,16 @@ def localize_plugin_dict(p: dict, locale: str = None) -> dict:
         label_key = menu.get('label_i18n_key')
         if label_key and translations.get(label_key):
             menu['label'] = translations[label_key]
+
+    dashboard = p.get('dashboard_meta')
+    if isinstance(dashboard, dict):
+        stats = dashboard.get('stats')
+        if isinstance(stats, list):
+            for stat in stats:
+                if isinstance(stat, dict):
+                    title_key = stat.get('title_i18n_key')
+                    if title_key and translations.get(title_key):
+                        stat['title'] = translations[title_key]
 
     return p
 

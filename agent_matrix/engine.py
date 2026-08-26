@@ -596,6 +596,175 @@ class UnifiedLLM:
                     )
         return _tracked_stream()
 
+    # ── 图像生成（配图网关） ──
+    # 供 ai_content_generator / 各插件配图复用，替代直连 DashScope。
+    # 支持两种寻址：provider_model_id（provider_models 表）或 provider(+model)。
+    # DashScope 走异步任务 API；其余供应商走 OpenAI-compatible /images/generations。
+
+    def image(self, prompt, provider_model_id=None, provider=None, model=None,
+              size='1024x1024', reference_image_url=None, module='image_generation',
+              **kwargs):
+        """统一图像生成接口，返回生成的图片 URL 字符串。
+
+        供应商/模型解析优先级：显式参数 → 实例配置 → system_config
+        ai_image_provider / ai_image_model → dashscope + wan2.7-image-pro。
+        """
+        if not prompt or not str(prompt).strip():
+            raise ValueError('Image prompt is empty')
+
+        if not provider_model_id and not provider:
+            if self._provider:
+                provider = self._provider
+                model = model or self._model
+            else:
+                provider = _get_system_key('ai_image_provider') or 'dashscope'
+                if not model:
+                    model = _get_system_key('ai_image_model') or ''
+                if not model:
+                    model = {'dashscope': 'wan2.7-image-pro'}.get(provider, '')
+
+        if provider_model_id:
+            cfg = self._resolve_model(provider_model_id)
+        else:
+            cfg = {
+                'provider': provider,
+                'model': model or '',
+                'base_url': self._default_base_url(provider),
+                'api_key': self._resolve_api_key(provider),
+                'model_id': 0,
+            }
+
+        # 配图专用 key 兜底：DashScope 配图 key 与文案 key 分离（dashscope_api_key）
+        if cfg['provider'] == 'dashscope':
+            img_key = (_resolve_key_from_provider_api_keys('dashscope')
+                       or _get_system_key('dashscope_api_key'))
+            if img_key:
+                cfg['api_key'] = img_key
+
+        if not cfg['api_key']:
+            raise ValueError(f'No API key resolved for image provider: {cfg["provider"]}')
+
+        # 预算闸门（与 chat 一致）
+        allowed, reason = check_ai_budget(module)
+        if not allowed:
+            raise RuntimeError(reason)
+
+        if cfg['provider'] == 'dashscope':
+            return self._image_dashscope(cfg, prompt, size, reference_image_url)
+        return self._image_openai_compatible(cfg, prompt, size, reference_image_url)
+
+    def _image_dashscope(self, cfg, prompt, size, reference_image_url=None):
+        """DashScope 异步任务式图像生成（wan2.x-image 系列）。"""
+        import requests as _requests
+        base_url = (cfg.get('base_url') or 'https://dashscope.aliyuncs.com').rstrip('/')
+        wanx_url = base_url + '/api/v1/services/aigc/image-generation/generation'
+        task_url = base_url + '/api/v1/tasks'
+        size_map = {'1024x1024': '1024*1024', '1280x720': '1280*720', '720x1280': '720*1280'}
+        ds_size = size_map.get(size, '1024*1024')
+
+        headers = {
+            'Authorization': f'Bearer {cfg["api_key"]}',
+            'Content-Type': 'application/json',
+            'X-DashScope-Async': 'enable',
+        }
+        body = {
+            'model': cfg.get('model') or 'wan2.7-image-pro',
+            'input': {
+                'messages': [
+                    {'role': 'user', 'content': [{'type': 'text', 'text': prompt}]},
+                ],
+            },
+            'parameters': {'size': ds_size, 'n': 1},
+        }
+        if reference_image_url:
+            body['parameters']['style_ref'] = reference_image_url
+
+        resp = _requests.post(wanx_url, headers=headers, json=body, timeout=30)
+        result = resp.json()
+        task_id = result.get('output', {}).get('task_id', '')
+        if not task_id:
+            raise ValueError(f'Image task submit failed: {result.get("message", str(result))}')
+
+        poll_headers = {'Authorization': f'Bearer {cfg["api_key"]}'}
+        for _i in range(30):
+            _time.sleep(2)
+            poll = _requests.get(f'{task_url}/{task_id}', headers=poll_headers, timeout=15)
+            sr = poll.json()
+            status = sr.get('output', {}).get('task_status', '')
+            logger.info(f'[UnifiedLLM] image poll {_i + 1}: {status}')
+
+            if status == 'SUCCEEDED':
+                choices = sr.get('output', {}).get('choices', [])
+                if choices:
+                    content = choices[0].get('message', {}).get('content', [])
+                    if (isinstance(content, list) and len(content) > 0
+                            and isinstance(content[0], dict) and content[0].get('image')):
+                        return content[0]['image']
+                    if isinstance(content, list) and len(content) > 0:
+                        text = content[0].get('text', '')
+                        if text and text.startswith('http'):
+                            return text
+                results = sr.get('output', {}).get('results', [])
+                if results and results[0].get('url'):
+                    return results[0]['url']
+                if results and results[0].get('b64_json'):
+                    import base64
+                    img_data = base64.b64decode(results[0]['b64_json'])
+                    local_path = f'/tmp/gen_img_{task_id[:8]}.png'
+                    with open(local_path, 'wb') as f:
+                        f.write(img_data)
+                    return f'file://{local_path}'
+                raise ValueError('Image task succeeded but response could not be parsed')
+            elif status == 'FAILED':
+                err_msg = sr.get('output', {}).get('message', status)
+                results = sr.get('output', {}).get('results', [])
+                if results and results[0].get('url'):
+                    return results[0]['url']
+                choices = sr.get('output', {}).get('choices', [])
+                if choices:
+                    content = choices[0].get('message', {}).get('content', [])
+                    if isinstance(content, list) and len(content) > 0:
+                        img_url = content[0].get('image', '')
+                        if img_url:
+                            return img_url
+                raise ValueError(f'Image task failed: {err_msg}')
+        raise ValueError('Image task timed out')
+
+    def _image_openai_compatible(self, cfg, prompt, size, reference_image_url=None):
+        """OpenAI-compatible /images/generations（siliconflow / openai 等）。"""
+        import requests as _requests
+        base_url = cfg.get('base_url') or ''
+        if base_url and not base_url.rstrip('/').endswith('/v1'):
+            base_url = base_url.rstrip('/') + '/v1'
+        url = base_url.rstrip('/') + '/images/generations'
+        payload = {
+            'model': cfg.get('model') or 'black-forest-labs/FLUX.1-schnell',
+            'prompt': prompt,
+            'n': 1,
+            'size': size,
+        }
+        if reference_image_url:
+            payload['image'] = reference_image_url
+        headers = {
+            'Authorization': f'Bearer {cfg["api_key"]}',
+            'Content-Type': 'application/json',
+        }
+        resp = _requests.post(url, headers=headers, json=payload, timeout=120)
+        data = resp.json()
+        if resp.status_code != 200:
+            raise ValueError(f'Image generation failed: {data.get("error", data)}')
+        for item in data.get('data', []):
+            if item.get('url'):
+                return item['url']
+            if item.get('b64_json'):
+                import base64
+                img_data = base64.b64decode(item['b64_json'])
+                local_path = f'/tmp/gen_img_{_time.time():.0f}.png'
+                with open(local_path, 'wb') as f:
+                    f.write(img_data)
+                return f'file://{local_path}'
+        raise ValueError('Image generation returned no data')
+
     # ── 便利方法（AIEngine 兼容） ──
 
     def ask(self, user_query, temperature=0.7):

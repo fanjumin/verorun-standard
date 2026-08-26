@@ -183,14 +183,17 @@ window.editor = (function() {
     var panel = document.getElementById('node-config-panel');
     if (!panel) return;
     if (!node) {
-      panel.innerHTML = '<div class="panel-empty">' + _t('editor.select_node') + '</div>';
+      panel.innerHTML = '<div class="panel-empty">'
+        + '<div style="font-size:13px;font-weight:600;margin-bottom:6px">' + _t('editor.select_node') + '</div>'
+        + '<div style="font-size:12px;line-height:1.7;opacity:.85">' + _t('editor.select_node_hint') + '</div>'
+        + '</div>';
       return;
     }
     var data = node.data;
     var fields = CONFIG_FIELDS[data.type];
     if (!fields) {
       panel.innerHTML = '<div class="panel-title" style="margin-bottom:8px">' + (data.label || '') + '</div>';
-      panel.innerHTML += '<div style="font-size:11px;color:var(--text-dim)">No configurable fields for this node type.</div>';
+      panel.innerHTML += '<div style="font-size:11px;color:var(--text-dim)">' + _t('misc.no_config') + '</div>';
       return;
     }
 
@@ -351,7 +354,7 @@ window.editor = (function() {
         data: {
           type: n.type,
           label: n.name || defaults.label,
-          description: cfg ? cfg.description : '',
+          description: cfg ? (_t(cfg.description) || '') : '',
           color: cfg ? cfg.color : '#6366f1',
           icon: cfg ? cfg.icon : '',
           showInput: cfg ? cfg.showInput !== false : true,
@@ -431,11 +434,11 @@ window.editor = (function() {
   var __stateVersion = 0;  // P1-2: 竞态条件防护
   function save() {
     var flowState = window.editor.__flowState;
-    if (!flowState) { alert('Editor not ready'); return; }
+    if (!flowState) { toast(_t('misc.editor_not_ready'), 'error'); return; }
     var nodes = flowState.getNodes();
     var edges = flowState.getEdges();
     if (!nodes || nodes.length === 0) {
-      alert(_t('toast.empty_workflow'));
+      toast(_t('toast.empty_workflow'), 'error');
       return;
     }
 
@@ -446,13 +449,26 @@ window.editor = (function() {
     var incompleteNodes = nodes.filter(function(n) { return n.data && n.data.incomplete; });
     if (incompleteNodes.length > 0) {
       var msg = _t('toast.config.incomplete') + ': ' + incompleteNodes.map(function(n) { return n.data.label || n.id; }).join(', ');
-      if (!confirm(msg + '\n\n' + _t('editor.save_anyway_confirm') || 'Save anyway?')) return;
+      var proceed = function() { submitSave(nodes, edges, version); };
+      if (window.showConfirm) {
+        // 系统统一确认弹窗（独立页无 showConfirm 时回退原生 confirm）
+        showConfirm(_t('toast.config.incomplete'), esc(msg), proceed, _t('editor.save_anyway_confirm') || 'Save anyway?');
+        return;
+      }
+      if (!confirm(msg + '\n\n' + (_t('editor.save_anyway_confirm') || 'Save anyway?'))) return;
     }
+    submitSave(nodes, edges, version);
+  }
 
+  // 保存主体（未配置节点确认后继续执行）
+  function submitSave(nodes, edges, version) {
     var definition = serializeToDefinition(nodes, edges);
     var nameInput = document.getElementById('workflow-name');
     var name = nameInput ? nameInput.value.trim() : '';
-    if (!name) name = 'Untitled Workflow';
+    if (!name) {
+      toast(_t('toast.name_required'), 'error');
+      return;
+    }
 
     var payload = { name: name, definition: definition };
 
@@ -464,7 +480,7 @@ window.editor = (function() {
     }
 
     document.getElementById('btn-save').disabled = true;
-    document.getElementById('btn-save').textContent = 'Saving...';
+    document.getElementById('btn-save').textContent = _t('misc.saving');
 
     doFetch(url, method, payload)
       .then(function(d) {
@@ -578,27 +594,23 @@ window.editor = (function() {
     });
   }
 
-  // ── Toast ──
+  // ── Toast（统一系统风格：复用 head.html #adminToast，独立页兜底自建） ──
   function toast(message, type) {
     type = type || 'info';
-    var container = document.getElementById('toast-container');
-    if (!container) {
-      container = document.createElement('div');
-      container.id = 'toast-container';
-      container.style.cssText = 'position:fixed;top:16px;right:16px;z-index:99999;display:flex;flex-direction:column;gap:8px;';
-      document.body.appendChild(container);
+    var t = document.getElementById('adminToast');
+    if (!t) {
+      t = document.createElement('div');
+      t.id = 'adminToast';
+      t.style.cssText = 'position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:#111118;color:#e0e0e0;padding:10px 20px;border-radius:8px;font-size:13px;z-index:2000;opacity:0;transition:opacity .3s;pointer-events:none;border:1px solid rgba(255,255,255,0.06);max-width:80vw;word-break:break-word';
+      document.body.appendChild(t);
     }
-    var colors = { info: '#2563eb', success: '#16a34a', error: '#dc2626', warn: '#f59e0b' };
-    var bg = colors[type] || colors.info;
-    var el = document.createElement('div');
-    el.style.cssText = 'background:' + bg + ';color:#fff;padding:10px 18px;border-radius:6px;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,.15);max-width:360px;word-break:break-word;animation:toast-in .3s ease;';
-    el.textContent = message;
-    container.appendChild(el);
-    setTimeout(function() {
-      el.style.opacity = '0';
-      el.style.transition = 'opacity .3s';
-      setTimeout(function() { if (el.parentNode) el.parentNode.removeChild(el); }, 300);
-    }, 3000);
+    t.textContent = message;
+    if (type === 'success') { t.style.borderColor = '#00ff9f'; }
+    else if (type === 'error') { t.style.borderColor = '#f85149'; }
+    else { t.style.borderColor = ''; }
+    t.style.opacity = '1';
+    clearTimeout(t._toastTimer);
+    t._toastTimer = setTimeout(function() { t.style.opacity = '0'; }, 3000);
   }
 
   // ── 初始化 ──
@@ -616,6 +628,9 @@ window.editor = (function() {
     if (loadId) {
       CURRENT_WORKFLOW_ID = parseInt(loadId);
       load(CURRENT_WORKFLOW_ID);
+    } else {
+      // P0 修复：新建工作流时清除上次编辑残留的 ID，防止保存误走 PUT 覆盖旧工作流
+      CURRENT_WORKFLOW_ID = null;
     }
   }
 

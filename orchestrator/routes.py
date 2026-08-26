@@ -439,7 +439,7 @@ def run_workflow(wf_id):
             trigger_config={'admin_id': admin.get('id')},
             initial_context=initial_context
         )
-        return _success({'instance_id': inst_id}, f'工作流已启动 (实例 #{inst_id})')
+        return _success({'instance_id': inst_id}, _('Workflow started (instance #{id})', id=inst_id))
     except Exception as e:
         return _error(f'Launch failed: {str(e)}', 500)
 

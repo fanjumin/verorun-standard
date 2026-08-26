@@ -55,7 +55,6 @@ AI Cleaning: AI 清洗
 AI Content Generation: AI内容生成
 AI Continuous Monitoring + Keyword Suggestions + Ranking Tracking: AI持续监控+关键词建议+排名跟踪
 AI Continuous SEO: AI持续SEO
-AI Copywriting (Tongyi Qianwen): AI文案 (通义千问)
 AI Copywriting Generation (API configuration required): AI文案生成（需自行配置API）
 AI Description Optimization Failed: AI描述优化失败
 AI Engine Not Initialized: AI引擎未初始化
@@ -91,7 +90,6 @@ AI response is empty: AI 返回空内容
 AI response is missing required fields: AI 返回结果缺少必填字段
 AI returned empty content: AI返回空内容
 AI will generate professional marketing copy for you: AI将为您生成专业的营销文案
-AI-generated Image (Tongyi Wanxiang): AI配图 (通义万相)
 AI-powered Website Building · Let your business attract customers online 24/7: AI赋能建站 · 让您的企业24小时在线获客
 ALIBABA_APP_KEY not configured: ALIBABA_APP_KEY 未配置
 ALIBABA_APP_SECRET not configured: ALIBABA_APP_SECRET 未配置
@@ -342,7 +340,6 @@ Daily: 每日
 Daily Analysis Report: 每日分析报告
 Daily Content Collection and Processing: 每日内容采集处理
 Daily call count for the key has been reset: 已重置该密钥的日调用量
-DashScope (Tongyi Qianwen): DashScope (通义千问)
 DashScope Text Key is not configured: DashScope Text Key 未配置
 Dashboard: 仪表板
 Data Package: 用量包
@@ -1374,7 +1371,7 @@ TikTok Mini Program: 抖音小程序
 TikTok User xxx: 抖音用户xxx
 TikTok User_: 抖音用户_
 Time: 时间
-Timeout (seconds): '{{ _(''Timeout'') }}(秒)'
+'Timeout (seconds)': '超时（秒）'
 Times: 次数
 Title: 标题
 Title 1: 标题1
@@ -1387,7 +1384,6 @@ Title and URL are required: title、url 为必填
 Title cannot be empty: 标题不能为空
 Token Refreshed: Token 已刷新
 Token is invalid or expired: Token 无效或已过期
-Tongyi Wanxiang Key: 通义万相 Key
 Too frequent actions: 操作太频繁
 Top 5 Browsers: 浏览器 Top 5
 Top 5 Operating Systems: 操作系统 Top 5
@@ -1425,6 +1421,7 @@ Unknown error: 未知错误
 Unknown user: 未知用户
 Unprocessed: 未处理
 Untitled topic: 未命名主题
+Untitled Workflow: 未命名工作流
 Unverified: 未验证
 Update successful: 更新成功
 Updated: 已更新
@@ -1534,6 +1531,116 @@ Workflow has been paused: 工作流已暂停
 Workflow has been restored: 工作流已恢复
 Workflow has been updated: 工作流已更新
 Workflow name cannot be empty: 工作流名称不能为空
+# ── 工作流编辑器词条（编辑器专用，常驻全局 yml） ──
+'Workflow': '工作流'
+'Workflow Editor': '工作流编辑器'
+'← Back to List': '← 返回列表'
+'Select a node to configure': '点击画布上的节点以配置其参数'
+'Select a node to configure hint': '从左侧拖入节点会自动打开配置面板；点击任意节点可切换'
+'Save as Template': '另存为模板'
+'Flow Control': '流程控制'
+'Output Actions': '输出动作'
+'Human Interaction': '人工交互'
+'Advanced': '高级'
+'Data Collection': '数据采集'
+'AI Process': 'AI 处理'
+'Condition': '条件判断'
+'Wait': '等待'
+'Notify': '通知'
+'HTTP Request': 'HTTP 请求'
+'Market Check': '行情检查'
+'Sub Workflow': '子工作流'
+'Modified': '已修改'
+'Nodes: {count}': '节点数：{count}'
+'Edges: {count}': '连接数：{count}'
+'Node Config': '节点配置'
+'Nodes: 0': '节点数：0'
+'Edges: 0': '连接数：0'
+'Workflow saved successfully': '工作流保存成功'
+'Failed to save workflow': '工作流保存失败'
+'Failed to load workflow': '工作流加载失败'
+'Workflow started successfully': '工作流启动成功'
+'Workflow execution failed': '工作流执行失败'
+'Cycle detected, cannot create this connection': '检测到循环，无法创建该连接'
+'Please complete all required fields': '请填写所有必填字段'
+'Please add at least one node': '请至少添加一个节点'
+'Cannot connect a node to itself': '不能将节点连接到自身'
+'This connection already exists': '该连接已存在'
+'Workflow loaded': '工作流已加载'
+'Save anyway?': '仍然保存？'
+'Delete confirm message': '确定要删除「{name}」吗？'
+'Template Workflow': '模板工作流'
+'Agent Type': 'Agent 类型'
+'Agent ID': 'Agent ID'
+'Prompt Template': '提示词模板'
+'Data Sources': '数据源'
+'Max Per Source': '每源上限'
+'Keywords': '关键词'
+'Processing Instruction': '处理指令'
+'Output Fields': '输出字段'
+'Condition Expression': '条件表达式'
+'Wait Time (seconds)': '等待时间（秒）'
+'Publish Platforms': '发布平台'
+'Publishing Management': '发布管理'
+'Title Template': '标题模板'
+'Notification Channels': '通知渠道'
+'Notification Title': '通知标题'
+'Message Template': '消息模板'
+'Webhook URL': 'Webhook URL'
+'Email To': '收件邮箱'
+'Approver Role': '审批人角色'
+'Approver User IDs': '审批人用户 ID'
+'Approval Timeout (minutes, 0=global 72h)': '审批超时（分钟，0=全局 72 小时）'
+'Approval Message': '审批消息'
+'Require Approval on Error': '出错时要求审批'
+'Script Name': '脚本名称'
+'Language': '语言'
+'Script Args': '脚本参数'
+'URL': 'URL'
+'Headers (JSON)': '请求头（JSON）'
+'Request Body': '请求体'
+'Stock Symbol': '股票代码'
+'Metric': '指标'
+'Operator': '运算符'
+'Threshold': '阈值'
+'Target Workflow ID': '目标工作流 ID'
+'Get source data': '获取源数据'
+'AI agent call': 'AI 智能体调用'
+'Data processing': '数据处理'
+'Branch logic': '分支逻辑'
+'Time delay': '时间延迟'
+'Auto publish': '自动发布'
+'Send notification': '发送通知'
+'Human approval': '人工审批'
+'Custom script': '自定义脚本'
+'HTTP call': 'HTTP 请求'
+'Market data check': '行情数据检查'
+'Nested workflow': '嵌套工作流'
+'No configurable fields for this node type.': '该节点类型没有可配置字段。'
+'Editor not ready': '编辑器未就绪'
+'Daily Content Collection': '每日内容采集处理'
+'Schedule RSS collection → AI processing → human review → notify admin': '定时采集 RSS 源 → AI 加工 → 人工审核 → 通知管理员'
+'Collect Content Sources': '采集内容源'
+'Interpret and analyze collected content, output Chinese summary': '对采集内容进行解读分析，输出中文摘要'
+'Human Review': '人工审核'
+'Notify Admin': '通知管理员'
+'Scheduled Static Site Generation': '定时全站静态生成'
+'Check newly published articles → incremental static page generation → notify': '定时检查新发布文章 → 增量生成静态页 → 通知完成'
+'Check New Articles': '检查新文章'
+'Generate Static Pages Incrementally': '增量生成静态页'
+'Notify Completion': '通知完成'
+'Static site updated': '静态站点已更新'
+'Social Auto Publish': '社交自动发布'
+'Check publish conditions → push to WeChat/Weibo/Toutiao → notify result': '判断是否满足发布条件 → 推送到微信/微博/头条 → 通知结果'
+'Should Publish to Social': '是否发布社媒'
+'Publish to Social Media': '发布到社媒'
+'Notify Result': '通知结果'
+'Social publish completed': '社交发布完成'
+'Collect new articles → AI cleaning → push to knowledge base → notify': '采集新文章 → AI 清洗 → 推送到知识库 → 通知'
+'Fetch New Articles': '获取新文章'
+'Notify Sync Completed': '通知同步完成'
+'Knowledge base updated with new content': '知识库已同步新内容'
+'Workflow started (instance #{id})': '工作流已启动（实例 #{id}）'
 Write Email: 写邮件
 Write Text: 写文字
 Write an intelligent article for me...: 帮我写一篇智能体文章...
@@ -3772,7 +3879,6 @@ Please enter a GitHub repo URL: 请输入 GitHub 仓库地址
 'Log': '日志'
 'Start Time': '开始时间'
 'Trigger': '触发'
-'Workflow': '工作流'
 'Admin Panel': '管理后台'
 'Checking': '检查中'
 'Latest': '最新'
@@ -3801,3 +3907,70 @@ Please enter a GitHub repo URL: 请输入 GitHub 仓库地址
 'Module': '模块'
 'optional': '可选'
 'unlimited': '不限'
+# ── 知识库 & 数据清洗模块 ──
+'Failed to delete knowledge block': '删除知识块失败'
+'Failed to fetch knowledge base': '获取知识库失败'
+'Failed to fetch version': '获取版本失败'
+'Failed to save knowledge block': '保存知识块失败'
+'id is required': 'id 是必需的'
+'id, title and content are required': 'id、title 和 content 是必需的'
+'Knowledge block created': '知识块已创建'
+'Knowledge block deleted': '知识块已删除'
+'Knowledge block not found': '知识块不存在'
+'Knowledge block updated': '知识块已更新'
+'query is required': 'query 是必需的'
+'Secret knowledge can only be set by super admin': '保密级(secret)知识仅超级管理员可设置'
+'System knowledge base cannot be deleted': '系统知识库禁止删除。如需更新请使用在线更新功能'
+'System knowledge base can only be modified by super admin': '系统知识库仅超级管理员可修改'
+'System knowledge base online update can only be performed by super admin': '系统知识库在线更新仅超级管理员可执行'
+'System knowledge base updated': '系统知识库更新成功'
+'Unknown knowledge base scope': '未知的知识库作用域'
+'Update failed': '更新失败'
+'Update package verification failed, checksum mismatch': '更新包校验失败，checksum 不匹配'
+'version and blocks are required': 'version 和 blocks 是必需的'
+'You can only operate on your own knowledge base entries': '仅可操作自己的知识库条目'
+# ── 知识库 & 数据清洗 UI ──
+'Added to Cleaning Queue': '已加入清洗队列'
+'Are you sure you want to delete this entry?': '确定要删除此条目吗？'
+'Auto-clean into Structured KB Entries': '自动清洗为结构化知识库条目'
+'Batch clean all pending items?': '是否批量清洗所有待处理项？'
+'Batch Clean All': '批量清洗全部'
+'Batch cleanup failed': '批量清洗失败'
+'Cleaning': '清洗中'
+'Cleaning Queue': '清洗队列'
+'Cleaned Knowledge Auto-synced to Mini Program': '清洗后的知识自动同步到小程序'
+'Cleanup failed': '清洗失败'
+'Content is required': '内容是必需的'
+'Content Preview': '内容预览'
+'CS & This Site': '客服与本网站'
+'CS Agent': '客服Agent'
+'Edit Knowledge Entry': '编辑知识条目'
+'Execute': '执行'
+'Industry Analysis etc.': '行业分析等'
+'Industry Background etc.': '行业背景等'
+'keyword1, keyword2': '关键词1, 关键词2'
+'Keywords (comma separated)': '关键词（逗号分隔）'
+'Knowledge Base': '知识库'
+'New Knowledge Entry': '新建知识条目'
+'No knowledge entries found': '未找到知识条目'
+'Only super admin can modify system knowledge base': '仅超级管理员可修改系统知识库'
+'Paste Article': '粘贴文章'
+'Paste Raw Content': '粘贴原始内容'
+'Prev': '上一页'
+'Priority (0-100)': '优先级（0-100）'
+'Queue List': '队列列表'
+'Raw Content': '原始内容'
+'Record not found': '记录不存在'
+'Scope': '作用域'
+'Search title / content / keywords...': '搜索标题 / 内容 / 关键词...'
+'Submit Area': '提交区域'
+'Submit for Cleaning': '提交清洗'
+'Submit Raw Content': '提交原始内容'
+'System KB': '系统知识库'
+'System KB entries cannot be deleted': '系统知识库条目不可删除'
+'System knowledge base entries cannot be deleted': '系统知识库条目不可删除'
+'Title is required': '标题是必需的'
+'total': '总数'
+'User KB': '用户知识库'
+'Whitepaper': '白皮书'
+'Data Cleaning': '数据清洗'

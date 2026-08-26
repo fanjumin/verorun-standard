@@ -1,25 +1,25 @@
-window.l_cleaner=function(){
-  var c=document.getElementById("mc"),h='';
+function _cleanerTab(){
+  var c=document.getElementById("kbTabContent"),h='';
   h+='<div style="max-width:960px;margin:0 auto;padding:20px">';
   h+='<h2 style="margin-bottom:20px">🧹 {{ _('Data Cleaning Agent') }}</h2>';
   h+='<p style="color:var(--dim);margin-bottom:20px">{{ _('Paste Raw Content') }}（{{ _('Article') }}、{{ _('Whitepaper') }}、{{ _('Industry Background etc.') }}），AI{{ _('Auto-clean into Structured KB Entries') }}。{{ _('Cleaned Knowledge Auto-synced to Mini Program') }}AI{{ _('CS & This Site') }}AI{{ _('CS Agent') }}。</p>';
 
   // {{ _('Submit Area') }}
-  h+='<div class="card" style="padding:20px;margin-bottom:20px">';
-  h+='<h3 style="margin-bottom:12px">📝 {{ _('Submit Raw Content') }}</h3>';
-  h+='<textarea id="cleanerInput" style="width:100%;min-height:200px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--fg);font-size:14px;resize:vertical" placeholder="{{ _('Paste Article') }}、{{ _('Whitepaper') }}、{{ _('Industry Analysis etc.') }}..."></textarea>';
+  h+='<div style="margin-bottom:20px">';
+  h+='<div class="st">📝 {{ _('Submit Raw Content') }}</div>';
+  h+='<textarea id="cleanerInput" class="ta" style="min-height:200px" placeholder="{{ _('Paste Article') }}、{{ _('Whitepaper') }}、{{ _('Industry Analysis etc.') }}..."></textarea>';
   h+='<div style="display:flex;gap:10px;margin-top:12px">';
-  h+='<button onclick="cleanerSubmit()" style="padding:10px 24px;background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer">📤 {{ _('Submit for Cleaning') }}</button>';
-  h+='<button onclick="cleanerRunAll()" style="padding:10px 24px;background:var(--bg2);color:var(--fg);border:1px solid var(--border);border-radius:6px;cursor:pointer">▶ {{ _('Batch Clean All') }}</button>';
+  h+='<button class="btn bp" onclick="cleanerSubmit()">📤 {{ _('Submit for Cleaning') }}</button>';
+  h+='<button class="btn bo" onclick="cleanerRunAll()">▶ {{ _('Batch Clean All') }}</button>';
   h+='</div></div>';
 
   // {{ _('Queue List') }}
-  h+='<div class="card" style="padding:20px">';
+  h+='<div>';
   h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
-  h+='<h3>📋 {{ _('Cleaning Queue') }}</h3>';
+  h+='<div class="st" style="margin:0">📋 {{ _('Cleaning Queue') }}</div>';
   h+='<div style="display:flex;gap:6px">';
-  h+='<button class="tb" onclick="cleanerLoad()">🔄 {{ _('Refresh') }}</button>';
-  h+='<select id="cleanerFilter" onchange="cleanerLoad()" style="padding:6px 10px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--fg)">';
+  h+='<button class="btn bo" onclick="cleanerLoad()">🔄 {{ _('Refresh') }}</button>';
+  h+='<select id="cleanerFilter" class="sl" onchange="cleanerLoad()">';
   h+='<option value="">{{ _('All') }}</option><option value="pending">{{ _('Pending') }}</option><option value="cleaning">{{ _('Cleaning') }}</option><option value="done">{{ _('Completed') }}</option><option value="failed">{{ _('Failed') }}</option>';
   h+='</select></div></div>';
   h+='<div id="cleanerList"><div class="em">{{ _('Loading...') }}...</div></div></div>';
@@ -28,12 +28,23 @@ window.l_cleaner=function(){
   cleanerLoad();
 };
 
+var _cleanerPollTimer=null;
+function _cleanerPollStart(){
+  if(_cleanerPollTimer)return;
+  var ticks=0;
+  _cleanerPollTimer=setInterval(function(){
+    ticks++;
+    cleanerLoad(true);
+    if(ticks>=30){clearInterval(_cleanerPollTimer);_cleanerPollTimer=null}
+  },3000);
+}
+
 function cleanerSubmit(){
   var input=document.getElementById("cleanerInput");
   var txt=(input.value||'').trim();
   if(!txt){showToast("{{ _('Content cannot be empty') }}","error");return}
   fetch("/admin/cleaner/submit",{method:"POST",headers:{"Authorization":"Bearer "+T,"Content-Type":"application/json"},body:JSON.stringify({content:txt})}).then(function(r){return r.json()}).then(function(d){
-    if(d.success){showToast("✅ {{ _('Added to Cleaning Queue') }} (#"+d.data.id+")","success");input.value='';cleanerLoad()}
+    if(d.success){showToast("✅ {{ _('Added to Cleaning Queue') }} (#"+d.data.id+")","success");input.value='';cleanerLoad();_cleanerPollStart()}
     else showToast(d.error||"{{ _('Submit Failed') }}","error")
   }).catch(function(){showToast("{{ _('Submit Failed') }}","error")})
 }
@@ -41,14 +52,14 @@ function cleanerSubmit(){
 function cleanerRunAll(){
   if(!confirm("{{ _('Batch clean all pending items?') }}"))return;
   fetch("/admin/cleaner/run-all",{method:"POST",headers:{"Authorization":"Bearer "+T}}).then(function(r){return r.json()}).then(function(d){
-    if(d.success){showToast("✅ "+d.message,"success");cleanerLoad()}
+    if(d.success){showToast("✅ "+d.message,"success");cleanerLoad();_cleanerPollStart()}
     else showToast(d.error||"{{ _('Batch cleanup failed') }}","error")
   }).catch(function(){showToast("{{ _('Batch cleanup failed') }}","error")})
 }
 
 function cleanerRun(id){
   fetch("/admin/cleaner/run/"+id,{method:"POST",headers:{"Authorization":"Bearer "+T}}).then(function(r){return r.json()}).then(function(d){
-    if(d.success){showToast("✅ "+d.message,"success");cleanerLoad()}
+    if(d.success){showToast("✅ "+d.message,"success");cleanerLoad();_cleanerPollStart()}
     else showToast(d.error||"{{ _('Cleanup failed') }}","error")
   }).catch(function(){showToast("{{ _('Cleanup failed') }}","error")})
 }
@@ -62,12 +73,12 @@ function cleanerViewResult(id){
   })
 }
 
-function cleanerLoad(){
+function cleanerLoad(silent){
   var list=document.getElementById("cleanerList");
   if(!list)return;
   var filter=document.getElementById("cleanerFilter");
   var statusParam=filter?filter.value:'';
-  list.innerHTML='<div class="em">{{ _('Loading...') }}...</div>';
+  if(!silent)list.innerHTML='<div class="em">{{ _('Loading...') }}...</div>';
   fetch("/admin/cleaner/list"+(statusParam?'?status='+statusParam:''),{headers:{"Authorization":"Bearer "+T}}).then(function(r){return r.json()}).then(function(d){
     if(!d.success||!d.data){list.innerHTML='<div class="em">{{ _('No data') }}</div>';return}
     var items=d.data;
@@ -82,15 +93,16 @@ function cleanerLoad(){
       h+='<td>'+(r.cleaned_id||'-')+'</td>';
       h+='<td>'+(r.created_at||'')+'</td>';
       h+='<td>';
-      if(r.status==='pending') h+='<button onclick="cleanerRun('+r.id+')" class="tb">▶ {{ _('Execute') }}</button> ';
-      h+='<button onclick="cleanerViewResult('+r.id+')" class="tb">👁 {{ _('View') }}</button>';
+      if(r.status==='pending') h+='<button class="btn bs" onclick="cleanerRun('+r.id+')">▶ {{ _('Execute') }}</button> ';
+      h+='<button class="btn bs" onclick="cleanerViewResult('+r.id+')">👁 {{ _('View') }}</button>';
       h+='</td></tr>'
     });
     h+='</tbody></table>';
     list.innerHTML=h;
+    // 无待处理项时自动停止轮询
+    if(_cleanerPollTimer){
+      var active=items.some(function(r){return r.status==='pending'||r.status==='cleaning'});
+      if(!active){clearInterval(_cleanerPollTimer);_cleanerPollTimer=null}
+    }
   }).catch(function(){list.innerHTML='<div class="em">{{ _('Load failed') }}</div>'})
 }
-
-// ============================
-// {{ _('Deploy Code Management') }} — l_deploy
-// ============================

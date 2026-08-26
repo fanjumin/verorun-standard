@@ -35,8 +35,7 @@ def _lazy_load(module_path: str, class_name: str = None):
 _PROVIDER_REGISTRY = {
     'cn': {
         'sms':       [('providers.sms.aliyun', 'AliyunSMSProvider')],
-        'payment':   [('routes.subscription.gateway.alipay', None),
-                      ('routes.subscription.gateway.wechat', None)],
+        'payment':   [],
         'verify':    [('providers.verify.alipay', 'AlipayVerificationProvider')],
         'social':    [('providers.social.wechat', 'WeChatPushProvider'),
                       ('providers.social.weibo', 'WeiboPushProvider'),

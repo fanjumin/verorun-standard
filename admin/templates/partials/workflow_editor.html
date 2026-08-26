@@ -12,6 +12,7 @@ window.__t = window.__t || {
   'editor.run':             '{{ _("Run") }}',
   'editor.cancel':          '{{ _("Cancel") }}',
   'editor.select_node':    '{{ _("Select a node to configure") }}',
+  'editor.select_node_hint':'{{ _("Select a node to configure hint") }}',
   'editor.delete':          '{{ _("Delete") }}',
   'editor.confirm':         '{{ _("Confirm") }}',
   'editor.save_as_template':'{{ _("Save as Template") }}',
@@ -48,6 +49,59 @@ window.__t = window.__t || {
   'toast.duplicate_edge':   '{{ _("This connection already exists") }}',
   'toast.load.success':     '{{ _("Workflow loaded") }}',
   'editor.save_anyway_confirm': '{{ _("Save anyway?") }}',
+  'toast.name_required': '{{ _("Workflow name cannot be empty") }}',
+  'Agent Type': '{{ _("Agent Type") }}',
+  'Agent ID': '{{ _("Agent ID") }}',
+  'Prompt Template': '{{ _("Prompt Template") }}',
+  'Model': '{{ _("Model") }}',
+  'Data Sources': '{{ _("Data Sources") }}',
+  'Max Per Source': '{{ _("Max Per Source") }}',
+  'Keywords': '{{ _("Keywords") }}',
+  'Processing Instruction': '{{ _("Processing Instruction") }}',
+  'Output Fields': '{{ _("Output Fields") }}',
+  'Condition Expression': '{{ _("Condition Expression") }}',
+  'Wait Time (seconds)': '{{ _("Wait Time (seconds)") }}',
+  'Publish Platforms': '{{ _("Publish Platforms") }}',
+  'Title Template': '{{ _("Title Template") }}',
+  'Category': '{{ _("Category") }}',
+  'Notification Channels': '{{ _("Notification Channels") }}',
+  'Notification Title': '{{ _("Notification Title") }}',
+  'Message Template': '{{ _("Message Template") }}',
+  'Webhook URL': '{{ _("Webhook URL") }}',
+  'Email To': '{{ _("Email To") }}',
+  'Approver Role': '{{ _("Approver Role") }}',
+  'Approver User IDs': '{{ _("Approver User IDs") }}',
+  'Approval Timeout (minutes, 0=global 72h)': '{{ _("Approval Timeout (minutes, 0=global 72h)") }}',
+  'Approval Message': '{{ _("Approval Message") }}',
+  'Require Approval on Error': '{{ _("Require Approval on Error") }}',
+  'Script Name': '{{ _("Script Name") }}',
+  'Language': '{{ _("Language") }}',
+  'Script Args': '{{ _("Script Args") }}',
+  'Timeout (seconds)': '{{ _("Timeout (seconds)") }}',
+  'URL': '{{ _("URL") }}',
+  'Method': '{{ _("Method") }}',
+  'Headers (JSON)': '{{ _("Headers (JSON)") }}',
+  'Request Body': '{{ _("Request Body") }}',
+  'Stock Symbol': '{{ _("Stock Symbol") }}',
+  'Metric': '{{ _("Metric") }}',
+  'Operator': '{{ _("Operator") }}',
+  'Threshold': '{{ _("Threshold") }}',
+  'Target Workflow ID': '{{ _("Target Workflow ID") }}',
+  'Get source data': '{{ _("Get source data") }}',
+  'AI agent call': '{{ _("AI agent call") }}',
+  'Data processing': '{{ _("Data processing") }}',
+  'Branch logic': '{{ _("Branch logic") }}',
+  'Time delay': '{{ _("Time delay") }}',
+  'Auto publish': '{{ _("Auto publish") }}',
+  'Send notification': '{{ _("Send notification") }}',
+  'Human approval': '{{ _("Human approval") }}',
+  'Custom script': '{{ _("Custom script") }}',
+  'HTTP call': '{{ _("HTTP call") }}',
+  'Market data check': '{{ _("Market data check") }}',
+  'Nested workflow': '{{ _("Nested workflow") }}',
+  'misc.saving': '{{ _("Saving...") }}',
+  'misc.no_config': '{{ _("No configurable fields for this node type.") }}',
+  'misc.editor_not_ready': '{{ _("Editor not ready") }}',
   '_': function(key) { return this[key] || key; }
 };
 
@@ -74,13 +128,13 @@ function wfInjectOnce(url, isCss){
 
 function loadEditorAssets(){
   return Promise.resolve()
-    .then(function(){ return wfInjectOnce('/admin/static/css/workflow_editor.css', true); })
     .then(function(){ return wfInjectOnce('/admin/static/lib/workflow/reactflow.css', true); })
+    .then(function(){ return wfInjectOnce('/admin/static/css/workflow_editor.css?v=5', true); })
     .then(function(){ return wfInjectOnce('/admin/static/lib/workflow/react.production.min.js'); })
     .then(function(){ return wfInjectOnce('/admin/static/lib/workflow/react-dom.production.min.js'); })
     .then(function(){ return wfInjectOnce('/admin/static/lib/workflow/reactflow.umd.js'); })
-    .then(function(){ return wfInjectOnce('/admin/static/js/workflow_editor.js'); })
-    .then(function(){ return wfInjectOnce('/admin/static/js/workflow_editor_app.js'); });
+    .then(function(){ return wfInjectOnce('/admin/static/js/workflow_editor.js?v=4'); })
+    .then(function(){ return wfInjectOnce('/admin/static/js/workflow_editor_app.js?v=2'); });
 }
 
 window.l_workflow_editor = function(){

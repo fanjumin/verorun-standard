@@ -7,6 +7,15 @@ window.l_automation=function(){
 
 var aWfs=[],aWTotal=0;
 
+// 统一提示条（复用系统 head.html #adminToast）
+function showToast(msg,type){
+  var t=document.getElementById("adminToast");
+  if(!t)return;
+  t.textContent=msg;
+  t.className="toast show "+(type||"");
+  setTimeout(function(){t.classList.remove("show")},3000);
+}
+
 function loadWorkflowList(){
   var mc=document.getElementById("mc");
   mc.innerHTML='<div class="lo"><div class="s"></div>{{ _('Loading') }}...</div>';
@@ -89,22 +98,28 @@ function openWorkflowEditor(id){
 }
 
 function runWorkflow(id){
-  if(!confirm("{{ _('Run this workflow?') }}"))return;
-  fetch("/admin/automation/workflows/"+id+"/run",{method:"POST",headers:{"Authorization":"Bearer "+T}}).then(function(r){return r.json()}).then(function(d){
-    if(d.success){
-      alert("{{ _('Workflow started') }}");
-      loadWorkflowList();
-    }else{
-      alert("{{ _('Failed') }}: "+esc(d.error||''));
-    }
-  }).catch(function(){alert("{{ _('Network error') }}")});
+  var doRun=function(){
+    fetch("/admin/automation/workflows/"+id+"/run",{method:"POST",headers:{"Authorization":"Bearer "+T}}).then(function(r){return r.json()}).then(function(d){
+      if(d.success){
+        showToast("{{ _('Workflow started') }}","success");
+        loadWorkflowList();
+      }else{
+        showToast("{{ _('Failed') }}: "+esc(d.error||''),"error");
+      }
+    }).catch(function(){showToast("{{ _('Network error') }}","error")});
+  };
+  if(window.showConfirm){
+    showConfirm("{{ _('Confirm') }}","{{ _('Run this workflow?') }}",doRun,"{{ _('Run') }}");
+  }else if(confirm("{{ _('Run this workflow?') }}")){
+    doRun();
+  }
 }
 
 function deleteWorkflow(id,name){
-  showConfirm("{{ _('Delete') }}","{{ _('Are you sure you want to delete') }}「"+esc(name)+"」？",function(){
+  showConfirm("{{ _('Delete') }}","{{ _('Delete confirm message') }}".replace('{name}',esc(name)),function(){
     fetch("/admin/automation/workflows/"+id,{method:"DELETE",headers:{"Authorization":"Bearer "+T}}).then(function(r){return r.json()}).then(function(d){
-      if(d.success){loadWorkflowList()}else{alert("{{ _('Failed') }}: "+esc(d.error||''))}
-    }).catch(function(){alert("{{ _('Network error') }}")});
+      if(d.success){loadWorkflowList()}else{showToast("{{ _('Failed') }}: "+esc(d.error||''),"error")}
+    }).catch(function(){showToast("{{ _('Network error') }}","error")});
   });
 }
 
@@ -161,9 +176,9 @@ function createFromTemplate(tpl){
     if(d.success && d.data){
       var newId = d.data.id || d.data.workflow_id;
       if(newId){ openWorkflowEditor(newId); }
-      else { alert("{{ _('Failed to create from template') }}"); }
+      else { showToast("{{ _('Failed to create from template') }}","error"); }
     } else {
-      alert("{{ _('Failed to create from template') }}: " + esc(d.error||''));
+      showToast("{{ _('Failed to create from template') }}: " + esc(d.error||''),"error");
     }
-  }).catch(function(){alert("{{ _('Network error') }}")});
+  }).catch(function(){showToast("{{ _('Network error') }}","error")});
 }

@@ -42,7 +42,6 @@ test_out.txt
 deploy/install.sh
 deploy/install-official.sh
 deploy/install-code.sh
-deploy/mac-mini-deploy.sh
 deploy/intranet/
 deploy/bump_version.sh
 deploy/bump_plugin_version.sh

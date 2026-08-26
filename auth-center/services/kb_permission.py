@@ -1,5 +1,6 @@
 """知识库权限检查模块 — 统一入口，供所有知识库 API 使用"""
 from flask import jsonify
+from i18n import _
 
 
 def get_admin_role(token_payload: dict) -> str:
@@ -35,7 +36,7 @@ def check_kb_permission(scope: str, owner_id: int, action: str,
                 return True, None
             return False, (jsonify({
                 'success': False,
-                'error': '系统知识库在线更新仅超级管理员可执行'
+                'error': _('System knowledge base online update can only be performed by super admin')
             }), 403)
 
         if action == 'write':
@@ -69,7 +70,7 @@ def check_kb_permission(scope: str, owner_id: int, action: str,
 
     return False, (jsonify({
         'success': False,
-        'error': '未知的知识库作用域'
+        'error': _('Unknown knowledge base scope')
     }), 400)
 
 
