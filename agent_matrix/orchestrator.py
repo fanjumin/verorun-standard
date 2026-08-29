@@ -56,19 +56,19 @@ class AgentOrchestrator:
         # 注入模式指令
         mode_prefixes = {
             'deep': '【深度思考模式】请进行深入、全面、细致的分析，尽可能给出最详尽的回答。',
-            'image': '【图像处理模式】请优先将任务委派给内容管理Agent（CMS域），由负责图像生成，包括文生图、图生图、配图等操作。',
+            'image': '【图像处理模式】请优先将任务委派给内容管理Agent（内容管理域），由其负责图像生成，包括文生图、图生图、配图等操作。',
         }
         if mode in mode_prefixes:
             instruction = mode_prefixes[mode] + '\n\n' + instruction
 
-        # 图像模式：派发给 CMS Agent（含图像能力）
+        # 图像模式：派发给 Content Agent（含图像能力）
         if mode == 'image':
-            cms_agents = [a for a in self.models.list_agents(role_type='sub', active_only=True)
-                          if a.get('domain') == 'cms']
-            if cms_agents:
-                cms_agent = cms_agents[0]
-                instruction = (f'请将以下任务委派给内容管理Agent（ID={cms_agent["id"]}, '
-                               f'名称={cms_agent["name"]}），由其执行图像相关操作：\n\n{instruction}')
+            content_agents = [a for a in self.models.list_agents(role_type='sub', active_only=True)
+                              if a.get('domain') == 'content']
+            if content_agents:
+                content_agent = content_agents[0]
+                instruction = (f'请将以下任务委派给内容管理Agent（ID={content_agent["id"]}, '
+                               f'名称={content_agent["name"]}），由其执行图像相关操作：\n\n{instruction}')
 
         # 1. 创建 Master 任务
         master_task_id = self.models.create_task({
@@ -284,8 +284,6 @@ class AgentOrchestrator:
         返回事实列表，每条为简洁陈述句。
         失败返回空列表，不影响对话响应。
         """
-        import requests, json as _json
-
         prompt = (
             "从以下对话中提取关键事实，每条一行，简洁陈述。只提取客观事实，不推测。\n"
             "格式：每行一条事实，以 '- ' 开头。\n"
@@ -298,44 +296,25 @@ class AgentOrchestrator:
         )
 
         try:
-            # 使用与 orchestrator 相同的 AI 配置
+            # 使用与 orchestrator 相同的 AI 配置（统一走 UnifiedLLM，避免裸 requests + LLM_API_* 环境变量断流）
             agent = self.models.get_agent(1)  # Master Agent 配置
             if not agent:
                 return []
 
-            api_url = os.environ.get(
-                'LLM_API_URL',
-                agent.get('api_url', 'https://api.deepseek.com/v1/chat/completions')
+            from agent_matrix.engine import UnifiedLLM
+            engine = UnifiedLLM(agent)
+            content = engine.chat(
+                [
+                    {'role': 'system',
+                     'content': '你是事实提取器。每行输出一条以 "- " 开头的客观事实，无可提取则只输出：无'},
+                    {'role': 'user', 'content': prompt},
+                ],
+                temperature=0.2, max_tokens=500, module='memory_extract',
             )
-            api_key = os.environ.get(
-                'LLM_API_KEY',
-                agent.get('api_key', '')
-            )
-            model = os.environ.get(
-                'LLM_API_MODEL',
-                agent.get('model_name', '')
-            )
-
-            resp = requests.post(
-                api_url,
-                headers={
-                    'Authorization': f'Bearer {api_key}',
-                    'Content-Type': 'application/json',
-                },
-                json={
-                    'model': model,
-                    'messages': [{'role': 'user', 'content': prompt}],
-                    'max_tokens': 500,
-                    'temperature': 0.3,
-                },
-                timeout=10,
-            )
-            resp.raise_for_status()
-            content = resp.json()['choices'][0]['message']['content']
 
             # 解析事实列表
             facts = []
-            for line in content.strip().split('\n'):
+            for line in (content or '').strip().split('\n'):
                 line = line.strip()
                 if line.startswith('- ') and len(line) > 3:
                     fact = line[2:].strip()
@@ -1473,7 +1452,7 @@ class AgentOrchestrator:
         # ── Agent availability check with degradation (Fix #5) ──
         planner_agent = self._find_agent_by_domain('site_builder')   # Builder → Planner
         reviewer_agent = self._find_agent_by_domain('ops')           # Ops → Reviewer
-        decider_agent = self._find_agent_by_domain('finance')        # Steward → Decider
+        decider_agent = self._find_agent_by_domain('finance')        # Finance → Decider
 
         missing = []
         if not planner_agent:
@@ -1481,7 +1460,7 @@ class AgentOrchestrator:
         if not reviewer_agent:
             missing.append('Reviewer (Ops/ops)')
         if not decider_agent:
-            missing.append('Decider (Steward/finance)')
+            missing.append('Decider (Finance/finance)')
 
         if missing:
             degradation_msg = 'Discussion roles unavailable: ' + ', '.join(missing) + '. '
@@ -1663,7 +1642,7 @@ class AgentOrchestrator:
         # Fallback: JSON parsing failed → ask user for manual approval (Fix #4)
         if exec_plan is None:
             yield _emit('needs_approval',
-                        agent='Steward', role='Decision Maker',
+                        agent='Finance', role='Decision Maker',
                         content=decision,
                         raw_output=decision,
                         hint=(

@@ -54,7 +54,7 @@ function notifShowPush(){
     +'<option value="system">{{ _('System Notification') }}</option><option value="reward">{{ _('Reward Notification') }}</option><option value="promo">{{ _('Campaign Notice') }}</option><option value="event">{{ _('Event Notification') }}</option>'
     +'</select></div>'
     +'<div class="fl"><label style="min-width:100px">{{ _('Title') }}</label><input id="notifTitle" class="in" placeholder="{{ _('Notification Title') }}" style="flex:1"></div>'
-    +'<div class="fl"><label style="min-width:100px">{{ _('Content') }}</label><textarea id="notifContent_" class="in" rows="4" placeholder="{{ _('Notification Content') }}，{{ _('Support') }} HTML" style="flex:1;min-height:80px"></textarea></div>'
+    +'<div class="fl"><label style="min-width:100px">{{ _('Content') }}</label><textarea id="notifContent_" class="in" rows="4" placeholder="{{ _('Notification content, supports HTML') }}" style="flex:1;min-height:80px"></textarea></div>'
     +'<div class="fl"><label style="min-width:100px">{{ _('Redirect Link') }}</label><input id="notifLink" class="in" placeholder={{ _('Optional, e.g. /user/coupons') | tojson }} style="flex:1"></div>'
     +'<div class="fl"><label style="min-width:100px"></label><div style="display:flex;align-items:center;gap:8px;flex:1">'
     +'<button class="btn bp" onclick="notifSend()">{{ _('Send Notification') }}</button>'
@@ -91,7 +91,7 @@ function notifSend(){
     headers:{"Authorization":"Bearer "+T,"Content-Type":"application/json"},
     body:JSON.stringify(data)
   }).then(function(r){return r.json()}).then(function(d){
-    if(d.success)resultEl.textContent={{ _('Sent ') | tojson }}+d.sent+"/"+d.total+" 条";
+    if(d.success)resultEl.textContent={{ _('Sent ') | tojson }}+d.sent+"/"+d.total+" "+{{ _('items') | tojson }};
     else resultEl.textContent={{ _('Failed to Send: ') | tojson }}+(d.error||"{{ _('Unknown Error') }}");
   }).catch(function(){resultEl.textContent="{{ _('Request Failed') }}"});
 }

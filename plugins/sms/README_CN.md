@@ -90,7 +90,7 @@ sms/
 +-- services.py                  # 核心服务（发送、验证码、手机号验证、频率限制、提供商路由）
 +-- countries.py                 # 国家/地区列表与手机号验证规则
 +-- migrations/
-|   +-- v1.0.0_to_v1.1.0.sql     # 版本迁移 SQL（§10.6）
+|   +-- .gitkeep                 # 建表由 models.py init_sms_db() 运行时幂等完成（内嵌 DDL 为唯一真源）
 +-- i18n/
 |   +-- en.yml                   # 英文国际化
 |   +-- zh-CN.yml                # 中文国际化

@@ -2,7 +2,7 @@
 
 Falls back to in-memory dict when Redis is unavailable (local dev)."""
 import time
-from ..config import CAPTCHA_TTL, RATE_LIMIT_TTL, MAX_FAILS
+from ..config import CAPTCHA_TTL, RATE_LIMIT_TTL, MAX_FAILS, REDIS_URL, BLOCK_TTL
 
 _redis = None
 _memory = {}  # in-memory fallback: {key: {field: value, ...}, ...}
@@ -15,7 +15,7 @@ def _get_store():
         try:
             import redis
             _redis = redis.Redis.from_url(
-                'redis://127.0.0.1:6379/0',
+                REDIS_URL,
                 decode_responses=True,
                 socket_connect_timeout=2,
             )
@@ -133,8 +133,12 @@ def record_fail(ip: str):
     key = f"rate:{ip}"
     if _is_redis():
         try:
-            _redis.incr(key)
+            fails = _redis.incr(key)
             _redis.expire(key, RATE_LIMIT_TTL)
+            if fails >= MAX_FAILS:
+                # 达到失败上限：加入封禁名单（带 TTL，BLOCK_TTL 后自动解除）
+                _redis.sadd("blocklist:ips", ip)
+                _redis.expire("blocklist:ips", BLOCK_TTL)
         except Exception:
             pass
     else:
@@ -144,6 +148,8 @@ def record_fail(ip: str):
             _memory[key] = {"count": 0}
             _memory[f"{key}:expire"] = now + RATE_LIMIT_TTL
         _memory[key]["count"] = _memory[key].get("count", 0) + 1
+        if _memory[key]["count"] >= MAX_FAILS:
+            _memory["block:ip:" + ip] = now + BLOCK_TTL
 
 
 def check_ip_blocked(ip: str) -> bool:
@@ -152,7 +158,11 @@ def check_ip_blocked(ip: str) -> bool:
             return bool(_redis.sismember("blocklist:ips", ip))
         except Exception:
             return False
-    return False  # no blocklist in memory mode
+    expire = _memory.get("block:ip:" + ip, 0)
+    if expire and time.time() < expire:
+        return True
+    _memory.pop("block:ip:" + ip, None)
+    return False
 
 
 # ── Stats ────────────────────────────────────────────────

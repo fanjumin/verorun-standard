@@ -112,8 +112,12 @@ CREATE TABLE IF NOT EXISTS store_plugins (
     readme_url      TEXT DEFAULT '',
     tagline         TEXT DEFAULT '',                 -- 宣传语（AI 提取/手写）
     tagline_i18n_key TEXT DEFAULT '',                -- 宣传语 i18n 查找键
-    tagline_font_size TEXT DEFAULT '12px',           -- 宣传语字号
+    tagline_font_size TEXT DEFAULT '16px',           -- 宣传语字号
     tagline_color   TEXT DEFAULT '#ffffff',          -- 宣传语字体颜色
+    tagline_subtitle TEXT DEFAULT '',                -- 宣传语副标题（第二行，≤64字符）
+    tagline_subtitle_font_size TEXT DEFAULT '14px',   -- 副标题字号
+    usage_guide     TEXT DEFAULT '',                 -- 插件使用说明（富文本 HTML，独立于 readme，同步知识库）
+    readme_cache    TEXT DEFAULT '',                 -- README 缓存（服务端代理，多命名抓取，前端详情走本地端点）
     downloads       BIGINT DEFAULT 0,
     rating          DOUBLE PRECISION DEFAULT 0.0,
     review_count    BIGINT DEFAULT 0,               -- 评价总数
@@ -196,6 +200,16 @@ _STORE_COLUMN_MIGRATIONS = [
     "ALTER TABLE store_plugins ADD COLUMN IF NOT EXISTS name_i18n_key TEXT DEFAULT ''",
     "ALTER TABLE store_plugins ADD COLUMN IF NOT EXISTS tagline TEXT DEFAULT ''",
     "ALTER TABLE store_plugins ADD COLUMN IF NOT EXISTS tagline_i18n_key TEXT DEFAULT ''",
+    # 标语字号/颜色（手动标语样式；旧库缺列会导致保存与目录同步 500）
+    "ALTER TABLE store_plugins ADD COLUMN IF NOT EXISTS tagline_font_size TEXT DEFAULT '16px'",
+    "ALTER TABLE store_plugins ADD COLUMN IF NOT EXISTS tagline_color TEXT DEFAULT '#ffffff'",
+    # 双行标语：副标题 + 独立字号（问题1，2026-08-29）
+    "ALTER TABLE store_plugins ADD COLUMN IF NOT EXISTS tagline_subtitle TEXT DEFAULT ''",
+    "ALTER TABLE store_plugins ADD COLUMN IF NOT EXISTS tagline_subtitle_font_size TEXT DEFAULT '14px'",
+    # 插件使用说明（问题3，2026-08-29）
+    "ALTER TABLE store_plugins ADD COLUMN IF NOT EXISTS usage_guide TEXT DEFAULT ''",
+    # README 服务端代理缓存（问题2 方案A，2026-08-29）
+    "ALTER TABLE store_plugins ADD COLUMN IF NOT EXISTS readme_cache TEXT DEFAULT ''",
     # P0-2：目录同步时间戳持久化（TEXT 存 ISO 时间串，与 store_plugins 其余时间列一致）
     "ALTER TABLE store_plugins ADD COLUMN IF NOT EXISTS last_sync_ts TEXT DEFAULT ''",
     # 订阅三档价 + 适用版本（阶段1：定价机制完整化）
@@ -324,8 +338,12 @@ class StorePlugin:
     readme_url: str = ''
     tagline: str = ''
     tagline_i18n_key: str = ''
-    tagline_font_size: str = '12px'
+    tagline_font_size: str = '16px'
     tagline_color: str = '#ffffff'
+    tagline_subtitle: str = ''
+    tagline_subtitle_font_size: str = '14px'
+    usage_guide: str = ''
+    readme_cache: str = ''
     downloads: int = 0
     rating: float = 0.0
     review_count: int = 0
@@ -368,8 +386,12 @@ class StorePlugin:
             readme_url=row.get('readme_url', ''),
             tagline=row.get('tagline', ''),
             tagline_i18n_key=row.get('tagline_i18n_key', ''),
-            tagline_font_size=row.get('tagline_font_size', '12px'),
+            tagline_font_size=row.get('tagline_font_size', '16px'),
             tagline_color=row.get('tagline_color', '#ffffff'),
+            tagline_subtitle=row.get('tagline_subtitle', ''),
+            tagline_subtitle_font_size=row.get('tagline_subtitle_font_size', '14px'),
+            usage_guide=row.get('usage_guide', ''),
+            readme_cache=row.get('readme_cache', ''),
             downloads=row.get('downloads', 0),
             rating=row.get('rating', 0.0),
             review_count=row.get('review_count', 0),

@@ -182,6 +182,38 @@ class SchedulerEngine:
         """设置工作流执行器"""
         self._workflow_runner = runner
 
+    def add_plugin_job(self, job: dict) -> bool:
+        """注册一个插件定时任务（消费插件 register_jobs() 的 APScheduler job dict）。
+
+        兼容 dict 格式: {id, func, trigger: 'cron'|'interval'|'date', hour, minute, ...}。
+        进程内注册到 APScheduler，不写入 cron_jobs 表；服务重启后由
+        init_automation() 重新扫描注册，天然幂等。
+        """
+        job_id = job.get('id')
+        func = job.get('func')
+        if not job_id or not callable(func):
+            return False
+        kwargs = {k: v for k, v in job.items()
+                  if k not in ('id', 'func', 'name')}
+        try:
+            self._apscheduler.add_job(
+                func,
+                id=f'plugin_{job_id}',
+                name=job.get('name', job_id),
+                max_instances=1,
+                coalesce=True,
+                misfire_grace_time=300,
+                replace_existing=True,
+                **kwargs,
+            )
+            m.add_log('system', 0, 'info',
+                       f'📅 Plugin job scheduled: [{job_id}]')
+            return True
+        except Exception as e:
+            m.add_log('system', 0, 'error',
+                       f'Plugin job [{job_id}] schedule failed: {e}')
+            return False
+
     # ---- 生命周期 ----
 
     def start(self):

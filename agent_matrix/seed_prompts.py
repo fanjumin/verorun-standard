@@ -18,14 +18,12 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROMPTS_DIR = os.path.join(BASE_DIR, 'prompts')
 
 # (slug, name, prompt_type, domain, tags, task_triggers, file_path, bind_agent_slugs)
-# 覆盖 prompts/ 目录全部 15 个 .md；bind_agent_slugs 对应的 Agent 不存在时自动跳过。
+# 覆盖当前 11 个角色对应的 prompt；bind_agent_slugs 对应的 Agent 不存在时自动跳过。
+# 旧角色（cms/user/automation/health_check/supply_chain）已不存在，其 prompt 不再入池。
 PROMPT_SEEDS = [
     ('master-base', 'Master Agent Role Base', 'system', 'orchestration',
      '["task_decomposition","orchestration","master_agent"]', '["composite","decompose"]',
      'master_prompt.md', ['athena']),
-    ('cms-role', 'CMS Agent Role Base', 'system', 'cms',
-     '["content_management","cms_publish","image_layout"]', '[]',
-     'sub_cms_prompt.md', ['cms']),
     ('content-role', 'Content Agent Role Base', 'system', 'content',
      '["content_creation"]', '[]',
      'sub_content_prompt.md', ['content']),
@@ -38,21 +36,9 @@ PROMPT_SEEDS = [
     ('ops-role', 'Ops Agent Role Base', 'system', 'ops',
      '["automation","health_monitor","workflow"]', '[]',
      'sub_ops_prompt.md', ['ops']),
-    ('user-role', 'User Agent Role Base', 'system', 'service',
-     '["user_service","support"]', '[]',
-     'sub_user_prompt.md', ['user']),
     ('chatbot-role', 'Chatbot Agent Role Base', 'system', 'service',
      '["chatbot","user_service"]', '[]',
      'sub_chatbot_prompt.md', ['service']),
-    ('automation-role', 'Automation Agent Role Base', 'system', 'automation',
-     '["automation","workflow"]', '[]',
-     'sub_automation_prompt.md', ['automation']),
-    ('health-check-role', 'Health Check Agent Role Base', 'system', 'ops',
-     '["health_check","monitoring"]', '[]',
-     'sub_health_check_prompt.md', ['health_check']),
-    ('supply-chain-role', 'Supply Chain Agent Role Base', 'system', 'supply_chain',
-     '["supply_chain","logistics"]', '[]',
-     'sub_supply_chain_prompt.md', ['supply_chain']),
     ('business-role', 'Business Agent Role Base', 'system', 'business',
      '["business","planning"]', '[]',
      'sub_business_prompt.md', ['business']),

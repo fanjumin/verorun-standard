@@ -33,14 +33,14 @@ import hashlib
 import hmac
 from typing import Any, Dict
 
-# ── 官方插件白名单（34 个已上线官方插件 identifier）────────────────
+# ── 官方插件白名单（35 个已上线官方插件 identifier）────────────────
 OFFICIAL_PLUGIN_IDS = {
     'ads', 'ali_api', 'analytics', 'captcha_embedded', 'chatbot',
     'cogevolution_substrate', 'content_factory', 'coupons',
     'currency_converter', 'email', 'enterprise_verify', 'health_check',
     'im_gateway', 'logistics', 'memory_engine', 'mini_app_builder',
     'oauth_config', 'order_notify', 'payment', 'project_workspace',
-    'reviews', 'shop', 'site_builder', 'site_domains', 'sms',
+    'reviews', 'risk_control', 'shop', 'site_builder', 'site_domains', 'sms',
     'social_push', 'stock_analysis', 'subscription', 'two_factor_auth',
     'vault', 'verification', 'veroscholar', 'visitor_profile', 'wishlist',
 }

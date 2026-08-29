@@ -6,6 +6,7 @@ import re
 import time
 
 import psycopg2.extras
+from i18n import _
 from models.database import get_db
 
 # ── Rate limiting ──
@@ -74,11 +75,11 @@ def send_notification_by_event(event_type, user_id, context_vars=None):
             (event_type,)
         ).fetchone()
         if not template:
-            return {'success': False, 'error': f'No active template for event: {event_type}'}
+            return {'success': False, 'error': _('No active template for event: {event_type}', event_type=event_type)}
 
-        # Substitute variables
-        title = _substitute_vars(template['title_template'], context_vars)
-        content = _substitute_vars(template['content_template'], context_vars)
+        # Translate template (locale-aware, falls back to original text) then substitute variables
+        title = _substitute_vars(_(template['title_template']), context_vars)
+        content = _substitute_vars(_(template['content_template']), context_vars)
         link_url = ''
         if template.get('link_url_template'):
             link_url = _substitute_vars(template['link_url_template'], context_vars)
@@ -93,7 +94,7 @@ def send_notification_by_event(event_type, user_id, context_vars=None):
             extra_data={'event_type': event_type}
         )
         if nid is None:
-            return {'success': False, 'error': 'Rate limited or creation failed'}
+            return {'success': False, 'error': _('Rate limited or creation failed')}
 
         # Log the send
         conn.execute(

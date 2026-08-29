@@ -587,6 +587,12 @@ def store_sync():
             before = {r['identifier'] for r in conn.execute(
                 'SELECT identifier FROM store_plugins').fetchall()}
         cnt = mgr.store_client.sync_all()
+        # ★ 试验：同步远程目录后，从本地插件目录读取 USAGE 使用说明（多命名，中文优先）
+        try:
+            usage_synced = _sync_local_usage_guides(mgr)
+        except Exception as _e:
+            print(f'[store] local usage guide sync failed: {_e}')
+            usage_synced = []
         with get_registry_db() as conn:
             after = {r['identifier'] for r in conn.execute(
                 'SELECT identifier FROM store_plugins').fetchall()}
@@ -599,6 +605,7 @@ def store_sync():
             'added': added,
             'source': _catalog_urls(),
             'error': error,
+            'usage_synced': usage_synced,
         })
     except Exception as e:
         print(f'[store] sync failed: {e}')
@@ -719,6 +726,97 @@ def _ensure_tagline(pdata: dict, lang: str = 'zh-CN') -> str:
         return ''
 
 
+def _sync_plugin_usage_kb(identifier: str, name: str, usage_guide: str, enabled: int):
+    """插件使用说明 ↔ 系统知识库同步（复用主库 knowledge_blocks，软删除）。
+
+    空内容或未上架 → 软删除 kb_plugin_usage_<identifier>（用户已确认的清理逻辑）。
+    知识库行 id 固定为 kb_plugin_usage_<identifier>，写入后 RAG 关键词/向量路均可检索。
+    镜像 main_site/routes/api_v1.py 知识块保存模式；embedding 失败静默走关键词路。
+    """
+    import re as _re
+    kb_id = f'kb_plugin_usage_{identifier}'
+    html = (usage_guide or '').strip()
+    try:
+        with get_registry_db() as conn:
+            if not html or not enabled:
+                conn.execute(
+                    "UPDATE knowledge_blocks SET deleted_at=NOW() WHERE id=%s AND deleted_at IS NULL",
+                    (kb_id,))
+                conn.commit()
+                return
+            text = _re.sub(r'\s+', ' ', _re.sub(r'<[^>]+>', ' ', html)).strip()[:4000]
+            title = f'Plugin {name} — 使用说明'
+            keywords = f'{identifier},{name},plugin,usage,插件,使用'
+            existing = conn.execute(
+                'SELECT id FROM knowledge_blocks WHERE id=%s', (kb_id,)).fetchone()
+            if existing:
+                conn.execute(
+                    "UPDATE knowledge_blocks SET title=%s, content=%s, keywords=%s, "
+                    "category='plugin', priority=50, scope='system', owner_id=NULL, "
+                    "deleted_at=NULL, updated_at=NOW() WHERE id=%s",
+                    (title, text, keywords, kb_id))
+            else:
+                conn.execute(
+                    "INSERT INTO knowledge_blocks (id, title, content, keywords, category, "
+                    "priority, scope, owner_id) VALUES (%s,%s,%s,%s,'plugin',50,'system',NULL)",
+                    (kb_id, title, text, keywords))
+            conn.commit()
+        try:
+            from agent_matrix.rag_retriever import store_embedding
+            store_embedding(kb_id, title, text)
+        except Exception as e:
+            print(f'[store] usage guide embedding failed: {e}')
+    except Exception as e:
+        print(f'[store] usage guide KB sync failed: {e}')
+
+
+def _sync_local_usage_guides(mgr) -> list:
+    """从本地插件目录读取 USAGE.md（多命名，中文优先）同步到商店 usage_guide 与知识库。
+
+    试验策略（已确认）：存在 USAGE 文件时自动覆盖管理端手写内容；无文件的行保持不变。
+    返回本次同步的 identifier 列表。
+    """
+    plugins_dir = getattr(mgr, 'plugins_dir', '')
+    if not plugins_dir or not os.path.isdir(plugins_dir):
+        return []
+    usage_names = ('USAGE.cn.md', 'USAGE_CN.md', 'USAGE.zh-CN.md', 'USAGE.md')
+    synced = []
+    for entry in sorted(os.listdir(plugins_dir)):
+        plugin_dir = os.path.join(plugins_dir, entry)
+        if entry.startswith('_') or entry.startswith('.') or not os.path.isdir(plugin_dir):
+            continue
+        if not os.path.isfile(os.path.join(plugin_dir, '__init__.py')):
+            continue
+        text = ''
+        for name in usage_names:
+            p = os.path.join(plugin_dir, name)
+            if os.path.isfile(p):
+                try:
+                    with open(p, 'r', encoding='utf-8') as f:
+                        text = f.read().strip()[:20000]
+                except (IOError, OSError):
+                    text = ''
+                break
+        if not text:
+            continue
+        try:
+            with get_registry_db() as conn:
+                row = conn.execute(
+                    'SELECT name, enabled FROM store_plugins WHERE identifier=%s',
+                    (entry,)).fetchone()
+                if not row:
+                    continue
+                conn.execute(
+                    'UPDATE store_plugins SET usage_guide=%s WHERE identifier=%s',
+                    (text, entry))
+                conn.commit()
+            _sync_plugin_usage_kb(entry, row['name'] or entry, text, row['enabled'])
+            synced.append(entry)
+        except Exception as _e:
+            print(f'[store] usage guide sync failed for {entry}: {_e}')
+    return synced
+
+
 @bp.route('/store/admin', methods=['POST'])
 def store_admin_save():
     """管理员：创建或更新商店插件商品"""
@@ -751,7 +849,7 @@ def store_admin_save():
     # 宣传语：开发者手填优先；仅当为空时由 AI 从 README 兜底提取（失败自动降级，不阻断上架）
     tagline = (data.get('tagline') or '').strip()
     if tagline:
-        tagline = tagline[:20]   # 长度限制 ≤20 字
+        tagline = tagline[:32]   # 长度限制 ≤32 字（双行标语第一行）
     else:
         try:
             from i18n import get_lang
@@ -759,6 +857,7 @@ def store_admin_save():
         except Exception:
             _lang = 'zh-CN'
         tagline = _ensure_tagline(data, lang=_lang)
+    tagline_subtitle = (data.get('tagline_subtitle') or '').strip()[:64]
 
     with get_registry_db() as conn:
         conn.execute("""
@@ -768,8 +867,10 @@ def store_admin_save():
                 price_interval, price_quarter_fen, price_year_fen, compatible_editions,
                 trial_days, download_url, package_hash,
                 file_size, category, tags, screenshots, readme_url,
-                tagline, tagline_i18n_key, min_app_version, depends_on, enabled
-            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                tagline, tagline_i18n_key, tagline_font_size, tagline_color,
+                tagline_subtitle, tagline_subtitle_font_size, usage_guide,
+                readme_cache, min_app_version, depends_on, enabled
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             ON CONFLICT(identifier) DO UPDATE SET
                 name=excluded.name,
                 name_i18n_key=excluded.name_i18n_key,
@@ -796,6 +897,10 @@ def store_admin_save():
                 tagline_i18n_key=excluded.tagline_i18n_key,
                 tagline_font_size=excluded.tagline_font_size,
                 tagline_color=excluded.tagline_color,
+                tagline_subtitle=excluded.tagline_subtitle,
+                tagline_subtitle_font_size=excluded.tagline_subtitle_font_size,
+                usage_guide=excluded.usage_guide,
+                readme_cache=COALESCE(NULLIF(excluded.readme_cache,''), store_plugins.readme_cache),
                 min_app_version=excluded.min_app_version,
                 depends_on=excluded.depends_on,
                 enabled=excluded.enabled,
@@ -825,13 +930,20 @@ def store_admin_save():
             data.get('readme_url', ''),
             tagline,
             data.get('tagline_i18n_key', ''),
-            data.get('tagline_font_size', '12px'),
+            data.get('tagline_font_size', '16px'),
             data.get('tagline_color', '#ffffff'),
+            tagline_subtitle,
+            data.get('tagline_subtitle_font_size', '14px'),
+            data.get('usage_guide', ''),
+            data.get('readme_cache', ''),
             data.get('min_app_version', '0.10.0'),
             json.dumps(data.get('depends_on', {})),
             int(data.get('enabled', 1)),
         ))
         conn.commit()
+
+    # 同步插件使用说明到系统知识库（RAG 可检索；空/下架即软删）
+    _sync_plugin_usage_kb(identifier, data.get('name', ''), data.get('usage_guide', ''), int(data.get('enabled', 1)))
 
     return _json_result(True, data={'identifier': identifier, 'saved': True})
 
@@ -852,6 +964,9 @@ def store_admin_delete(identifier: str):
             return _json_result(False, error=f'Plugin "{identifier}" not found', code=404)
         conn.execute('DELETE FROM store_plugins WHERE identifier=%s', (identifier,))
         conn.execute('DELETE FROM plugin_reviews WHERE plugin_identifier=%s', (identifier,))
+        # 删除插件时同步软删知识库中的使用说明（用户已确认的清理逻辑）
+        conn.execute("UPDATE knowledge_blocks SET deleted_at=NOW() WHERE id=%s AND deleted_at IS NULL",
+                     (f'kb_plugin_usage_{identifier}',))
         conn.commit()
     return _json_result(True, data={'deleted': True})
 
@@ -872,6 +987,10 @@ def store_admin_toggle(identifier: str):
         new_enabled = 0 if row['enabled'] else 1
         conn.execute('UPDATE store_plugins SET enabled=%s, updated_at=NOW() WHERE identifier=%s',
                      (new_enabled, identifier))
+        # 下架时同步软删知识库中的使用说明（用户已确认的清理逻辑）
+        if new_enabled == 0:
+            conn.execute("UPDATE knowledge_blocks SET deleted_at=NOW() WHERE id=%s AND deleted_at IS NULL",
+                         (f'kb_plugin_usage_{identifier}',))
         conn.commit()
     return _json_result(True, data={'identifier': identifier, 'enabled': bool(new_enabled)})
 
@@ -1056,6 +1175,37 @@ def store_detail(identifier: str):
     except Exception as e:
         print(f'[routes] store_detail annotate failed: {e}')
     return _json_result(True, data=detail)
+
+
+@bp.route('/store/<identifier>/readme', methods=['GET'])
+def store_readme_proxy(identifier: str):
+    """服务端 README 代理（问题2 方案A）：优先读本地缓存，空则现场抓 readme_url。
+
+    多命名兼容（README.cn.md / README_CN.md / README.zh-CN.md）由导入期多命名抓取落库
+    （store_importer），无缓存时按 readme_url 现场抓取（timeout 8s），失败返回空串。
+    """
+    err = _require_admin()
+    if err:
+        return err
+    try:
+        with get_registry_db() as conn:
+            row = conn.execute(
+                'SELECT readme_cache, readme_url FROM store_plugins WHERE identifier=%s',
+                (identifier,)
+            ).fetchone()
+    except Exception as _e:
+        print(f'[routes] readme proxy db error: {_e}')
+        return _json_result(False, error='Store not available', code=503)
+    if not row:
+        return _json_result(False, error=f'Plugin "{identifier}" not found in store', code=404)
+    cache = (row['readme_cache'] or '').strip()
+    if cache:
+        return _json_result(True, data={'text': cache, 'from_cache': True})
+    url = (row['readme_url'] or '').strip()
+    if not url:
+        return _json_result(True, data={'text': '', 'from_cache': False})
+    text = _readme_text(url)
+    return _json_result(True, data={'text': text, 'from_cache': False})
 
 
 # ── 20. 从商店安装 ───────────────────────────────────────

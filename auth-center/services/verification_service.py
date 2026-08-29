@@ -22,6 +22,7 @@ from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from i18n import _
 from models import get_db, now_iso
 
 logger = logging.getLogger(__name__)
@@ -573,8 +574,8 @@ def verify_callback(user_id: int, params: Dict[str, Any]) -> Dict[str, Any]:
         _create_notif(
             user_id=user_id,
             ntype='reward',
-            title='实名认证通过',
-            content=f'恭喜您已通过实名认证，显示名已更新为 {real_name}。',
+            title=_('Real-name verification passed'),
+            content=_('Congratulations! Your real name has been verified and your display name has been updated to {name}.', name=real_name),
         )
     except Exception as e:
         logger.warning(f"Notification send failed (non-critical): {e}")

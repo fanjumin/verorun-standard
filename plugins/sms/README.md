@@ -91,7 +91,7 @@ sms/
 +-- services.py                  # Core services (send, code, phone validation, rate limit, provider routing)
 +-- countries.py                 # Country list & phone validation rules
 +-- migrations/
-|   +-- v1.0.0_to_v1.1.0.sql     # Version migration SQL (§10.6)
+|   +-- .gitkeep                 # Tables created idempotently at runtime by models.py init_sms_db() (inline DDL is the single source of truth)
 +-- i18n/
 |   +-- en.yml                   # English i18n
 |   +-- zh-CN.yml                # Chinese i18n

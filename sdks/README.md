@@ -1,35 +1,7 @@
 # VeroRun SDKs
 
-JavaScript SDKs for VeroRun social media mini-program platforms.
+This directory now only contains the Python CLI client (`cli/`, package `verorun_cli`).
 
-## Packages
-
-| Package | Directory | Description |
-|---------|-----------|-------------|
-| `@verorun/sdk-common` | `common/` | Core SDK: Auth, Chat, RAG |
-| `@verorun/sdk-wechat` | `wechat/` | WeChat Mini-Program (`wx.*`) wrapper |
-| `@verorun/sdk-douyin` | `douyin/` | Douyin/Toutiao Mini-Program (`tt.*`) wrapper |
-| `@verorun/sdk-telegram` | `telegram/` | Telegram Bot API + WebApp SDK |
-| `@verorun/sdk-line` | `line/` | LINE LIFF + Messaging API SDK |
-
-## Usage
-
-```js
-// Common SDK — works on all platforms
-import { VeroAuth, VeroChat, VeroRAG } from '@verorun/sdk-common';
-
-const auth = new VeroAuth({ baseURL: 'https://your-domain.com', platform: 'telegram' });
-const { data } = await auth.login({ initData: tg.initData });
-```
-
-## Publishing
-
-```bash
-# Each package can be published independently
-cd sdks/<package>
-npm publish
-```
-
-## License
-
-MIT
+The JavaScript SDKs for mini-program platforms (`common` / `wechat` / `douyin` / `telegram` / `line`)
+have been **vendored into the `mini_app_builder` plugin** at `plugins/mini_app_builder/sdks/`.
+See that directory for the JS package sources, and `cli/README.md` for the Python CLI.

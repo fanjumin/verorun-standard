@@ -6,7 +6,7 @@ Agent Matrix — AI 引擎
 复用 system_config 中的 API Key，无需额外配置。
 """
 from i18n import _
-import json, logging, sys, os, threading
+import json, logging, sys, os, threading, re
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 import time as _time
@@ -14,6 +14,11 @@ import time as _time
 from agent_matrix.cache_utils import get_llm_cache
 
 logger = logging.getLogger(__name__)
+
+from agent_matrix.failover import FallbackEngine
+
+# 兜底引擎单例（进程内共享熔断器 + 健康状态存储）
+_failover_engine = FallbackEngine()
 
 # 模块级 sys.path 设置（只执行一次，避免函数内重复插入）
 _PARENT_DIR = os.path.join(os.path.dirname(__file__), '..')
@@ -311,6 +316,15 @@ class UnifiedLLM:
         }
         return defaults.get(provider, '')
 
+    def _normalize_base_url(self, base_url, provider=None):
+        """规范化 OpenAI 兼容端点：已含版本路径（/v1、/v4、/v1beta 等）则不追加 /v1。"""
+        base = (base_url or (self._default_base_url(provider) if provider else '') or '').rstrip('/')
+        if not base:
+            return base
+        if re.search(r'/v\d[a-z0-9]*', base):
+            return base
+        return base + '/v1'
+
     def _fallback_key(self, provider):
         """回退到环境变量（兼容过渡期）"""
         env_map = {
@@ -375,9 +389,7 @@ class UnifiedLLM:
             if pm is None:
                 raise ValueError(f'Model not found or inactive: id={provider_model_id}')
             pm = dict(pm)
-            base_url = pm['endpoint_url'] or self._default_base_url(pm['provider_slug'])
-            if base_url and not base_url.rstrip('/').endswith('/v1'):
-                base_url = base_url.rstrip('/') + '/v1'
+            base_url = self._normalize_base_url(pm['endpoint_url'], pm['provider_slug'])
             return {
                 'provider': pm['provider_slug'],
                 'model': pm['model_name'],
@@ -400,9 +412,7 @@ class UnifiedLLM:
                 ).fetchone()
             if pm:
                 pm = dict(pm)
-                base_url = pm['endpoint_url'] or self._default_base_url(provider)
-                if base_url and not base_url.rstrip('/').endswith('/v1'):
-                    base_url = base_url.rstrip('/') + '/v1'
+                base_url = self._normalize_base_url(pm['endpoint_url'], provider)
                 return {
                     'provider': pm['provider_slug'],
                     'model': pm['model_name'],
@@ -412,6 +422,28 @@ class UnifiedLLM:
                 }
 
         raise ValueError('Cannot resolve model: provide provider_model_id or (provider + model)')
+
+    def resolve_model(self, provider_model_id=None, provider=None, model=None):
+        """公开解析模型配置（供状态检测等只读场景使用，避免直接调用内部 _resolve_model）。"""
+        return self._resolve_model(provider_model_id, provider, model)
+
+    def _build_fallback_cfgs(self, primary_cfg):
+        """构建兜底候选模型 cfg 列表（来自 ai_fallback_models 配置，跳过与主模型相同项）"""
+        out = []
+        try:
+            for item in _failover_engine.load_fallback_models():
+                try:
+                    c = self._resolve_model(None, item.get('provider'), item.get('model'))
+                    if not c.get('api_key'):
+                        continue  # 无 key 的兜底候选直接跳过，避免必然失败的调用拉长恢复时间
+                except Exception:
+                    continue  # 候选未注册/无 key → 跳过
+                if (c.get('provider') != primary_cfg.get('provider')
+                        or c.get('model') != primary_cfg.get('model')):
+                    out.append(c)
+        except Exception as e:
+            logger.warning(f'[UnifiedLLM] build fallback cfgs failed: {e}')
+        return out
 
     def _get_client(self, base_url, api_key):
         """获取或创建 OpenAI 客户端（线程安全 + 5 分钟缓存 TTL）"""
@@ -508,8 +540,6 @@ class UnifiedLLM:
         if not quota_ok:
             raise RuntimeError(quota_reason)
 
-        client = self._get_client(cfg['base_url'], cfg['api_key'])
-
         # Phase 2: LLM response cache — check before API call
         _cache_sys = ''
         _cache_usr = ''
@@ -523,19 +553,24 @@ class UnifiedLLM:
                 return _cached
 
         start_time = _time.time()
-        resp = client.chat.completions.create(
-            model=cfg['model'],
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            **kwargs
-        )
+        # 兜底引擎：主模型失败时自动切换 fallback 候选模型
+        def _call_once(cfg_):
+            client_ = self._get_client(cfg_['base_url'], cfg_['api_key'])
+            return client_.chat.completions.create(
+                model=cfg_['model'],
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                **kwargs
+            )
+        resp, used_cfg = _failover_engine.call_with_failover(
+            cfg, self._build_fallback_cfgs(cfg), _call_once, request_id='chat')
         elapsed = _time.time() - start_time
 
         usage = resp.usage
         if usage:
             self._log_usage(
-                cfg['model_id'], cfg['model'], cfg['provider'],
+                used_cfg['model_id'], used_cfg['model'], used_cfg['provider'],
                 usage.prompt_tokens or 0,
                 usage.completion_tokens or 0,
                 usage.total_tokens or 0,
@@ -547,7 +582,7 @@ class UnifiedLLM:
         # Phase 2: cache the response
         if temperature == 0 and not raw_response:
             get_llm_cache().set_response(
-                cfg['model'], _cache_sys, _cache_usr, result,
+                used_cfg['model'], _cache_sys, _cache_usr, result,
                 tokens_used=usage.total_tokens if usage else 0,
             )
 
@@ -567,27 +602,32 @@ class UnifiedLLM:
         if not quota_ok:
             raise RuntimeError(quota_reason)
 
-        client = self._get_client(cfg['base_url'], cfg['api_key'])
         start_time = _time.time()
-        stream = client.chat.completions.create(
-            model=cfg['model'],
-            messages=messages,
-            stream=True,
-            stream_options={'include_usage': True},
-            **kwargs
-        )
+
+        def _stream_call(cfg_):
+            client_ = self._get_client(cfg_['base_url'], cfg_['api_key'])
+            return client_.chat.completions.create(
+                model=cfg_['model'],
+                messages=messages,
+                stream=True,
+                stream_options={'include_usage': True},
+                **kwargs
+            )
+        failover_gen = _failover_engine.stream_with_failover(
+            cfg, self._build_fallback_cfgs(cfg), _stream_call, request_id='chat_stream')
 
         def _tracked_stream():
             final_usage = None
             try:
-                for chunk in stream:
+                for chunk in failover_gen:
                     if chunk.usage:
                         final_usage = chunk.usage
                     yield chunk
             finally:
+                used_cfg = getattr(failover_gen, 'used_cfg', cfg)
                 if final_usage:
                     self._log_usage(
-                        cfg['model_id'], cfg['model'], cfg['provider'],
+                        used_cfg['model_id'], used_cfg['model'], used_cfg['provider'],
                         final_usage.prompt_tokens,
                         final_usage.completion_tokens,
                         final_usage.total_tokens,
@@ -733,9 +773,7 @@ class UnifiedLLM:
     def _image_openai_compatible(self, cfg, prompt, size, reference_image_url=None):
         """OpenAI-compatible /images/generations（siliconflow / openai 等）。"""
         import requests as _requests
-        base_url = cfg.get('base_url') or ''
-        if base_url and not base_url.rstrip('/').endswith('/v1'):
-            base_url = base_url.rstrip('/') + '/v1'
+        base_url = self._normalize_base_url(cfg.get('base_url') or '')
         url = base_url.rstrip('/') + '/images/generations'
         payload = {
             'model': cfg.get('model') or 'black-forest-labs/FLUX.1-schnell',

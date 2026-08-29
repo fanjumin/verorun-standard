@@ -1397,3 +1397,21 @@ def llm_quota_delete(qid):
         conn.execute('DELETE FROM llm_quotas WHERE id=%s', (qid,))
         conn.commit()
     _log(admin['user_id'], 'delete_llm_quota', 'llm_quota', str(qid))
+
+
+@admin_bp.route('/ai-model-health', methods=['GET'])
+def ai_model_health():
+    admin, err = _require_admin()
+    if err:
+        return err
+    from agent_matrix.failover import ModelHealthStore
+    return jsonify({'success': True, 'data': ModelHealthStore().get_health()})
+
+
+@admin_bp.route('/ai-model-failover-events', methods=['GET'])
+def ai_model_failover_events():
+    admin, err = _require_admin()
+    if err:
+        return err
+    from agent_matrix.failover import ModelHealthStore
+    return jsonify({'success': True, 'data': ModelHealthStore().get_recent_events()})

@@ -24,6 +24,34 @@ from i18n import _
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 
+# ── 进程内 IP 维度 SMS 限流（防短信轰炸，2026-08-29 加固）──
+# 短信发送此前仅按手机号限流（5 次/小时），无 IP 维度防线；
+# stub 模式又曾把验证码明文回传响应体，未配置供应商时任何人都能批量换取验证码。
+# 此处增加每 IP 10 分钟最多 5 次的滑动窗口（多 worker 下各自独立，可接受，无迁移成本）。
+_IP_LIMIT_WINDOW = 600
+_IP_LIMIT_MAX = 5
+_ip_attempts: dict = {}
+_ip_lock = __import__('threading').Lock()
+
+
+def _client_ip():
+    """优先取反代注入的真实 IP 头，最后回退到套接字地址。"""
+    return (request.headers.get('X-Real-IP')
+            or (request.headers.get('X-Forwarded-For') or '').split(',')[0].strip()
+            or request.remote_addr or '0.0.0.0')
+
+
+def _ip_rate_limited(ip: str) -> bool:
+    """Return True if the given IP has exceeded the SMS send window."""
+    import time
+    now = int(time.time())
+    with _ip_lock:
+        _ip_attempts[ip] = [t for t in _ip_attempts.get(ip, []) if now - t < _IP_LIMIT_WINDOW]
+        if len(_ip_attempts[ip]) >= _IP_LIMIT_MAX:
+            return True
+        _ip_attempts[ip].append(now)
+    return False
+
 
 def api_ok(data=None):
     return jsonify({'success': True, 'data': data})
@@ -71,6 +99,8 @@ def sms_send():
                 return api_err(_('CAPTCHA expired or incomplete, please retry'), 400)
         except Exception:
             return api_err(_('Verification service error, please retry later'), 500)
+    if _ip_rate_limited(_client_ip()):
+        return api_err(_('Too many requests, please retry later'))
     if not check_rate_limit(phone):
         return api_err(_('Too many requests, please retry in one hour'))
     code = generate_code()
@@ -83,9 +113,9 @@ def sms_send():
     result = send_sms(phone, code, purpose)
     if not result.get('success'):
         return api_err('SMS send failed: ' + result.get('message', result.get('error', 'unknown error')))
-    # In stub mode, return code for testing
-    stub_info = {'code': code} if result.get('provider') == 'stub' else {}
-    return api_ok({'sent': True, 'provider': result.get('provider', 'unknown'), **stub_info})
+    # 安全加固（2026-08-29）：stub 模式下验证码仅写服务端日志/控制台，
+    # 绝不回传到响应体（此前可被匿名利用完成注册/登录）。
+    return api_ok({'sent': True, 'provider': result.get('provider', 'unknown')})
 
 
 # =============================================

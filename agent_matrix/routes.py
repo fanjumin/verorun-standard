@@ -1029,8 +1029,8 @@ def dispatch_task():
     if not agent_config['is_active']:
         return _error(_('Target Agent is disabled'))
 
-    # ── Image Agent special path: direct API call ──
-    if agent_config.get('domain') == 'image':
+    # ── Creative Agent special path: direct API call ──
+    if agent_config.get('domain') == 'creative':
         action = data.get('action', 'generate_image')
         params = data.get('params', {})
 
@@ -1662,7 +1662,7 @@ def matrix_dashboard():
     agents = _m().list_agents(active_only=True)
 
     # 科研版兜底：拒绝展示商务/电商域 Agent
-    if getattr(_m(), 'SCIENCE_EDITION', False):
+    if _m()._current_edition() == 'research':
         agents = [a for a in agents
                   if a.get('domain') not in ('business', 'finance')]
 

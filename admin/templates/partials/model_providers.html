@@ -1,4 +1,4 @@
-﻿var _mpTargetId=null;
+var _mpTargetId=null;
 window.l_model_providers=function(targetId){
   if(!targetId) document.getElementById("pt").textContent="{{ _('Model Management') }}";
   _mpTargetId=targetId||"mc";
@@ -44,7 +44,7 @@ function mpRefresh(){
       });
     }
     h+='</div>';
-    if(_mpTargetId!=='mc') h = '<div class="ai-hub-subtitle">AI Hub <span style="color:var(--dim)">&rsaquo;</span> {{ _('Model Management') }}</div>' + h;
+    if(_mpTargetId!=='mc') h = '<div class="ai-hub-subtitle">{{ _('AI Hub') }} <span style="color:var(--dim)">&rsaquo;</span> {{ _('Model Management') }}</div>' + h;
     document.getElementById(_mpTargetId).innerHTML=h;
   }).catch(function(e){
     document.getElementById(_mpTargetId).innerHTML='<div class="em">{{ _('Request Failed') }} — {{ _('Check Network or') }}<a href="javascript:go(\'model_providers\')">{{ _('Refresh & Retry') }}</a><br><span style="font-size:10px;color:var(--dim)">'+esc(String(e))+'</span></div>';
@@ -58,12 +58,12 @@ function mpRenderKeySelect(selectedId, providerSlug) {
             var keys = (d.data || []).filter(function(k) {
                 return !providerSlug || k.provider === providerSlug;
             });
-            var h = '<div style="font-size:11px;color:var(--dim)">API Key {{ _('Select') }}</div>';
+            var h = '<div style="font-size:11px;color:var(--dim)">{{ _('API Key') }} {{ _('Select') }}</div>';
             h += '<select class="sl" id="mpApiKeyId" style="width:100%">';
-            h += '<option value="">-- None --</option>';
+            h += '<option value="">{{ _('None') }}</option>';
             keys.forEach(function(k) {
                 var sel = (selectedId && k.id == selectedId) ? ' selected' : '';
-                h += '<option value="'+k.id+'"'+sel+'>'+esc(k.name)+' ('+esc(k.provider)+')'+(k.has_value ? '' : ' - No Key')+'</option>';
+                h += '<option value="'+k.id+'"'+sel+'>'+esc(k.name)+' ('+esc(k.provider)+')'+(k.has_value ? '' : ' - {{ _('No Key') }}')+'</option>';
             });
             h += '</select>';
             return h;
@@ -78,11 +78,11 @@ function mpShowAddModel(providerId, providerName){
     '<input type="hidden" id="mpEditId" value="">'+
     '<input type="hidden" id="mpProvId" value="'+providerId+'">'+
     '<div class="g2">'+
-    '<div><div style="font-size:11px;color:var(--dim)">{{ _('Display Name') }} *</div><input class="in" id="mpName" placeholder="如：{{ _('Voice Cloning') }} v2" style="width:100%"></div>'+
-    '<div><div style="font-size:11px;color:var(--dim)">{{ _('Model Name') }}</div><input class="in" id="mpModelName" placeholder="如：volc-voice-clone-v2" style="width:100%"></div>'+
+    '<div><div style="font-size:11px;color:var(--dim)">{{ _('Display Name') }} *</div><input class="in" id="mpName" placeholder="{{ _('e.g.') }}: {{ _('Voice Cloning') }} v2" style="width:100%"></div>'+
+    '<div><div style="font-size:11px;color:var(--dim)">{{ _('Model Name') }}</div><input class="in" id="mpModelName" placeholder="{{ _('e.g.') }}: volc-voice-clone-v2" style="width:100%"></div>'+
     '<div><div style="font-size:11px;color:var(--dim)">{{ _('Ability Type') }}</div><select class="sl" id="mpCaps" style="width:100%"><option value="text">{{ _('Text') }}</option><option value="image">{{ _('Image') }}</option><option value="voice">{{ _('Voice') }}</option><option value="tts">{{ _('TTS') }}</option><option value="video">{{ _('Video') }}</option></select></div>'+
     '</div>'+
-    '<div style="margin-top:8px"><div style="font-size:11px;color:var(--dim)">API {{ _('Endpoint') }}</div><input class="in" id="mpUrl" placeholder="https://api.siliconflow.cn/v1" style="width:100%"></div>'+
+    '<div style="margin-top:8px"><div style="font-size:11px;color:var(--dim)">{{ _('API Endpoint') }}</div><input class="in" id="mpUrl" placeholder="https://api.siliconflow.cn/v1" style="width:100%"></div>'+
     '<div style="margin-top:10px"><button class="btn bp" onclick="mpCreateModel()">{{ _('Save') }}</button> <button class="btn bo" onclick="document.getElementById(\'mpAddForm\').style.display=\'none\'">{{ _('Cancel') }}</button></div>'+
     '</div>';
 }
@@ -111,7 +111,7 @@ function mpShowEditModel(id){
       '<option value="video"'+(m.capabilities=='video'?' selected':'')+'>{{ _('Video') }}</option>'+
     '</select></div>'+
     '</div>'+
-    '<div style="margin-top:8px"><div style="font-size:11px;color:var(--dim)">API {{ _('Endpoint') }}</div><input class="in" id="mpUrl" value="'+escAttr(m.endpoint_url||'')+'" style="width:100%"></div>'+
+    '<div style="margin-top:8px"><div style="font-size:11px;color:var(--dim)">{{ _('API Endpoint') }}</div><input class="in" id="mpUrl" value="'+escAttr(m.endpoint_url||'')+'" style="width:100%"></div>'+
     '<div style="margin-top:8px"><label style="font-size:11px"><input type="checkbox" id="mpActive"'+(m.is_active?' checked':'')+'> {{ _('Enabled') }}</label></div>'+
     '<div style="margin-top:10px"><button class="btn bp" onclick="mpUpdateModel()">{{ _('Save') }}</button> <button class="btn bo" onclick="document.getElementById(\'mpAddForm\').style.display=\'none\'">{{ _('Cancel') }}</button></div>'+
     '</div>';
@@ -178,7 +178,7 @@ function mpDeleteModel(id,name){
   document.body.appendChild(overlay);
   box.querySelector('.mp-cancel-btn').onclick=function(){overlay.remove();};
   box.querySelector('.mp-del-btn').onclick=function(){
-    var btn=this;btn.disabled=true;btn.textContent='Deleting...';
+    var btn=this;btn.disabled=true;btn.textContent='{{ _('Deleting...') }}';
     fetch("/admin/provider-models/"+id,{method:"DELETE",headers:{"Authorization":"Bearer "+T}})
     .then(function(r){return r.json()})
     .then(function(d){

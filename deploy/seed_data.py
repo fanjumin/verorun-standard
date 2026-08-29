@@ -284,6 +284,58 @@ def seed_admin_subscription(db: SeedDB, user_id: int):
     print(f"  [OK] admin subscription: free (user_id={user_id})")
 
 
+def seed_ai_system_config(db: SeedDB):
+    """Seed default AI runtime configuration (idempotent; never overwrites admin tweaks).
+
+    - model_tier_standard points to the deepseek/deepseek-v4-flash provider_model id,
+      resolved by name (NOT a hardcoded id, which would be fragile across installs).
+    - ai_text_provider / ai_text_model / cleaner_ai_model give tier/cleaner pipelines a
+      working default when the operator has not explicitly configured one
+      (BUG-8 tier resolution / BUG-7 cleaner pipeline regression fix).
+    """
+    if not db.table_exists("system_config"):
+        print("  [SKIP] system_config table not found")
+        return
+    if not db.table_exists("provider_models") or not db.table_exists("providers"):
+        print("  [SKIP] provider_models/providers table not found")
+        return
+
+    # Resolve deepseek-v4-flash provider_model id by name (stable across installs).
+    if db._db_type == "postgresql":
+        cur = db.execute(
+            "SELECT pm.id FROM provider_models pm "
+            "JOIN providers p ON pm.provider_id = p.id "
+            "WHERE p.slug = %s AND pm.model_name = %s",
+            ("deepseek", "deepseek-v4-flash")
+        )
+    else:
+        cur = db.execute(
+            "SELECT pm.id FROM provider_models pm "
+            "JOIN providers p ON pm.provider_id = p.id "
+            "WHERE p.slug = ? AND pm.model_name = ?",
+            ("deepseek", "deepseek-v4-flash")
+        )
+    row = cur.fetchone()
+    tier_value = str(row[0]) if row else None
+    if not row:
+        print("  [WARN] deepseek/deepseek-v4-flash provider_model not found; model_tier_standard NOT seeded")
+
+    seeds = {
+        "model_tier_standard": tier_value,
+        "ai_text_provider": "deepseek",
+        "ai_text_model": "deepseek-v4-flash",
+        "cleaner_ai_model": "deepseek-v4-flash",
+    }
+    for key, value in seeds.items():
+        if value is None:
+            continue
+        db.insert_on_conflict("system_config", {
+            "key": key,
+            "value": value,
+        }, conflict_col="key")
+        print(f"  [OK] system_config: {key}={value}")
+
+
 # ======================================================================
 # Main
 # ======================================================================
@@ -336,6 +388,7 @@ def main():
     seed_admin_profile(db, user_id, username)
     seed_quotas(db)
     seed_admin_subscription(db, user_id)
+    seed_ai_system_config(db)
 
     db.conn.commit()
     db.close()

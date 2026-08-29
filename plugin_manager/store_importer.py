@@ -207,11 +207,15 @@ def import_from_github(raw_url: str) -> Tuple[Optional[dict], List[str]]:
     if not _IDENTIFIER_RE.match(manifest.get('identifier', '')):
         return None, ['identifier must match ^[a-z0-9_]+$']
 
-    # 统一网关注册强制校验：agent_role 必须为 9 个核心角色之一（插件标准 §2.2）
-    _CORE_ROLES = ['athena', 'content', 'business', 'builder',
-                   'finance', 'ops', 'service', 'vision', 'creative']
-    if manifest.get('agent_role') not in _CORE_ROLES:
-        return None, [f'plugin.json agent_role must be one of the 9 core roles: {", ".join(_CORE_ROLES)}']
+    # 统一网关注册强制校验：agent_role 必须为核心角色之一（插件标准 §2.2）
+    # 核心角色集由 agent_matrix/roles/*.yaml 动态推导（单一事实源），不再手写。
+    try:
+        from agent_matrix.models import get_core_role_slugs
+        _core_roles = get_core_role_slugs()
+    except ImportError:
+        return None, ['agent_matrix unavailable: cannot validate agent_role']
+    if manifest.get('agent_role') not in _core_roles:
+        return None, [f'plugin.json agent_role must be one of the core roles: {", ".join(_core_roles)}']
     if not isinstance(manifest.get('capabilities'), list) or not manifest.get('capabilities'):
         return None, ['plugin.json capabilities must be a non-empty array of strings']
 
@@ -225,6 +229,26 @@ def import_from_github(raw_url: str) -> Tuple[Optional[dict], List[str]]:
 
     readme_path = f'{dir_path}/README.md' if dir_path else 'README.md'
 
+    # README 多命名抓取（问题2 方案A：服务端代理缓存用）
+    # 命中优先级：中文命名 > 英文默认；双平台回退；失败静默（readme_cache 留空，不影响导入）
+    readme_url = (manifest.get('readme_url') or '').strip()
+    readme_cache = ''
+    readme_names = ('README.cn.md', 'README_CN.md', 'README.zh-CN.md', 'README.md')
+    if dir_path:
+        readme_names = tuple(f'{dir_path}/{n}' for n in readme_names)
+    for h in ('gitee', 'github'):
+        if readme_cache:
+            break
+        for name in readme_names:
+            for u in _build_manifest_paths(h, owner, repo, branch, name):
+                text = _http_get(u)
+                if text:
+                    readme_url = u
+                    readme_cache = text[:20000]
+                    break
+            if readme_cache:
+                break
+
     entry = {
         'identifier': manifest['identifier'],
         'name': manifest.get('name', ''),
@@ -235,13 +259,15 @@ def import_from_github(raw_url: str) -> Tuple[Optional[dict], List[str]]:
         'author_url': manifest.get('author_url', ''),
         'category': cat,
         'tags': (manifest.get('tags') or [])[:10],
-        'tagline': (manifest.get('tagline') or '')[:20],
+        'tagline': (manifest.get('tagline') or '')[:32],
+        'tagline_subtitle': (manifest.get('tagline_subtitle') or '')[:64],
         'tagline_i18n_key': manifest.get('tagline_i18n_key', ''),
         'icon_url': manifest.get('icon_url', ''),
         'min_app_version': manifest.get('min_app_version', '0.10.0'),
         'depends_on': manifest.get('depends_on', {}),
         'screenshots': (manifest.get('screenshots') or [])[:12],
         'readme_url': readme_url,
+        'readme_cache': readme_cache,
         'download_url': '',      # 无 Release 时留空，管理员可后补
         'package_hash': '',
         'file_size': 0,

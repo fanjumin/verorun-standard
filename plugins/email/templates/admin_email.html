@@ -107,6 +107,7 @@ function saveEmailSettings(){
   var inputs=el.querySelectorAll('[id^="es-"]');
   inputs.forEach(function(inp){
     var key=inp.id.replace('es-','');
+    if(inp.value==='********'){return;} // 掩码占位不提交，避免覆盖真实 SMTP 密码
     data[key]=inp.value;
   });
   var status=document.getElementById("es-status");

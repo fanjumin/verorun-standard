@@ -25,6 +25,26 @@ import urllib.request as _ur
 from auth_blueprint import register_auth
 
 
+# ── Edition 服务门控（单一事实源：deploy/editions/<edition>.yaml 的 services: 段）──
+try:
+    from agent_matrix.models import is_service_enabled
+except Exception as _e:
+    print(f'[Edition] ⚠️ is_service_enabled import failed, default all-enabled: {_e}')
+
+    def is_service_enabled(_name):
+        return True
+
+_MAIN_SITE_ENABLED = is_service_enabled('main_site')
+_USER_LOGIN_ENABLED = is_service_enabled('user_login')
+
+
+def _site_route(rule, **kw):
+    """主站禁用（桌面包裹版）时只定义不注册路由（请求 404），官方版正常注册。"""
+    if not _MAIN_SITE_ENABLED:
+        return lambda fn: fn
+    return app.route(rule, **kw)
+
+
 def _is_edu():
     """教育版：无主站/无用户登录/无用户面板，所有公开入口统一导向 Admin 登录。"""
     return os.environ.get('DEPLOY_TYPE', '').strip().lower() == 'edu'
@@ -72,25 +92,32 @@ try:
 except Exception as e:
     print(f'[PluginManager] ⚠️ Auth service initialization failed: {e}')
 
-register_auth(app)
+# 桌面包裹版（user_login 禁用）：用户登录 / 用户资料蓝本不注册；
+# admin / cms_admin / agent / session 保留（管理端仍需使用）。
+_exclude_bps = []
+if not _USER_LOGIN_ENABLED:
+    _exclude_bps += ['auth', 'user']
+register_auth(app, exclude_blueprints=_exclude_bps)
 
 # ── Main site CMS public routes (/services, /cases, ...) ──
-try:
-    from main_site.cms_public import cms_bp
-    app.register_blueprint(cms_bp)
-    print('[CMS Public] ✅ Main site public CMS routes registered')
-except Exception as e:
-    print(f'[CMS Public] ⚠️ Main site public CMS routes failed: {e}')
+if _MAIN_SITE_ENABLED:
+    try:
+        from main_site.cms_public import cms_bp
+        app.register_blueprint(cms_bp)
+        print('[CMS Public] ✅ Main site public CMS routes registered')
+    except Exception as e:
+        print(f'[CMS Public] ⚠️ Main site public CMS routes failed: {e}')
 
-# ── OAuth Plugin third-party login routes ──
-try:
-    from plugins.oauth_config.routes.auth import oauth_bp
-    app.register_blueprint(oauth_bp)
-    print('[OAuth Plugin] ✅ Third-party login routes registered')
-except ImportError:
-    print('[OAuth Plugin] ⚠️ OAuth plugin not installed, third-party login unavailable')
-except Exception as e:
-    print(f'[OAuth Plugin] ⚠️ Load failed: {e}')
+# ── OAuth Plugin third-party login routes（user_login 禁用时不注册）──
+if _USER_LOGIN_ENABLED:
+    try:
+        from plugins.oauth_config.routes.auth import oauth_bp
+        app.register_blueprint(oauth_bp)
+        print('[OAuth Plugin] ✅ Third-party login routes registered')
+    except ImportError:
+        print('[OAuth Plugin] ⚠️ OAuth plugin not installed, third-party login unavailable')
+    except Exception as e:
+        print(f'[OAuth Plugin] ⚠️ Load failed: {e}')
 
 try:
     from flask_cors import CORS
@@ -191,7 +218,7 @@ def site_features():
     return render_template('public_home.html', LANG=deploy.LANG, site_plans=site_plans)
 
 
-@app.route('/contact')
+@_site_route('/contact')
 def site_contact():
     if _is_edu():
         return _edu_admin_login()
@@ -210,7 +237,7 @@ def login_page():
     return render_template('login.html', LANG=deploy.LANG, brand=brand, version=get_version())
 
 
-@app.route('/register')
+@_site_route('/register')
 def register_page():
     """Unified SSO register page."""
     if _is_edu():

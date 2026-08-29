@@ -180,16 +180,35 @@ class PluginDiscovery:
             dashboard_meta=meta.get('dashboard', {}),
         )
         # ★ v1.6 统一网关注册强制校验（插件标准 §2.2/§4）：
-        # agent_role 必须为 9 个核心角色之一，否则记录校验错误（enable 将拒绝）。
+        # agent_role 必须为核心角色之一，否则记录校验错误（enable 将拒绝）。
+        # 核心角色集由 agent_matrix/roles/*.yaml 动态推导（单一事实源）。
         try:
             from agent_matrix.models import get_core_role_slugs
             _core_roles = get_core_role_slugs()
         except ImportError:
-            _core_roles = ['athena', 'content', 'business', 'builder',
-                           'finance', 'ops', 'service', 'vision', 'creative']
+            _core_roles = []
         _ar = meta.get('agent_role', '')
         if _ar not in _core_roles:
-            info.last_error = f'missing/invalid agent_role: {_ar!r}（须为 9 个核心角色之一）'
+            info.last_error = f'missing/invalid agent_role: {_ar!r}（须为核心角色之一）'
+        # ★ capabilities 声明→实现 轻量校验（架构评审 §3.4）：
+        # 每个 capability 的 namespace（首个点号前）须在插件 .py 实现中出现，
+        # 否则视为「假能力」告警（不阻断 enable）。
+        _caps = meta.get('capabilities') or []
+        if _caps:
+            _py_blob = []
+            for _root, _dirs, _files in os.walk(plugin_dir):
+                for _f in _files:
+                    if _f.endswith('.py'):
+                        try:
+                            _py_blob.append(open(os.path.join(_root, _f), encoding='utf-8').read())
+                        except Exception:
+                            pass
+            _blob = '\n'.join(_py_blob)
+            for _cap in _caps:
+                if isinstance(_cap, str) and '.' in _cap:
+                    _ns = _cap.split('.')[0]
+                    if _ns and _ns not in _blob:
+                        print(f'[PluginDiscovery] WARNING: {identifier} capability {_cap!r} namespace {_ns!r} not found in implementation')
         if info.admin_url and str(info.admin_url).startswith('/'):
             print(f'[PluginDiscovery] WARNING: {identifier} uses deprecated admin_url field. Use menu.items[].key + l_<key>() instead.')
         return info

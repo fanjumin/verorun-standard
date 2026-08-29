@@ -612,22 +612,22 @@ class PluginManager:
                 print(f'[PluginManager] ⚠️ {identifier}: integrity check skipped: {_e}')
 
             # ── 统一网关注册强制校验（插件标准 §2.2/§4）────────────
-            # 官方插件必须声明 agent_role（9 核心角色之一），否则拒绝启用。
+            # 官方插件必须声明 agent_role（核心角色之一），否则拒绝启用。
+            # 核心角色集由 agent_matrix/roles/*.yaml 动态推导（单一事实源）。
             try:
                 from agent_matrix.models import get_core_role_slugs
                 _core_roles = get_core_role_slugs()
             except ImportError:
-                _core_roles = ['athena', 'content', 'business', 'builder',
-                               'finance', 'ops', 'service', 'vision', 'creative']
+                _core_roles = []
             if (info.metadata or {}).get('agent_role') not in _core_roles:
                 info.last_error = ('missing/invalid agent_role: '
                                    f'{(info.metadata or {}).get("agent_role")!r} '
-                                   '（须为 9 个核心角色之一）')
+                                   '（须为核心角色之一）')
                 info.status = PluginStatus.ERROR
                 self._save_to_db(info)
                 raise PluginStateError(
                     identifier, 'missing_agent_role',
-                    'enable failed: plugin.json 必须声明 agent_role（9 个核心角色之一）'
+                    'enable failed: plugin.json 必须声明 agent_role（核心角色之一）'
                 )
 
             # 执行插件 setup()
@@ -1160,6 +1160,40 @@ class PluginManager:
                 engine.register_node_handler(node_type, handler)
                 count += 1
                 print(f'[PluginManager] ✅ {pid}: DAG 节点 {node_type} 已注册')
+        return count
+
+    def register_all_plugin_jobs(self, scheduler) -> int:
+        """将 ACTIVE 插件的 register_jobs() 注册到 SchedulerEngine（APScheduler 进程内）。
+
+        消费插件 register_jobs() 返回的 APScheduler job dict（id/func/trigger...）。
+        单个插件失败不影响其他插件。返回注册成功数。
+        """
+        count = 0
+        for pid, instance in self._instances.items():
+            info = self._cache.get(pid)
+            if not info or info.status != PluginStatus.ACTIVE:
+                continue
+            if not hasattr(instance, 'register_jobs'):
+                continue
+            if not self._capability_allowed(info, 'register_jobs'):
+                continue
+            try:
+                jobs = instance.register_jobs() or []
+            except SystemExit as e:
+                self._guard_failure(info, 'register_jobs')
+                print(f'[PluginManager] ⚠️ {pid}: register_jobs() SystemExit: {e}')
+                continue
+            except Exception as e:
+                self._guard_failure(info, 'register_jobs')
+                print(f'[PluginManager] ⚠️ {pid}: register_jobs() 调用失败: {e}')
+                continue
+            for job in jobs:
+                if not isinstance(job, dict) or not callable(job.get('func')):
+                    print(f'[PluginManager] ⚠️ {pid}: job {job} 无 func 或不可调用，跳过')
+                    continue
+                if scheduler.add_plugin_job(job):
+                    count += 1
+                    print(f'[PluginManager] ✅ {pid}: job {job.get("id")} 已注册')
         return count
 
     # ── 批量操作 ────────────────────────────────────────────────────────

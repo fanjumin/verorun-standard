@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Email Plugin Routes — 邮件管理 API 路由
 ========================================
@@ -180,10 +180,12 @@ def admin_email_settings_save():
     if not mgr:
         return jsonify({'success': False, 'error': 'PluginManager not available'}), 503
 
-    # 只保存 config 中定义的 keys
+    # 只保存 config 中定义的 keys；掩码占位值 '********' 视为未修改，保留旧密码
     cfg = {}
     for k in _MAIL_KEYS:
         if k in data:
+            if k == 'smtp_pass' and str(data[k]) == '********':
+                continue
             cfg[k] = data[k]
 
     if not cfg:

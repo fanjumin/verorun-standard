@@ -12,6 +12,7 @@
 {% include 'partials/api_keys.html' %}
 {% include 'partials/provider_api_keys.html' %}
 {% include 'partials/llm_quotas.html' %}
+{% include 'partials/model_health.html' %}
 {% include 'partials/posts.html' %}
 {% include 'partials/tickets.html' %}
 {% include 'plugins/im_gateway/templates/admin_imgateway.html' ignore missing %}
@@ -49,6 +50,11 @@
 {% include 'partials/workflow_editor.html' %}
 {% include 'plugins/analytics/templates/admin_analytics.html' ignore missing %}
 {% include 'plugins/health_check/templates/admin_health.html' ignore missing %}
+{% include 'plugins/risk_control/templates/dashboard.html' ignore missing %}
+{% include 'plugins/risk_control/templates/rules.html' ignore missing %}
+{% include 'plugins/risk_control/templates/lists.html' ignore missing %}
+{% include 'plugins/risk_control/templates/reviews.html' ignore missing %}
+{% include 'plugins/risk_control/templates/events.html' ignore missing %}
 {% include 'partials/i18n_translations.html' %}
 {% include 'partials/comments.html' %}
 {% include 'partials/admins.html' %}

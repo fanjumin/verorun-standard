@@ -1751,12 +1751,12 @@ def init_db():
         m.execute('CREATE INDEX IF NOT EXISTS idx_kb_scope ON knowledge_blocks(scope)')
         m.execute('CREATE INDEX IF NOT EXISTS idx_kb_owner ON knowledge_blocks(owner_id)')
         # Backfill existing data: distinguish system KB from user KB by id prefix
-        m.execute("UPDATE knowledge_blocks SET scope='system', owner_id=NULL WHERE id LIKE 'kb_company_%' OR id LIKE 'kb_product_%' OR id LIKE 'kb_faq_faq_%' OR id LIKE 'kb_faq_whitepaper%' OR (id LIKE 'kb_faq_%' AND id NOT LIKE 'kb_faq_faq_%')")
+        m.execute("UPDATE knowledge_blocks SET scope='user', owner_id=NULL WHERE id LIKE 'kb_company_%' OR id LIKE 'kb_product_%' OR id LIKE 'kb_faq_faq_%' OR id LIKE 'kb_faq_whitepaper%' OR (id LIKE 'kb_faq_%' AND id NOT LIKE 'kb_faq_faq_%')")
         m.execute("UPDATE knowledge_blocks SET scope='user', owner_id=NULL WHERE id LIKE 'kb_cleaner_%'")
         # Backfill only when the 'source' column exists (added by the 2026-07-18 migration)
         kb_cols_after = get_table_columns(m, 'knowledge_blocks')
         if 'source' in kb_cols_after:
-            m.execute("UPDATE knowledge_blocks SET scope='system', owner_id=NULL WHERE scope IS NULL AND source='manual'")
+            m.execute("UPDATE knowledge_blocks SET scope='user', owner_id=NULL WHERE scope IS NULL AND source='manual'")
             m.execute("UPDATE knowledge_blocks SET scope='user', owner_id=NULL WHERE scope IS NULL AND source IN ('auto','matrix')")
         print('[Migration] knowledge_blocks scope/owner_id migration completed')
         # Seed knowledge blocks from mini-program
@@ -1786,7 +1786,7 @@ def init_db():
                 ('kb_faq_004','域名和服务器说明','平台可协助客户完成域名注册和服务器配置。客户可使用自有域名，也可通过平台代购。服务器采用云部署方案，自动扩容，保障稳定运行。域名和服务器费用不包含在套餐内。','域名,服务器,云部署,扩容,注册,代购,备案','faq',7),
             ]
             for s in kb_seeds:
-                m.execute("INSERT INTO knowledge_blocks (id,title,content,keywords,category,priority,scope,owner_id) VALUES (%s,%s,%s,%s,%s,%s,'system',NULL) ON CONFLICT (id) DO NOTHING", s)
+                m.execute("INSERT INTO knowledge_blocks (id,title,content,keywords,category,priority,scope,owner_id) VALUES (%s,%s,%s,%s,%s,%s,'user',NULL) ON CONFLICT (id) DO NOTHING", s)
             m.commit()
             print(f'[Migration] knowledge_blocks seeded: {len(kb_seeds)} blocks')
 
@@ -1810,7 +1810,7 @@ def init_db():
                 ('kb_faq_whitepaper_tech', '技术架构说明', '系统采用Python 3.12 + Flask多服务微架构，SQLite (WAL模式)数据库，Vanilla JS SPA前端。支持SSO统一登录、多种支付网关、SSE流式对话、RAG知识库检索、Agent矩阵智能体编排等核心技术。', '技术,架构,Flask,Python,SSO,支付', 'tech', 8),
             ]
             for s in faq_seeds_data:
-                ms.execute("INSERT INTO knowledge_blocks (id,title,content,keywords,category,priority,scope,owner_id) VALUES (%s,%s,%s,%s,%s,%s,'system',NULL) ON CONFLICT (id) DO NOTHING", s)
+                ms.execute("INSERT INTO knowledge_blocks (id,title,content,keywords,category,priority,scope,owner_id) VALUES (%s,%s,%s,%s,%s,%s,'user',NULL) ON CONFLICT (id) DO NOTHING", s)
             ms.commit()
             print(f'[Migration] FAQ & whitepaper seeded: {len(faq_seeds_data)} blocks')
 
@@ -2165,6 +2165,44 @@ def init_db():
             except Exception as e:
                 print(f'[Migration] knowledge_queue.processed_hash skipped: {e}')
         m.commit()
+
+    # ── Migration: ai_model_health + ai_model_failover_events（兜底引擎模型健康状态 2026-08-27）──
+    with get_db() as m:
+        m.execute('''CREATE TABLE IF NOT EXISTS ai_model_health (
+            id                    SERIAL PRIMARY KEY,
+            model_id              BIGINT NOT NULL DEFAULT 0,
+            provider_slug         VARCHAR(64) NOT NULL DEFAULT '',
+            model_name            VARCHAR(255) NOT NULL DEFAULT '',
+            status                VARCHAR(20) NOT NULL DEFAULT 'unknown',
+            consecutive_failures  BIGINT NOT NULL DEFAULT 0,
+            circuit_open          BOOLEAN NOT NULL DEFAULT FALSE,
+            total_calls           BIGINT NOT NULL DEFAULT 0,
+            total_failures        BIGINT NOT NULL DEFAULT 0,
+            last_success_at       TIMESTAMP DEFAULT NULL,
+            last_failure_at       TIMESTAMP DEFAULT NULL,
+            last_error            TEXT DEFAULT '',
+            cooldown_until        TIMESTAMP DEFAULT NULL,
+            created_at            TIMESTAMP DEFAULT NOW(),
+            updated_at            TIMESTAMP DEFAULT NOW(),
+            UNIQUE(provider_slug, model_name)
+        )''')
+        m.execute('CREATE INDEX IF NOT EXISTS idx_amh_model ON ai_model_health(model_id)')
+        m.execute('''CREATE TABLE IF NOT EXISTS ai_model_failover_events (
+            id            SERIAL PRIMARY KEY,
+            from_model_id BIGINT NOT NULL DEFAULT 0,
+            from_provider VARCHAR(64) NOT NULL DEFAULT '',
+            from_model    VARCHAR(255) NOT NULL DEFAULT '',
+            to_model_id   BIGINT NOT NULL DEFAULT 0,
+            to_provider   VARCHAR(64) NOT NULL DEFAULT '',
+            to_model      VARCHAR(255) NOT NULL DEFAULT '',
+            reason        VARCHAR(64) NOT NULL DEFAULT 'health',
+            error_text    TEXT DEFAULT '',
+            request_id    VARCHAR(64) DEFAULT '',
+            created_at    TIMESTAMP DEFAULT NOW()
+        )''')
+        m.execute('CREATE INDEX IF NOT EXISTS idx_amfe_created ON ai_model_failover_events(created_at)')
+        m.commit()
+        print('[Migration] ai_model_health + ai_model_failover_events created')
 
 
 def _get_default_interests():

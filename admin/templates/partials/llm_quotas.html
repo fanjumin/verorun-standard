@@ -1,4 +1,4 @@
-﻿window.l_llm_quotas=function(targetId){
+window.l_llm_quotas=function(targetId){
   if(!targetId) document.getElementById("pt").textContent="{{ _('LLM Quotas') }}";
   var target=document.getElementById(targetId||"mc");
   render();
@@ -33,7 +33,7 @@
         var label=(TYPES[q.target_type]||q.target_type)+(q.target_id?' #'+q.target_id:'');
         h+='<tr>';
         h+='<td style="font-weight:600"><span class="tag" style="background:rgba(0,245,255,0.1);color:var(--accent)">'+esc(label)+'</span></td>';
-        h+='<td>'+(q.daily_limit>0?'<span style="color:var(--accent3)">'+formatNum(q.daily_limit)+' tokens</span>':'<span style="color:var(--dim)">{{ _('Unlimited') }}</span>')+'</td>';
+        h+='<td>'+(q.daily_limit>0?'<span style="color:var(--accent3)">'+formatNum(q.daily_limit)+' {{ _('tokens') }}</span>':'<span style="color:var(--dim)">{{ _('Unlimited') }}</span>')+'</td>';
         h+='<td>'+(q.rate_limit>0?'<span style="color:var(--gold)">'+q.rate_limit+' /'+q.rate_window_sec+'s</span>':'<span style="color:var(--dim)">{{ _('Unlimited') }}</span>')+'</td>';
         h+='<td style="color:var(--dim)">'+q.rate_window_sec+'s</td>';
         h+='<td>'+(q.is_active?'<span style="color:var(--accent3)">{{ _('Active') }}</span>':'<span style="color:var(--dim)">{{ _('Inactive') }}</span>')+'</td>';
@@ -44,7 +44,7 @@
       h+='</tbody></table>';
     }
     h+='</div>';
-    if(targetId) h = '<div class="ai-hub-subtitle">AI Hub <span style="color:var(--dim)">&rsaquo;</span> {{ _('LLM Quotas') }}</div>' + h;
+    if(targetId) h = '<div class="ai-hub-subtitle">{{ _('AI Hub') }} <span style="color:var(--dim)">&rsaquo;</span> {{ _('LLM Quotas') }}</div>' + h;
     target.innerHTML=h;
   }
 
@@ -72,7 +72,7 @@
     });
     h+='</select></div>';
     h+='<div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--dim);margin-bottom:4px">{{ _('Target ID') }} <span style="font-weight:400">({{ _('optional') }})</span></label>';
-    h+='<input id="q-tid" class="in" style="width:100%" value="'+escAttr(isEdit?(q.target_id||''):'')+'" placeholder="{{ _('e.g. user_id, model_id, or leave blank for global') }}"></div>';
+    h+='<input id="q-tid" class="in" style="width:100%" value="'+escAttr(isEdit?(q.target_id||''):'')+'" placeholder="{{ _('e.g.') }}: user_id, model_id, {{ _('or leave blank for global') }}"></div>';
     h+='<div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--dim);margin-bottom:4px">{{ _('Daily Token Limit') }} (0={{ _('unlimited') }})</label>';
     h+='<input id="q-daily" class="in" type="number" style="width:100%" min="0" value="'+(isEdit?q.daily_limit:'0')+'"></div>';
     h+='<div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--dim);margin-bottom:4px">{{ _('Rate Limit') }} (0={{ _('unlimited') }})</label>';

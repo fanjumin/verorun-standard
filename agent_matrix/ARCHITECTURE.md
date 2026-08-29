@@ -34,9 +34,9 @@
 │  │  └────────────┬────────────┬────────────┬─────────────┘  │   │
 │  │               │            │            │                 │   │
 │  │  ┌────────────▼──┐ ┌──────▼──────┐ ┌───▼──────────┐     │   │
-│  │  │ CMS Agent     │ │ Health     │ │ Content     │ ... │   │   │
-│  │  │ (内容专家)     │ │ Check      │ │ Factory     │     │   │   │
-│  │  │               │ │ Agent      │ │ Agent       │     │   │   │
+│  │  │ Content       │ │ Business    │ │ Finance      │ ... │   │   │
+│  │  │ Agent         │ │ Agent       │ │ Agent        │     │   │   │
+│  │  │ (内容/分析)   │ │ (商业/店铺) │ │ (财务)       │     │   │   │
 │  │  └───────────────┘ └────────────┘ └──────────────┘     │   │
 │  └──────────────────────────────────────────────────────────┘   │
 │                         │                                       │
@@ -393,6 +393,8 @@ STEP 6 — 最终报告
 
 ## 五、子 Agent 角色 Prompt 模板
 
+> 注：各角色的**实际系统提示词**以 `agent_matrix/prompts/*.md` 为准（经 PromptResolver 或 seed 写入 `agent_prompts` 表）。以下为早期设计模板，仅作参考。
+
 ### 5.1 通用模板
 
 ```markdown
@@ -730,41 +732,23 @@ auth-center/
 | system_prompt | [使用第四章模板] |
 | auto_approve | 0 |
 
-### Sub Agent 1: CMS Agent
+### Sub Agents（当前 11 个角色，由 `agent_matrix/roles/*.yaml` 定义并 seed 到 `agent_matrix` 表）
 
-| 字段 | 值 |
-|------|-----|
-| name | CMS Agent |
-| role_type | sub |
-| description | 内容管理专家 — CMS 文章创建、排版、配图、发布 |
-| domain | cms |
-| provider | system_qwen (复用 dashscope) |
-| model | qwen-turbo |
-| allowed_modules | ["cms_admin", "social_push", "content_factory"] |
+| slug | name | domain | 说明 |
+|------|------|--------|------|
+| athena | Athena | orchestration | 主协调（Master） |
+| content | Content | content | 内容与数据分析 |
+| business | Business | business | 商业与店铺运营 |
+| builder | Builder | site_builder | 建站 |
+| finance | Finance | finance | 财务 |
+| ops | Ops | ops | 运维与自动化 |
+| service | Service | service | 客服 |
+| vision | Vision | vision | 视觉理解 |
+| creative | Creative | creative | 图像生成 |
+| veroscholar | Veroscholar | general | 学术研究（research 版） |
+| stock_analyst | Stock Analyst | finance | 证券分析（finance 版） |
 
-### Sub Agent 2: Content Factory Agent
-
-| 字段 | 值 |
-|------|-----|
-| name | Content Factory Agent |
-| role_type | sub |
-| description | 内容工厂专家 — 采集、加工、审核、Skill推送 |
-| domain | content-factory |
-| provider | system_qwen (复用 dashscope) |
-| model | qwen-turbo |
-| allowed_modules | ["content_factory"] |
-
-### Sub Agent 4: Analytics Agent
-
-| 字段 | 值 |
-|------|-----|
-| name | Analytics Agent |
-| role_type | sub |
-| description | 数据分析师 — 统计解读、报告生成、洞察发现 |
-| domain | analytics |
-| provider | system_qwen |
-| model | qwen-turbo |
-| allowed_modules | ["analytics", "automation"] |
+> 注：角色定义以 `agent_matrix/roles/*.yaml` 为准；实际运行的 provider/model 以 `agent_matrix` 表 + AI Hub（`provider_models`）为准。
 
 ---
 

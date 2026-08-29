@@ -220,7 +220,7 @@ def kb_create():
         keywords = ','.join(keywords)
     category = data.get('category', 'general')
     priority = data.get('priority', 5)
-    scope = data.get('scope', 'system')
+    scope = data.get('scope', 'user')
     source = data.get('source', 'manual')
 
     # 系统知识库写入仅超级管理员（与 cleaner / 用户端 API 权限对齐）
@@ -337,7 +337,7 @@ def kb_import():
     if not isinstance(blocks, list) or not blocks:
         return _error(_('blocks must be a non-empty list'))
 
-    scope = data.get('scope', 'system')
+    scope = data.get('scope', 'user')
     from agent_matrix.rag_retriever import store_embedding
     count, failed = 0, 0
     with get_db() as db:
@@ -384,7 +384,7 @@ def kb_import_url():
     url = (data.get('url') or '').strip()
     if not url:
         return _error(_('url is required'))
-    scope = data.get('scope', 'system')
+    scope = data.get('scope', 'user')
     category = data.get('category', 'general')
     keywords = data.get('keywords', '')
 
@@ -603,11 +603,9 @@ def kb_rag_query():
     top_k = max(1, min(10, top_k))
 
     try:
-        with get_db() as db:
-            rows = db.execute(
-                "SELECT id, title, content FROM knowledge_blocks WHERE " + _dw() + " AND (title LIKE %s OR content LIKE %s) ORDER BY priority DESC, hit_count DESC LIMIT %s",
-                (f'%{question}%', f'%{question}%', top_k)
-            ).fetchall()
+        from agent_matrix.rag_retriever import rag_search
+
+        rows = rag_search(question, top_k=top_k) or []
 
         if not rows:
             return _success({'answer': _('No relevant knowledge found'), 'sources': []})
@@ -616,8 +614,8 @@ def kb_rag_query():
         context_parts = []
         sources = []
         for row in rows:
-            context_parts.append(f"[{row['title']}]\n{row['content'][:1500]}")
-            sources.append({'id': row['id'], 'title': row['title']})
+            context_parts.append(f"[{row['title']}]\n{(row.get('content') or '')[:1500]}")
+            sources.append({'id': row['id'], 'title': row['title'], 'score': row.get('score')})
         context = '\n\n---\n\n'.join(context_parts)
 
         # Call LLM

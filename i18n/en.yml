@@ -110,6 +110,7 @@ Advanced multi-turn conversation: Advanced multi-turn conversation
 Advertisement: Advertisement
 Advertisement does not exist: Advertisement does not exist
 Advertisement name cannot be empty: Advertisement name cannot be empty
+'After selecting a custom prompt, write the System Prompt directly in the text box.': 'After selecting a custom prompt, write the System Prompt directly in the text box.'
 Agent Community: Agent Community
 Agent configuration does not exist: Agent configuration does not exist
 Agent does not exist: Agent does not exist
@@ -154,6 +155,7 @@ Approval: Approval
 Approval Not Approved: Approval Not Approved
 Approval Note (optional): Approval Note (optional)
 Approve: Approve
+'Approve & Execute': 'Approve & Execute'
 Approved: Approved
 Article: Article
 Article Management: Article Management
@@ -306,7 +308,12 @@ Deduction plan ID (WECHAT_PLAN_ID) not configured: Deduction plan ID (WECHAT_PLA
 Deep AI Interpretation: Deep AI Interpretation
 Default: Default
 Default Sound: Default Sound
+Circuit Open: Circuit Open
+Consecutive Failures: Consecutive Failures
+Cooldown: Cooldown
+Degraded: Degraded
 Deleted: Deleted
+Deleting...: Deleting...
 Deletion Failed: Deletion Failed
 Deletion Successful: Deletion Successful
 Delivered: Delivered
@@ -320,7 +327,10 @@ Device: Device
 Deyang: Deyang
 Digital accessories: Digital accessories
 Digital human video: Digital human video
+'Dimension': 'Dimension'
 Discount Coupon: Discount Coupon
+'Discussion Request Failed': 'Discussion Request Failed'
+'Discussion Starting': 'Discussion Starting'
 Distribute: Distribute
 Distribute to All: Distribute to All
 Document: Document
@@ -355,6 +365,8 @@ Enterprise ID and Secret cannot be empty: Enterprise ID and Secret cannot be emp
 Error: Error
 Every Monday: Every Monday
 Executing: Executing
+'Execution Failed': 'Execution Failed'
+'Expected an array': 'Expected an array'
 Expected output field name: Expected output field name
 Expire This Month: Expire This Month
 Expired: Expired
@@ -370,6 +382,9 @@ Failed to Read Email: Failed to Read Email
 Failed to Retrieve: Failed to Retrieve
 Failed to Search Inbox: Failed to Search Inbox
 Failed to parse product data: Failed to parse product data
+Failover Events: Failover Events
+Failures: Failures
+From Model: From Model
 Feature 1: Feature 1
 Feature 2: Feature 2
 Feature 3: Feature 3
@@ -451,6 +466,7 @@ Harbin: Harbin
 Harbin City: Harbin City
 Has financial analysis capabilities: Has financial analysis capabilities
 Health Check: Health Check
+Healthy: Healthy
 Hebei Province: Hebei Province
 Hefei: Hefei
 Hefei City: Hefei City
@@ -480,6 +496,7 @@ IMAP Server: IMAP Server
 Icon: Icon
 Ids are required: Ids are required
 Ids cannot be empty: Ids cannot be empty
+'If built-in templates are selected, store as file path': 'If built-in templates are selected, store as file path'
 Illustration: Illustration
 Image: Image
 Image Library: Image Library
@@ -510,6 +527,7 @@ Instance Does Not Exist: Instance Does Not Exist
 Intelligent Agent Trends · Stock Market Research · Hermes Ecosystem: Intelligent Agent Trends · Stock Market Research · Hermes Ecosystem
 Internal server error: Internal server error
 Internationalization Plan: Internationalization Plan
+'Invalid JSON. Expected': 'Invalid JSON. Expected'
 Invalid JSON format returned by AI: Invalid JSON format returned by AI
 Invalid Task Type or Missing Parameters: Invalid Task Type or Missing Parameters
 Invalid Token: Invalid Token
@@ -574,6 +592,8 @@ Langfang City: Langfang City
 Lanzhou: Lanzhou
 Lanzhou City: Lanzhou City
 Last active: Last active
+Last Failure: Last Failure
+Last Success: Last Success
 Latest updates: Latest updates
 Launch Agent: Launch Agent
 Law: Law
@@ -616,11 +636,14 @@ Manage 2FA: Manage 2FA
 Manage Agent Matrix/Automatic Scheduling: Manage Agent Matrix/Automatic Scheduling
 Manage Other Administrators (Only super_admin): Manage Other Administrators (Only super_admin)
 Management Backend: Management Backend
+'Manual Approval Required': 'Manual Approval Required'
 Manual review: Manual review
+'Manually Approved': 'Manually Approved'
 Manually renewed: Manually renewed
 Marked as completed: Marked as completed
 Master Agent does not exist: Master Agent does not exist
 Matrix Dialogue Engine (Master Agent): Matrix Dialogue Engine (Master Agent)
+'Me': 'Me'
 Merged and updated existing entry (version history saved): Merged and updated existing entry (version history saved)
 Message cannot be empty: Message cannot be empty
 Message is required: Message is required
@@ -665,6 +688,7 @@ My Voice: My Voice
 Name (12 characters): Name (12 characters)
 Name and Audio URL cannot be empty: Name and Audio URL cannot be empty
 Name and Category cannot be empty: Name and Category cannot be empty
+Name and Content are required: Name and Content are required
 Name and Provider cannot be empty: Name and Provider cannot be empty
 Name and Template Code cannot be empty: Name and Template Code cannot be empty
 Name and URL are required: Name and URL are required
@@ -787,7 +811,10 @@ Ningxia Hui Autonomous Region: Ningxia Hui Autonomous Region
 '🚀 Get Started Now': '🚀 Get Started Now'
 No AI application tips: No AI application tips
 No Fix Needed: No Fix Needed
+No failover events yet.: No failover events yet.
+No health records yet.: No health records yet.
 No Images: No Images
+No Key: No Key
 No Permission: No Permission
 No Title: No Title
 No Trajectory: No Trajectory
@@ -805,6 +832,7 @@ No comments: No comments
 No configuration items. Click «Initialize Configuration Items» to create: No configuration items. Click «Initialize Configuration Items» to create
 No contacts (automatically collected after sending email): No contacts (automatically collected after sending email)
 No coupons available: No coupons available
+'No call records yet': 'No call records yet'
 No data source specified: No data source specified
 No describable content to optimize: No describable content to optimize
 No emails: No emails
@@ -920,9 +948,11 @@ Picture order updated: Picture order updated
 Picture size cannot exceed 1MB: Picture size cannot exceed 1MB
 Picture size cannot exceed 512KB: Picture size cannot exceed 512KB
 Picture uploaded successfully: Picture uploaded successfully
+'Plan rejected by user. Discussion ended.': 'Plan rejected by user. Discussion ended.'
 Plan Generated: Plan Generated
 Plugin: Plugin
 Plugin submission is not open yet: Plugin submission is not open yet
+'Please enter execution steps as a JSON array.': 'Please enter execution steps as a JSON array.'
 Please login first: Please login first
 Politeness Level 1-5: Politeness Level 1-5
 Popular Articles: Popular Articles
@@ -987,6 +1017,7 @@ Quarterly Payment: Quarterly Payment
 Query Failed: Query Failed
 Query Timeout: Query Timeout
 Question 1: Question 1
+'Question is required': 'Question is required'
 Queue item does not exist: Queue item does not exist
 Rate schedule: Rate schedule
 Rating must be between 1-5: Rating must be between 1-5
@@ -1172,6 +1203,7 @@ System Configuration: System Configuration
 Tag 1: Tag 1
 Tag 2: Tag 2
 Tag 3: Tag 3
+'Tags (JSON)': 'Tags (JSON)'
 Tags (comma separated): Tags (comma separated)
 Taipei: Taipei
 Taipei City: Taipei City
@@ -1184,6 +1216,7 @@ Target Agent Name (must be in the list above): Target Agent Name (must be in the
 Target Agent does not exist: Target Agent does not exist
 Target Agent is disabled: Target Agent is disabled
 Target_agent_id must: Target_agent_id must
+'Task Triggers (JSON)': 'Task Triggers (JSON)'
 Task does not exist: Task does not exist
 Task does not exist or is not updated: Task does not exist or is not updated
 Task execution timed out (300s): Task execution timed out (300s)
@@ -1204,6 +1237,7 @@ Template CODE: Template CODE
 Test Products: Test Products
 Test Task: Test Task
 Test Workflow: Test Workflow
+Test failed: Test failed
 Test using Alipay sandbox environment: Test using Alipay sandbox environment
 Text generation (Qwen-turbo): Text generation (Qwen-turbo)
 Text to Image: Text to Image
@@ -1218,6 +1252,7 @@ Theme does not exist: Theme does not exist
 Theme has been uninstalled: Theme has been uninstalled
 Third-party Binding: Third-party Binding
 'Re-scan': 'Re-scan'
+'Red': 'Red'
 'Redirecting...': 'Redirecting...'
 'Reset failed': 'Reset failed'
 'Scan successful, logging in...': 'Scan successful, logging in...'
@@ -1257,8 +1292,15 @@ Title and Content cannot be empty: Title and Content cannot be empty
 Title and Copy cannot be empty: Title and Copy cannot be empty
 Title and URL are required: Title and URL are required
 Title cannot be empty: Title cannot be empty
+'Token': 'Token'
 Token Refreshed: Token Refreshed
+'Token Usage': 'Token Usage'
 Token is invalid or expired: Token is invalid or expired
+Model Health: Model Health
+Reason: Reason
+Request ID: Request ID
+To Model: To Model
+tokens: tokens
 Too frequent actions: Too frequent actions
 Top 5 Browsers: Top 5 Browsers
 Top 5 Operating Systems: Top 5 Operating Systems
@@ -1432,6 +1474,7 @@ Workflow name cannot be empty: Workflow name cannot be empty
 'Save anyway?': 'Save anyway?'
 'Delete confirm message': 'Are you sure you want to delete "{name}"?'
 'Template Workflow': 'Template Workflow'
+'Agent Token': 'Agent Token'
 'Agent Type': 'Agent Type'
 'Agent ID': 'Agent ID'
 'Prompt Template': 'Prompt Template'
@@ -1764,6 +1807,7 @@ stub confirm is disabled outside dev: stub confirm is disabled outside dev
 'Active': 'Active'
 'Active Camps': 'Active Camps'
 'Active Subs (30d)': 'Active Subs (30d)'
+'Archived': 'Archived'
 'Active Subscriptions': 'Active Subscriptions'
 'Active Users': 'Active Users'
 'Activity Log': 'Activity Log'
@@ -2136,6 +2180,7 @@ stub confirm is disabled outside dev: stub confirm is disabled outside dev
 'MoM': 'MoM'
 'Mobile display broken': 'Mobile display broken'
 'Model': 'Model'
+'Model Mgmt': 'Model Mgmt'
 'Model Name': 'Model Name'
 'Model Provider': 'Model Provider'
 'Models': 'Models'
@@ -2586,6 +2631,7 @@ stub confirm is disabled outside dev: stub confirm is disabled outside dev
 'Yearly': 'Yearly'
 'Yearly Price': 'Yearly Price'
 'Years of Experience': 'Years of Experience'
+'Yellow': 'Yellow'
 'Yes': 'Yes'
 'Yes, all paid users can request VAT invoices.': 'Yes, all paid users can request VAT invoices.'
 'Yes, you need to purchase and point your domain. We provide detailed guides and can assist. Standard+ plans include free domain setup help.': 'Yes, you need to purchase and point your domain. We provide detailed guides and can assist. Standard+ plans include free domain setup help.'
@@ -2654,6 +2700,7 @@ stub confirm is disabled outside dev: stub confirm is disabled outside dev
 'Edit Quota': 'Edit Quota'
 'Has Key': 'Has Key'
 'Inactive': 'Inactive'
+'LLM': 'LLM'
 'LLM Quotas': 'LLM Quotas'
 'New Provider Key': 'New Provider Key'
 'New Quota': 'New Quota'
@@ -2672,6 +2719,7 @@ stub confirm is disabled outside dev: stub confirm is disabled outside dev
 'e.g. Alibaba Cloud DashScope': 'e.g. Alibaba Cloud DashScope'
 'e.g. user_id, model_id, or leave blank for global': 'e.g. user_id, model_id, or leave blank for global'
 'leave blank to keep current': 'leave blank to keep current'
+'leave empty to auto': 'leave empty to auto'
 'Invalid target_type': 'Invalid target_type'
 'Key is referenced by %(count)s model(s), please unlink first': 'Key is referenced by %(count)s model(s), please unlink first'
 'Name and Key cannot be empty': 'Name and Key cannot be empty'
@@ -2734,6 +2782,7 @@ stub confirm is disabled outside dev: stub confirm is disabled outside dev
 'Pending Activation': 'Pending Activation'
 'Provisioning': 'Provisioning'
 'Running': 'Running'
+'Running...': 'Running...'
 'Stopped': 'Stopped'
 'Terminated': 'Terminated'
 'Provision Failed': 'Provision Failed'
@@ -2820,6 +2869,8 @@ stub confirm is disabled outside dev: stub confirm is disabled outside dev
 'New Address': 'New Address'
 'Not bound': 'Not bound'
 'Optional': 'Optional'
+'Optional note': 'Optional note'
+'or leave blank for global': 'or leave blank for global'
 'Personal Info': 'Personal Info'
 'Prefer not to say': 'Prefer not to say'
 'Remaining Calls': 'Remaining Calls'
@@ -3356,6 +3407,7 @@ Please enter a GitHub repo URL: Please enter a GitHub repo URL
 'Prompt': 'Prompt'
 'Prompt Management Description': 'Prompt Management Description'
 'Prompt Storage': 'Prompt Storage'
+'Prompts': 'Prompts'
 'Knowledge Base Content': 'Knowledge Base Content'
 'Back to Matrix': 'Back to Matrix'
 'Connected to Matrix': 'Connected to Matrix'
@@ -3390,6 +3442,7 @@ Please enter a GitHub repo URL: Please enter a GitHub repo URL
 'Deciding': 'Deciding'
 'Deep Thinking': 'Deep Thinking'
 'Delete failed': 'Delete failed'
+'Delete this prompt? (soft delete)': 'Delete this prompt? (soft delete)'
 'Describe Agent Tech in One Sentence': 'Describe Agent Tech in One Sentence'
 'Directly': 'Directly'
 'Directory': 'Directory'
@@ -3581,10 +3634,18 @@ Please enter a GitHub repo URL: Please enter a GitHub repo URL
 'Tagline': 'Tagline'
 'Tagline Color': 'Tagline Color'
 'Tagline Font Size': 'Tagline Font Size'
+'Tagline Subtitle': 'Tagline Subtitle'
+'Tagline Subtitle Font Size': 'Tagline Subtitle Font Size'
 'Tiered prices': 'Tiered prices'
 'Tools': 'Tools'
 'Unpublish': 'Unpublish'
-'Up to 20 chars, line breaks supported, shown on store card': 'Up to 20 chars, line breaks supported, shown on store card'
+'Up to 32 chars, line breaks supported, shown on store card': 'Up to 32 chars, line breaks supported, shown on store card'
+'Up to 64 chars': 'Up to 64 chars'
+'Plugin Usage Guide': 'Plugin Usage Guide'
+'Rich-text usage instructions, also searchable in the knowledge base': 'Rich-text usage instructions, also searchable in the knowledge base'
+'Change plugin publish status?': 'Change plugin publish status?'
+'Delete this plugin from store? Its usage guide in knowledge base will also be removed.': 'Delete this plugin from store? Its usage guide in knowledge base will also be removed.'
+'Unpublish this plugin? Its usage guide in knowledge base will also be removed.': 'Unpublish this plugin? Its usage guide in knowledge base will also be removed.'
 'Waiting for payment': 'Waiting for payment'
 'Write a Review': 'Write a Review'
 'cents': 'cents'
@@ -3756,6 +3817,7 @@ Please enter a GitHub repo URL: Please enter a GitHub repo URL
 'Password Rules: At least 10 characters, Must include Uppercase, Lowercase, Digital, and at least one Special Character (3 types)': 'Password Rules: At least 10 characters, Must include Uppercase, Lowercase, Digital, and at least one Special Character (3 types)'
 'Phone updated, please login again': 'Phone updated, please login again'
 'Please enter': 'Please enter'
+'Recent 30 records': 'Recent 30 records'
 'Recent Actions': 'Recent Actions'
 'Role': 'Role'
 'SMS CAPTCHA Method': 'SMS CAPTCHA Method'
@@ -4041,3 +4103,33 @@ Please enter a GitHub repo URL: Please enter a GitHub repo URL
 'User KB': 'User KB'
 'Whitepaper': 'Whitepaper'
 'Data Cleaning': 'Data Cleaning'
+
+# ── Notification templates (source zh-CN → en, used by notification_service) ──
+'实名认证通过': 'Real-name verification passed'
+'恭喜您已通过实名认证，解锁全部功能权益。': 'Congratulations! Your real-name verification passed. All features are now unlocked.'
+'资料完成度100%': 'Profile 100% complete'
+'您已完成全部个人资料填写，获得专属福利！': 'You have completed all profile fields. Enjoy your exclusive benefits!'
+'手机验证成功': 'Phone verified'
+'您已成功验证手机号，账户安全等级已提升。': 'Your phone number has been verified. Your account security has been upgraded.'
+'获得奖励': 'Reward received'
+'恭喜您获得 {reward_name}！请前往优惠券中心查看。': 'Congratulations! You received {reward_name}. Please check your coupon center.'
+'邀请成功': 'Invitation successful'
+'恭喜邀请成功！您的好友 {friend_name} 已注册，奖励已发放。': 'Congratulations! Your friend {friend_name} has registered and your reward has been issued.'
+'好友完成首单': 'Friend completed first order'
+'您的好友 {friend_name} 已完成首次操作，您的推广奖励已到账。': 'Your friend {friend_name} completed their first action. Your referral reward has arrived.'
+'优惠券即将过期': 'Coupon expiring soon'
+'您有一张 {coupon_name} 即将在 {expire_days} 天后过期，请尽快使用。': 'Your coupon {coupon_name} expires in {expire_days} days. Please use it soon.'
+
+# ── Notifications & Rewards module (en source keys, identity) ──
+'Display name': 'Display name'
+'Phone verified': 'Phone verified'
+'Date of birth': 'Date of birth'
+'Profile details': 'Profile details'
+'Interest tags': 'Interest tags'
+'Email verified': 'Email verified'
+'No active template for event: {event_type}': 'No active template for event: {event_type}'
+'Rate limited or creation failed': 'Rate limited or creation failed'
+'Real-name verification passed': 'Real-name verification passed'
+'Congratulations! Your real name has been verified and your display name has been updated to {name}.': 'Congratulations! Your real name has been verified and your display name has been updated to {name}.'
+'Related claim records will also be cleared.': 'Related claim records will also be cleared.'
+'Notification content, supports HTML': 'Notification content, supports HTML'

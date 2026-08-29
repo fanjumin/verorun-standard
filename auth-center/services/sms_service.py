@@ -81,9 +81,10 @@ def send_sms(phone, code, purpose='login'):
         elif provider.PROVIDER == 'aliyun':
             return _send_aliyun_via_provider(provider, phone, code, purpose)
 
-    # Fallback: stub mode
+    # Fallback: stub mode — verification code is only printed to console/server logs;
+    # never echoed back to the API caller (see auth-center/routes/auth.py sms_send)
     print(f"[SMS STUB] To: {phone} | Code: {code}")
-    return {'success': True, 'provider': 'stub', 'code': code}
+    return {'success': True, 'provider': 'stub'}
 
 
 def _send_aliyun_via_provider(provider, phone, code, purpose='login'):

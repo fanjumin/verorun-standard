@@ -119,7 +119,7 @@ _detect_pip_mirror() {
 #      and fetching full history re-downloads all data on CN networks, defeating the acceleration purpose.
 _clone_with_timeout() {
     local _repo=$1 _dest=$2 _branch=$3
-    local _attempt _max=2
+    local _attempt _max="${GIT_CLONE_ATTEMPTS:-3}"
     # Candidate list: direct → ghfast.top → ghproxy.net.
     # The domestic GFW often allows small requests but kills high-traffic transfers: direct probing succeeds
     # yet clone disconnects mid-way (fetch-pack: unexpected disconnect), so a failed clone must
@@ -142,7 +142,7 @@ _clone_with_timeout() {
             # Remove the incomplete clone directory to avoid "already exists" on the next clone
             rm -rf "${_dest}"
             _attempt=$((_attempt + 1))
-            [ "${_attempt}" -le "${_max}" ] && sleep 5
+            [ "${_attempt}" -le "${_max}" ] && sleep $((5 * _attempt))
         done
     done
     if [ -n "${_cloned}" ]; then
@@ -302,7 +302,35 @@ ensure_git_auth() {
         fi
         return 0
     fi
+    # 审计 D-8 fix：本地路径仓库（/path/...、./、../、file://）不走 SSH——全新服务器
+    # 无 /root/.ssh/id_ed25519 时，若 GIT_REPO 设为本地裸仓库（gitee 无法直连时的离线
+    # 中转），旧逻辑会生成 key 并 exit 阻断一键安装。本地仓库走文件系统，无需 key/known_hosts。
+    case "${GIT_REPO}" in
+        /*|./*|../*|file://*)
+            return 0
+            ;;
+    esac
     local ssh_key="/root/.ssh/id_ed25519"
+    # 审计 D-2 fix：按 GIT_REPO 实际 host（github.com / gitee.com / 自定义 SSH host）
+    # 动态预热 known_hosts 并给出对应平台的 deploy key 指引，不再写死 github.com
+    # （否则 gitee 首连必报 Host key verification failed，私有仓库 SSH 拉取不可用）。
+    local _ghost="github.com"
+    case "${GIT_REPO}" in
+        git@*:*)
+            _ghost="${GIT_REPO#git@}"
+            _ghost="${_ghost%%:*}"
+            ;;
+        https://*)
+            _ghost="${GIT_REPO#https://}"
+            _ghost="${_ghost%%/*}"
+            ;;
+    esac
+    local _keys_url="https://${_ghost}/fanjumin/verorun-code"
+    if [ "${_ghost}" = "gitee.com" ]; then
+        _keys_url="https://gitee.com/fanjumin/verorun-code/keys"
+    elif [ "${_ghost}" = "github.com" ]; then
+        _keys_url="https://github.com/fanjumin/verorun-code/settings/keys/new"
+    fi
     if [ ! -f "${ssh_key}" ]; then
         echo -e "${INFO} Generating SSH deploy key for git operations..."
         mkdir -p /root/.ssh
@@ -310,9 +338,10 @@ ensure_git_auth() {
         chmod 600 "${ssh_key}"
         chmod 644 "${ssh_key}.pub"
         echo -e "${YELLOW}╔══════════════════════════════════════════════════════════════╗${NC}"
-        echo -e "${YELLOW}║  ADD THIS DEPLOY KEY TO GITHUB (one-time setup):           ║${NC}"
+        echo -e "${YELLOW}║  ADD THIS DEPLOY KEY TO YOUR GIT HOST (one-time setup):     ║${NC}"
         echo -e "${YELLOW}╠══════════════════════════════════════════════════════════════╣${NC}"
-        echo -e "${YELLOW}║  URL: https://github.com/fanjumin/verorun-code/settings/keys/new${NC}"
+        echo -e "${YELLOW}║  Host: ${_ghost}${NC}"
+        echo -e "${YELLOW}║  URL:  ${_keys_url}${NC}"
         echo -e "${YELLOW}╠══════════════════════════════════════════════════════════════╣${NC}"
         cat "${ssh_key}.pub" | while read -r line; do
             echo -e "${GREEN}║  ${line}${NC}"
@@ -321,8 +350,8 @@ ensure_git_auth() {
         echo -e "${WARN} After adding the key, re-run this script to continue."
         exit 0
     fi
-    if [ ! -f /root/.ssh/known_hosts ] || ! grep -q '^github\.com' /root/.ssh/known_hosts 2>/dev/null; then
-        ssh-keyscan github.com >> /root/.ssh/known_hosts 2>/dev/null || true
+    if [ ! -f /root/.ssh/known_hosts ] || ! grep -q "^${_ghost} " /root/.ssh/known_hosts 2>/dev/null; then
+        ssh-keyscan "${_ghost}" >> /root/.ssh/known_hosts 2>/dev/null || true
     fi
     if [ -d "${APP_HOME}/.git" ]; then
         local current_url
@@ -461,7 +490,17 @@ _setup_ssl_cert() {
     if [ "${CERT_SOURCE:-}" = "private_ca" ]; then
         step "HTTPS certificate (private CA)"
         local _ca_cert_dir="/etc/letsencrypt/live/${DOMAIN}"
+        local _ip_cert_dir="/etc/verorun/certs/lanip"
+        local _ca_ok=0
         if [ -f "${_ca_cert_dir}/fullchain.pem" ] && [ -f "${_ca_cert_dir}/privkey.pem" ]; then
+            _ca_ok=1
+        # 审计 D-3 fix：IP 场景由 setup_private_ca_ip.sh 签发至 /etc/verorun/certs/lanip/，
+        # 同样视为证书就绪，不再误报「SSL skipped」。
+        elif echo "${DOMAIN}" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$' \
+             && [ -f "${_ip_cert_dir}/fullchain.pem" ] && [ -f "${_ip_cert_dir}/privkey.pem" ]; then
+            _ca_ok=1
+        fi
+        if [ "${_ca_ok}" = "1" ]; then
             if grep -q "^DEPLOY_PROTOCOL=" "${APP_HOME}/.env"; then
                 sed -i "s/^DEPLOY_PROTOCOL=.*/DEPLOY_PROTOCOL=https/" "${APP_HOME}/.env"
             else
@@ -856,6 +895,25 @@ GDEVEOF
     sed -i "s|GDPLATFORM|${_gwants}|g" "${file}"
     sed -i "s|GDEVDIR|${APP_HOME}|g" "${file}"
     systemctl daemon-reload
+    # STD-4 修复（2026-08-29 标准版部署测试）：非官方版 Guardian 依赖 Nuitka 产物
+    # veroguard/dist/verorun-guardian.bin，而仓库 .gitignore 排除 dist/ → 标准版安装后
+    # 二进制必然缺失，ExecStart fail-closed → systemd Restart=always 无限崩溃循环
+    # （实测 4 分钟 52 次 restart）。修复：二进制缺失且非官方版 → 写入 unit 但不 enable，
+    # 给出可执行修复指引，让一键安装得到可用系统（无守护）而非 crash-loop。
+    local _vr_ed="standard"
+    if [ -f "${APP_HOME}/.env" ]; then
+        _vr_ed=$(grep "^VR_EDITION=" "${APP_HOME}/.env" 2>/dev/null | cut -d= -f2-)
+    fi
+    _vr_ed="${_vr_ed:-standard}"
+    if [ "${_vr_ed}" != "official" ] && [ ! -x "${APP_HOME}/veroguard/dist/verorun-guardian.bin" ]; then
+        echo -e "${WARN} VeroGuard binary missing (non-official edition) — verorun-guardian NOT enabled (fail-closed guard avoided)."
+        echo -e "${INFO}   To enable integrity guarding: ship veroguard/dist/verorun-guardian.bin (Nuitka build) in the release,"
+        echo -e "${INFO}   then run: sudo systemctl enable --now verorun-guardian"
+        # STD-4 补强：存量系统（此前已被 enable）在 update 时顺带 disable，避免崩溃循环延续
+        systemctl disable verorun-guardian 2>/dev/null || true
+        systemctl stop verorun-guardian 2>/dev/null || true
+        return 0
+    fi
     systemctl enable verorun-guardian
 }
 
@@ -878,7 +936,7 @@ write_guardian_env() {
         # 审计 M21：fall back to the global default address when not configured in .env
         guardian_remote="https://api.verorun.com"
     fi
-    [ -z "${vr_edition}" ] && vr_edition="standard"
+    [ -z "${vr_edition}" ] && vr_edition="${VR_EDITION:-standard}"
     cat > "${env_file}" << GENVEOF
 # VeroGuard Guardian environment config — generated by ${INSTALL_SCRIPT}
 GUARDIAN_PROJECT_DIR=${APP_HOME}
@@ -1185,6 +1243,9 @@ verify_release_manifest() {
     fi
     if ! "${VENV_DIR}/bin/python" "${APP_HOME}/deploy/scripts/sign_release.py" --check 2>&1; then
         echo -e "${FAIL} release_manifest 验签失败 — 拒绝安装/更新"
+        echo -e "${INFO} 常见原因：VERSION 已 bump 但发版清单未用 RELEASE_SIGN_KEY 重签（semver 错位），"
+        echo -e "${INFO}   或 deploy 脚本/common.sh 在签名后被修改（制品哈希不符）。"
+        echo -e "${INFO} 维护者修复：python3 deploy/scripts/sign_release.py（需 RELEASE_SIGN_KEY）→ 提交推送 → 重新安装。"
         exit 1
     fi
     echo -e "${OK} release_manifest 验签通过"
@@ -1421,6 +1482,10 @@ DASHSCOPE_TEXT_KEY=
 OPENAI_API_KEY=
 DEEPSEEK_API_KEY=
 
+# Automatic knowledge extraction gate (BUG-7). Off by default (P1-F07 security design);
+# set to 1 when using cogevolution / evolution features.
+AUTO_KNOWLEDGE_EXTRACT=0
+
 # Region routing (VeroRun 0.43.0+)
 APP_REGION=${REGION}
 ENVEOF
@@ -1429,6 +1494,21 @@ ENVEOF
     if [ "${DEPLOY_TYPE}" = "edu" ]; then
         echo "VR_EDITION=edu" >> "${env_file}"
         echo "EDU_CODE=${EDU_CODE:-}" >> "${env_file}"
+    fi
+
+    # 桌面版分版（科研版 research / 金融版 finance / 官方版 official 等）：
+    # 产物根目录的 .verorun-edition 标识驱动 VR_EDITION，供 agent_matrix._current_edition() 消费，
+    # 驱动角色集与插件 overlay。标识存在时覆盖上面的 edu 旧分支（双保险）。
+    if [ -f "${APP_HOME}/.verorun-edition" ]; then
+        local _edition_marker
+        _edition_marker=$(tr -d '[:space:]' < "${APP_HOME}/.verorun-edition")
+        if [ -n "${_edition_marker}" ]; then
+            if grep -q "^VR_EDITION=" "${env_file}"; then
+                sed -i "s|^VR_EDITION=.*|VR_EDITION=${_edition_marker}|" "${env_file}"
+            else
+                echo "VR_EDITION=${_edition_marker}" >> "${env_file}"
+            fi
+        fi
     fi
 
     chown "${APP_USER}:${APP_USER}" "${env_file}"
@@ -1687,7 +1767,10 @@ NGXEOF
         # 审计 M11：detect local LAN IPs for the server_name whitelist (unknown Hosts hit a 444 rejection)
         local _lan_ips=""
         _lan_ips=$(hostname -I 2>/dev/null | tr -s ' ' | sed 's/^ //;s/ $//')
-        local _lan_server_name="localhost"
+        # STD-5 修复（2026-08-29 标准版部署测试）：回环地址加入白名单——
+        # 之前本机 curl http://127.0.0.1/ 落入 default_server 444（空回复），
+        # 服务器本地健康验证与脚本探测全部拿到 000。
+        local _lan_server_name="localhost 127.0.0.1"
         [ -n "${_lan_ips}" ] && _lan_server_name="${_lan_server_name} ${_lan_ips}"
         cat > "${nginx_conf}" << NGXEOF
 # VeroRun Nginx — no-domain mode (auto-generated by ${INSTALL_SCRIPT})
@@ -1964,7 +2047,7 @@ do_install() {
     #   (1) pgvector 二进制已安装（缺 vector.control 时给出安装指引，不中断安装）
     #   (2) 控制文件直接新增 trusted = true（幂等，追加前先检查），
     #       使 DB owner（app）无需 superuser 即可在插件激活时按需自建扩展
-    _vector_ctl="$(ls /usr/share/postgresql/*/extension/vector.control 2>/dev/null | head -1)"
+    _vector_ctl="$(ls /usr/share/postgresql/*/extension/vector.control 2>/dev/null | head -1 || true)"
     if [ -z "${_vector_ctl}" ]; then
         echo -e "${WARN} pgvector 二进制未安装（未找到 vector.control）— 依赖插件将在激活时缺少扩展（请安装 PGDG 的 postgresql-XX-pgvector）"
     elif ! grep -q '^trusted' "${_vector_ctl}" 2>/dev/null; then
@@ -2016,8 +2099,17 @@ do_install() {
         # 无人值守加固 ①：pre-warm known_hosts so git-over-SSH never stalls on host-key verification under `sudo`.
         # Without this, a fresh root environment with an empty /root/.ssh/known_hosts blocks git fetch until the timeout.
         ensure_git_auth
-        if ! timeout "${GIT_TIMEOUT}" git fetch origin "${GIT_BRANCH}" 2>&1; then
-            echo -e "${FAIL} Git fetch failed or timed out (${GIT_TIMEOUT}s) — aborting"
+        _fetch_ok=0
+        for _i in 1 2 3; do
+            if timeout "${GIT_TIMEOUT}" git fetch origin "${GIT_BRANCH}" 2>&1; then
+                _fetch_ok=1
+                break
+            fi
+            echo -e "${WARN} Git fetch failed or timed out (attempt ${_i}/3) — retrying"
+            sleep $((5 * _i))
+        done
+        if [ "${_fetch_ok}" != "1" ]; then
+            echo -e "${FAIL} Git fetch failed after 3 attempts (${GIT_TIMEOUT}s timeout each) — aborting"
             echo -e "${INFO} Check origin remote: git -C ${APP_HOME} remote -v"
             echo -e "${INFO} If it points to a mirror (ghfast.top/ghproxy), reset it:"
             echo -e "${INFO}   git -C ${APP_HOME} remote set-url origin ${GIT_REPO}"
@@ -2054,6 +2146,23 @@ do_install() {
     find "${APP_HOME}" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
     chown -R "${APP_USER}:${APP_USER}" "${APP_HOME}" 2>/dev/null || true
     done_step "Code pulled${_pull_suffix}: $(git -C "${APP_HOME}" log --oneline -1)"
+
+    # STD-3 前置预检（2026-08-29 标准版部署测试）：发版清单与 VERSION 的 semver 一致性必须在
+    # 重量级步骤（venv + pip 全量依赖，实测 5-10 分钟）之前校验——实测 0.60.0 VERSION 搭配
+    # 0.59.9 已签名清单时，安装在 pip 全部完成后才被 verify_release_manifest fail-closed 拒绝，
+    # 白白浪费整段下载安装时间。此处仅用系统 python3 做轻量 json 读取；深度验签仍由下方
+    # verify_release_manifest / build_veroguard_manifest 执行。
+    if [ -f "${APP_HOME}/release_manifest.json" ] && [ -f "${APP_HOME}/VERSION" ]; then
+        local _pre_mf_semver="" _pre_ver=""
+        _pre_mf_semver=$(python3 -c "import json;print(json.load(open('${APP_HOME}/release_manifest.json',encoding='utf-8')).get('semver',''))" 2>/dev/null || true)
+        _pre_ver=$(tr -d '[:space:]' < "${APP_HOME}/VERSION")
+        if [ -n "${_pre_mf_semver}" ] && [ -n "${_pre_ver}" ] && [ "${_pre_mf_semver}" != "${_pre_ver}" ]; then
+            echo -e "${FAIL} release_manifest semver ${_pre_mf_semver} != VERSION ${_pre_ver}（发版清单与代码版本错位）"
+            echo -e "${INFO} 维护者修复：用 RELEASE_SIGN_KEY 运行 python3 deploy/scripts/sign_release.py 重签并推送；"
+            echo -e "${INFO} 或改用与签名清单一致的版本分支/标签安装。已在依赖安装之前中止（fail-fast）。"
+            exit 1
+        fi
+    fi
 
     step "Python virtual environment"
     if [ "${SKIP_DEPS:-0}" != "1" ]; then
@@ -2113,6 +2222,24 @@ do_install() {
         nginx -t && systemctl restart nginx
         done_step "Nginx configured"
 
+        # 审计 D-3 fix：无域名 + IP + CERT_SOURCE=private_ca 时自动运行内网自签脚本
+        # （setup_private_ca_ip.sh），让 HTTPS 在服务启动前就绪，实现真·一键，免去
+        # 「install → IP 证书脚本 → 重启」三步法。失败则降级为 http 并提示手动补跑。
+        if [ "${CERT_SOURCE:-}" = "private_ca" ] \
+           && echo "${DOMAIN:-}" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$' \
+           && [ ! -f "/etc/verorun/certs/lanip/fullchain.pem" ]; then
+            echo -e "${INFO} IP domain + private_ca detected — auto-running intranet cert script (setup_private_ca_ip.sh)"
+            if [ -f "${APP_HOME}/deploy/intranet/setup_private_ca_ip.sh" ]; then
+                if APP_HOME="${APP_HOME}" bash "${APP_HOME}/deploy/intranet/setup_private_ca_ip.sh" --ip "${DOMAIN}"; then
+                    echo -e "${OK} Intranet self-signed HTTPS certificate ready"
+                else
+                    echo -e "${WARN} setup_private_ca_ip.sh failed — HTTPS deferred, run it manually after install"
+                fi
+            else
+                echo -e "${WARN} intranet/setup_private_ca_ip.sh not found — HTTPS deferred, run it manually after install"
+            fi
+        fi
+
         step "Start services"
         restart_services
         done_step "Services started"
@@ -2144,7 +2271,16 @@ do_install() {
     # if the cert is missing (certbot failed / DNS not resolving / offline), keeping https makes the app emit
     # Secure SSO cookies that browsers drop over plain HTTP → login sessions die. Rewrite to http here.
     if [ "${DEPLOY_TYPE}" = "production" ] && [ -n "${DOMAIN:-}" ]; then
-        if [ ! -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ] \
+        # 审计 D-3 fix：IP 场景证书位于 /etc/verorun/certs/lanip/（setup_private_ca_ip.sh），
+        # 不能仅因 /etc/letsencrypt/live/${DOMAIN} 无证书就把 https 回退为 http。
+        local _tls_ok=0
+        [ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ] && _tls_ok=1
+        if [ "${CERT_SOURCE:-}" = "private_ca" ] \
+           && echo "${DOMAIN}" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$' \
+           && [ -f "/etc/verorun/certs/lanip/fullchain.pem" ]; then
+            _tls_ok=1
+        fi
+        if [ "${_tls_ok}" != "1" ] \
             && grep -q "^DEPLOY_PROTOCOL=https" "${APP_HOME}/.env" 2>/dev/null; then
             sed -i "s/^DEPLOY_PROTOCOL=.*/DEPLOY_PROTOCOL=http/" "${APP_HOME}/.env"
             echo -e "${WARN} TLS certificate not found at /etc/letsencrypt/live/${DOMAIN} — DEPLOY_PROTOCOL set back to http."
@@ -2163,6 +2299,30 @@ do_install() {
     else
         echo -e "${WARN} Skipped database migration (pass --approve-migrate to apply schema changes)"
         echo -e "${INFO} Services may fail to start if code references columns not yet in the DB"
+    fi
+
+    # 标准版内置插件建表（2026-08-29）：email/sms/im_gateway 为运行时幂等建表，
+    # 此前仅挂在插件 enable 生命周期钩子上，而部署默认不自动启用插件（PLUGIN_AUTO_INSTALL=0）
+    # → 插件表不创建，管理员后手启用插件时相关功能直接 500。
+    # 此处随主库迁移一并提前建表（幂等、无副作用）；captcha_embedded 无表（Redis/内存存储）。
+    # 逐插件 try/except：某插件缺失或连接失败不阻断整体安装（有界原则，禁止 || true 掩盖后单独跳过）。
+    step "Bundled plugin tables"
+    if [ "${APPROVE_MIGRATE:-0}" = "1" ]; then
+        sudo -u "${APP_USER}" bash -c "set -a; source ${APP_HOME}/.env; cd ${APP_HOME} && PYTHONPATH=${APP_HOME}:${APP_HOME}/auth-center ${VENV_DIR}/bin/python - <<'PY'
+def _init(name, module, func):
+    try:
+        mod = __import__(module, fromlist=[func])
+        getattr(mod, func)()
+        print('[BUNDLED] %s tables ready' % name)
+    except Exception as e:
+        print('[BUNDLED] %s tables: skip (%s)' % (name, str(e)[:120]))
+_init('email', 'plugins.email.models', 'init_email_db')
+_init('sms', 'plugins.sms.models', 'init_sms_db')
+_init('im_gateway', 'plugins.im_gateway.models', 'init_im_db')
+PY"
+        done_step "Bundled plugin tables ready"
+    else
+        echo -e "${WARN} Skipped bundled plugin tables (pass --approve-migrate to apply schema changes)"
     fi
 
     step "Seed data"
@@ -2247,8 +2407,17 @@ do_update() {
         export GIT_TERMINAL_PROMPT=0
         # 无人值守加固 ①：pre-warm known_hosts (see do_install) — a fresh root env stalls git fetch on host-key verification.
         ensure_git_auth
-        if ! timeout "${GIT_TIMEOUT}" git fetch origin "${GIT_BRANCH}" 2>&1; then
-            echo -e "${FAIL} Git fetch failed or timed out (${GIT_TIMEOUT}s) — aborting"
+        _fetch_ok=0
+        for _i in 1 2 3; do
+            if timeout "${GIT_TIMEOUT}" git fetch origin "${GIT_BRANCH}" 2>&1; then
+                _fetch_ok=1
+                break
+            fi
+            echo -e "${WARN} Git fetch failed or timed out (attempt ${_i}/3) — retrying"
+            sleep $((5 * _i))
+        done
+        if [ "${_fetch_ok}" != "1" ]; then
+            echo -e "${FAIL} Git fetch failed after 3 attempts (${GIT_TIMEOUT}s timeout each) — aborting"
             echo -e "${INFO} Check origin remote: git -C ${APP_HOME} remote -v"
             echo -e "${INFO} If it points to a mirror (ghfast.top/ghproxy), reset it:"
             echo -e "${INFO}   git -C ${APP_HOME} remote set-url origin ${GIT_REPO}"
@@ -2468,7 +2637,7 @@ print_summary() {
             echo "  ╠══════════════════════════════════════════════════════════════╣"
             echo "  ║  Main site:   http://localhost/                               ║"
             echo "  ║  Admin:       http://localhost/admin/                         ║"
-            echo "  ║  Console:     http://localhost/auth/                          ║"
+            echo "  ║  Console:     :8083 only (LAN nginx does not proxy it - P2)   ║"
             PUBLIC_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
             if [ -n "${PUBLIC_IP}" ]; then
             echo "  ║  LAN access:  http://${PUBLIC_IP}/  (same paths)              ║"
@@ -2477,6 +2646,7 @@ print_summary() {
             echo "  ║  Useful commands:                                            ║"
             echo "  ║    systemctl status verorun-{main,auth,admin,guardian}       ║"
             echo "  ║    bash deploy/${INSTALL_SCRIPT} update                        ║"
+            echo "  ║  SMS codes print to console until provider set (Admin→SMS)  ║"
             echo "  ╠══════════════════════════════════════════════════════════════╣"
             echo "  ║  AI API keys are empty by default — set real values in:      ║"
             echo "  ║    ${APP_HOME}/.env  (DASHSCOPE_TEXT_KEY / OPENAI_API_KEY /   ║"

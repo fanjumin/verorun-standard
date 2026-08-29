@@ -1,6 +1,6 @@
 # VeroRun — 企业多核 AI 操作系统
 
-[![Version](https://img.shields.io/badge/version-0.59.3-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.60.0-blue.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-EULA%20v1.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)]()
 [![Plugins](https://img.shields.io/badge/plugins-30-orange.svg)]()
@@ -258,7 +258,7 @@ VeroRun 将复杂任务交给一组有分工、可评审的 Agent 角色：主�
 
 **插件管理器**：自动扫描 `plugins/` 解析 `plugin.json`；依赖解析用 Kahn 拓扑排序 + 环检测；事件总线 31 个系统事件（线程池异步分发）；WordPress 风格 Action / Filter 钩子（带优先级）；配置 JSON Schema Draft-07 校验；每插件独立日志（轮转 5MB×3）。
 
-**插件商店**：浏览 / 搜索（远程 API + 本地缓存）、一键安装（SHA256 完整性 + Zip Slip 防护）、支付宝扫码支付、订阅与优惠券。许可：在线 HMAC 签名校验 + 离线 token（HMAC-SHA256，72h 宽限 + 7 天有效期，Site ID 绑定）。
+**插件商店**：浏览 / 搜索（远程 API + 本地缓存）、一键安装（SHA256 完整性 + Zip Slip 防护）、支付宝扫码支付、订阅与优惠券。商店卡片支持双行宣传语（标题 ≤32 字符 + 副标题 ≤64 字符，字号 14–28px 自由选择）；插件使用说明为独立富文本字段，保存后自动同步系统知识库（RAG 可检索，删除/下架时软清理）；README 经服务端代理读取（多命名兼容 `README.cn.md` / `README_CN.md` / `README.zh-CN.md`，本地缓存 + 现场抓取兜底）。许可：在线 HMAC 签名校验 + 离线 token（HMAC-SHA256，72h 宽限 + 7 天有效期，Site ID 绑定）。
 
 ### 自定义插件
 
@@ -317,7 +317,7 @@ verorun-pro/
 ├── plugin_manager/         # 插件生命周期/商店/许可/区域路由
 ├── veroguard/              # VeroGuard 守护层（7 模块）
 ├── providers/              # 可插拔 Provider 抽象
-├── sdks/                   # JavaScript SDK（5 包）
+├── sdks/                   # Python CLI 客户端（小程序 JS SDK 已迁入 plugins/mini_app_builder/sdks/）
 ├── captcha-service/        # 旧独立服务残留（已迁移至 plugins/captcha_embedded）
 ├── health_service/         # 健康检查服务（8085）
 ├── i18n/                   # 国际化（en, zh-CN）

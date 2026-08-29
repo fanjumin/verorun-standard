@@ -15,8 +15,13 @@ def get_version() -> str:
 
 
 def get_edition() -> str:
-    """返回发行版标识：VR_EDITION 环境变量（official/edu/...），未设置视为 standard。"""
-    return (os.environ.get('VR_EDITION', '').strip().lower() or 'standard')
+    """返回发行版标识（统一走 agent_matrix.current_edition() 归一化：
+    edu→research / pro→finance，未设置视为 standard；agent_matrix 不可用时兜底 VR_EDITION）。"""
+    try:
+        from agent_matrix.models import current_edition
+        return current_edition()
+    except Exception:
+        return (os.environ.get('VR_EDITION', '').strip().lower() or 'standard')
 
 
 def get_build_id() -> str:

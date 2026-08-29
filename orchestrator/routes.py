@@ -63,6 +63,17 @@ def init_automation(app):
     # 5. 启动调度器
     _scheduler.start()
 
+    # 5.5 消费插件 register_jobs()（APScheduler 定时任务契约）
+    try:
+        pm = app.extensions.get('plugin_manager')
+        if pm is not None:
+            n = pm.register_all_plugin_jobs(_scheduler)
+            m.add_log('system', 0, 'info',
+                       f'✅ Plugin job registration: {n} job(s) scheduled')
+    except Exception as e:
+        m.add_log('system', 0, 'warn',
+                   f'⚠️ Plugin job registration failed: {e}')
+
     # 6. 注册蓝图
     app.register_blueprint(automation_bp)
 

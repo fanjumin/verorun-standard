@@ -12,6 +12,10 @@ Agent Matrix — 模型选择策略解析器（§3）
 """
 from typing import Dict
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 def resolve_model_args(model_policy: dict,
                        default_provider: str = 'siliconflow',
@@ -31,6 +35,8 @@ def resolve_model_args(model_policy: dict,
         pm_id = _get_system_key(f'model_tier_{tier}')
         if pm_id:
             return {'provider_model_id': pm_id}
+        # BUG-8：tier 未配置时不再静默降级，显式告警以便排查
+        logger.warning('model_tier_%s 未在 system_config 配置，已降级到 inherit/fallback 路径', tier)
     # 2. explicit：策略内显式 provider+model
     if strategy == 'explicit':
         provider = model_policy.get('provider', '')

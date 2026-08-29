@@ -37,8 +37,17 @@ def _catalog_urls() -> List[str]:
 # 下载镜像前缀（P0-2）：设置后对 GitHub Raw 下载地址做 host 替换，走 CDN/镜像
 DOWNLOAD_MIRROR_PREFIX = os.environ.get('DOWNLOAD_MIRROR_PREFIX', '').strip()
 
-# 部署版本（阶段 3）：商店按 compatible_editions 过滤插件（空数组=全版本兼容）
-DEPLOY_EDITION = os.environ.get('DEPLOY_EDITION', 'standard').strip().lower()
+# 部署版本（阶段 3）：商店按 compatible_editions 过滤插件（空数组=全版本兼容）。
+# 统一走 agent_matrix.current_edition()（单一事实源：VR_EDITION→RELEASE_EDITION→DEPLOY_TYPE，
+# 新旧名归一 edu→research / pro→finance）；agent_matrix 不可用时兜底旧 DEPLOY_EDITION 环境变量。
+def _resolve_deploy_edition() -> str:
+    try:
+        from agent_matrix.models import current_edition
+        return current_edition()
+    except Exception:
+        return os.environ.get('DEPLOY_EDITION', 'standard').strip().lower()
+
+DEPLOY_EDITION = _resolve_deploy_edition()
 
 # 同步调度参数（P0-2）：成功固定间隔 6h；失败指数退避 15min 起、上限 6h
 SYNC_SUCCESS_INTERVAL = 6 * 3600
@@ -267,11 +276,17 @@ class StoreAPIClient:
         """阶段 3：按部署版本（DEPLOY_EDITION）过滤插件。
 
         空数组 = 全版本兼容（旧插件未标注不拦截）；
-        非空时必须包含当前版本（大小写不敏感）。
+        非空时必须包含当前版本（大小写不敏感，双侧新旧名归一，
+        旧 catalog 的 edu/pro 与现行 research/finance 视为同版本）。
         """
         if not compatible_editions:
             return True
-        return DEPLOY_EDITION in [str(e).strip().lower() for e in compatible_editions]
+        try:
+            from agent_matrix.models import normalize_edition
+            current = normalize_edition(DEPLOY_EDITION)
+            return current in [normalize_edition(str(e)) for e in compatible_editions]
+        except Exception:
+            return DEPLOY_EDITION in [str(e).strip().lower() for e in compatible_editions]
 
     @staticmethod
     def _version_compatible(current: str, required: str) -> bool:
@@ -361,9 +376,9 @@ class StoreAPIClient:
                         trial_days, download_url, package_hash,
                         file_size, category, tags, min_app_version, depends_on,
                         screenshots, readme_url, tagline, tagline_i18n_key,
-                        tagline_font_size, tagline_color,
-                        downloads, rating, review_count, enabled
-                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1)
+                        tagline_font_size, tagline_color, tagline_subtitle, tagline_subtitle_font_size,
+                        downloads, rating, review_count, readme_cache, enabled
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1)
                     -- ★ ON CONFLICT: 更新商店侧管理的字段 + 展示资源 URL（icon_url/readme_url/
                     --    screenshots）。展示资源由发布工具自动生成真实 CDN URL，需随同步覆盖。
                     --    tagline 用 COALESCE 保护：目录有值才覆盖，AI 生成/手写的 tagline 得以保留。
@@ -395,6 +410,9 @@ class StoreAPIClient:
                         tagline_i18n_key=excluded.tagline_i18n_key,
                         tagline_font_size=COALESCE(NULLIF(excluded.tagline_font_size,''), store_plugins.tagline_font_size),
                         tagline_color=COALESCE(NULLIF(excluded.tagline_color,''), store_plugins.tagline_color),
+                        tagline_subtitle=COALESCE(NULLIF(excluded.tagline_subtitle,''), store_plugins.tagline_subtitle),
+                        tagline_subtitle_font_size=COALESCE(NULLIF(excluded.tagline_subtitle_font_size,''), store_plugins.tagline_subtitle_font_size),
+                        readme_cache=COALESCE(NULLIF(excluded.readme_cache,''), store_plugins.readme_cache),
                         updated_at=NOW()
                 """, (
                     pdata.get('identifier', ''),
@@ -423,11 +441,14 @@ class StoreAPIClient:
                     pdata.get('readme_url', ''),
                     pdata.get('tagline', ''),
                     pdata.get('tagline_i18n_key', ''),
-                    pdata.get('tagline_font_size', '12px'),
+                    pdata.get('tagline_font_size', '16px'),
                     pdata.get('tagline_color', '#ffffff'),
+                    pdata.get('tagline_subtitle', ''),
+                    pdata.get('tagline_subtitle_font_size', '14px'),
                     pdata.get('downloads', 0),
                     pdata.get('rating', 0.0),
                     pdata.get('review_count', 0),
+                    pdata.get('readme_cache', ''),
                 ))
                 conn.commit()
 

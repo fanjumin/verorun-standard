@@ -41,7 +41,7 @@ window.l_provider_keys=function(targetId){
       h+='</tbody></table>';
     }
     h+='</div>';
-    if(targetId) h = '<div class="ai-hub-subtitle">AI Hub <span style="color:var(--dim)">&rsaquo;</span> {{ _('Provider Keys') }}</div>' + h;
+    if(targetId) h = '<div class="ai-hub-subtitle">{{ _('AI Hub') }} <span style="color:var(--dim)">&rsaquo;</span> {{ _('Provider Keys') }}</div>' + h;
     target.innerHTML=h;
   }
 
@@ -64,7 +64,7 @@ window.l_provider_keys=function(targetId){
     var h='<div class="modal-overlay" onclick="closeModal()"><div class="modal-box" onclick="event.stopPropagation()" style="max-width:500px;width:90%">';
     h+='<h3 style="margin:0 0 16px;color:var(--accent)">'+(isEdit?'{{ _('Edit Provider Key') }}':'{{ _('New Provider Key') }}')+'</h3>';
     h+='<div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--dim);margin-bottom:4px">{{ _('Name') }}</label>';
-    h+='<input id="pk-name" class="in" style="width:100%" value="'+escAttr(isEdit?key.name:'')+'" placeholder="{{ _('e.g. Alibaba Cloud DashScope') }}"></div>';
+    h+='<input id="pk-name" class="in" style="width:100%" value="'+escAttr(isEdit?key.name:'')+'" placeholder="{{ _('e.g.') }}: Alibaba Cloud DashScope"></div>';
     h+='<div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--dim);margin-bottom:4px">{{ _('Provider') }}</label>';
     h+='<select id="pk-provider" class="in" style="width:100%"><option>{{ _('Loading...') }}</option></select></div>';
     h+='<div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--dim);margin-bottom:4px">{{ _('API Key Value') }}';
@@ -120,7 +120,7 @@ h+='</div>';
     if(!isEdit&&!keyVal){showToast('{{ _('API Key value is required') }}','error');return}
 
     var saveBtn=document.querySelector('#modal-root .pk-save-btn');
-    if(saveBtn){saveBtn.disabled=true;saveBtn.textContent='Saving...';}
+    if(saveBtn){saveBtn.disabled=true;saveBtn.textContent='{{ _('Saving...') }}';}
 
     var url="/admin/provider-api-keys"+(isEdit?'/'+id:'');
     var method=isEdit?'PUT':'POST';
@@ -137,7 +137,7 @@ h+='</div>';
     }).catch(function(e){
       if(e)showToast('{{ _('Save failed') }}: '+e.message,'error');
     }).finally(function(){
-      if(saveBtn){saveBtn.disabled=false;saveBtn.textContent='Save';}
+      if(saveBtn){saveBtn.disabled=false;saveBtn.textContent='{{ _('Save') }}';}
     });
   };
 
@@ -161,7 +161,7 @@ h+='</div>';
 
   window.confirmDelKey=function(id){
     var btn=document.querySelector('#modal-root .pk-del-confirm-btn');
-    if(btn){btn.disabled=true;btn.textContent='Deleting...';}
+    if(btn){btn.disabled=true;btn.textContent='{{ _('Deleting...') }}';}
     fetch("/admin/provider-api-keys/"+id,{method:"DELETE",headers:{"Authorization":"Bearer "+T}})
       .then(function(r){return r.json()}).then(function(d){
         if(d.success){closeModal();render();showToast('{{ _('Deleted') }}','success')}

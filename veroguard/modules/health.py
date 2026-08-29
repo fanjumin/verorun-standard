@@ -162,11 +162,14 @@ def handle_failure() -> float:
         write_status('health', {'status': 'ok'})
         return 0
 
-    # 阶梯 2: 全量 GitHub 回滚（修正点 6：使用扩展的文件列表）
-    logging.warning("Restart failed, rolling back from GitHub tag %s",
-                    config.ROLLBACK_TAG)
-    for filepath in config.FILES_TO_ROLLBACK:
-        rollback_file(filepath)
+    # 阶梯 2: 全量远程回滚（修正点 6：使用扩展的文件列表；未配置远程源时跳过）
+    if not config.GITHUB_RAW_BASE:
+        logging.warning("Remote rollback disabled (GUARDIAN_GITHUB_RAW empty), skipping")
+    else:
+        logging.warning("Restart failed, rolling back from GitHub tag %s",
+                        config.ROLLBACK_TAG)
+        for filepath in config.FILES_TO_ROLLBACK:
+            rollback_file(filepath)
 
     # 回滚后重启所有服务
     for service_name in config.SERVICE_MAP.values():

@@ -34,7 +34,7 @@ tmp/
 do_git*
 git_output*.log
 verify*
-!deploy/scripts/verify-research-payload.sh
+!deploy/scripts/verify-edition-payload.sh
 deploy_paramiko.py
 check_index.py
 t_git.py

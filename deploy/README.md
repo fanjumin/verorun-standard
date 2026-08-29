@@ -29,6 +29,12 @@
   - 2 GB RAM (4 GB recommended)
   - 20 GB disk
   - 1 vCPU (2 vCPU recommended)
+- **pgvector（可选）:** 依赖向量检索的插件需要 PostgreSQL 的 pgvector 二进制
+  （PGDG 仓库的 `postgresql-XX-pgvector`，XX=PG 主版本）。安装脚本缺失时**不中断**，
+  仅提示安装指引；插件在激活时用 `CREATE EXTENSION IF NOT EXISTS vector` 按需建扩展，
+  缺二进制则相关插件不可用。
+- **earlyoom（可选）:** 若部署机运行 earlyoom 且配置 `--prefer python node`，
+  内存压力下可能误杀部署进程。建议部署期间暂停 earlyoom 或放宽该策略。
 
 ---
 
@@ -408,6 +414,23 @@ sudo bash deploy/install.sh rollback
 
 This reverts the code to the previous git commit and restarts all services.
 
+### Deployment log stops mid-step / no output
+
+Unattended runs via `nohup bash deploy/install.sh ... > install.log 2>&1 &` can end
+abruptly and hide the real failure. Since the 2026-08-27 fix the scripts print the
+failing step and exit code on `set -e` aborts; for real-time line-buffered output use
+a pty or `stdbuf`:
+
+```bash
+# pty 行缓冲：崩溃时保留真实错误与退出码
+sudo script -qec "bash deploy/install.sh install your-domain.com" install.log
+# 或：stdbuf 行缓冲
+stdbuf -oL -eL sudo bash deploy/install.sh install your-domain.com 2>&1 | tee install.log
+```
+
+Always capture the **exit code** right after the run (e.g. `echo $?`); `set -e` exits
+silently if the failing command swallowed its own stderr.
+
 ### Git fetch hangs / never completes
 
 The scripts disable interactive credential prompts (`GIT_TERMINAL_PROMPT=0`) and wrap
@@ -474,6 +497,12 @@ sudo systemctl enable --now postgresql
 sudo -u postgres psql -c "CREATE ROLE app WITH LOGIN PASSWORD 'change-me-in-production';"
 sudo -u postgres psql -c "CREATE DATABASE appdb OWNER app;"
 ```
+
+> **pgvector:** 依赖向量检索的插件在激活时执行
+> `CREATE EXTENSION IF NOT EXISTS vector SCHEMA public`（幂等）。未安装 pgvector 二进制时该扩展失败，
+> 安装：`sudo apt-get install postgresql-XX-pgvector`（XX=PG 主版本，如 14）。
+> 自动部署脚本检测到 `vector.control` 时写入 `trusted = true`，使 `app` 角色无需超级权限即可建扩展；
+> 缺失时仅提示，不中断安装。
 
 ### 6. Generate .env
 

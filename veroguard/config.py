@@ -10,7 +10,7 @@ import os
 # ── 健康监控 ───────────────────────────────────
 TARGETS = [
     "http://127.0.0.1:8085/health",
-    "http://127.0.0.1:8082/health",
+    "http://127.0.0.1:8081/health",
     "http://127.0.0.1:8084/health",
     "http://127.0.0.1:8083/health",
 ]
@@ -18,7 +18,7 @@ TARGETS = [
 # 修正：使用 install.sh 创建的实际 systemd 服务名
 SERVICE_MAP = {
     "http://127.0.0.1:8085/health": "verorun-health",
-    "http://127.0.0.1:8082/health": "verorun-main",
+    "http://127.0.0.1:8081/health": "verorun-main",
     "http://127.0.0.1:8084/health": "verorun-admin",
     "http://127.0.0.1:8083/health": "verorun-auth",
 }
@@ -32,8 +32,9 @@ PROJECT_DIR     = os.getenv('GUARDIAN_PROJECT_DIR',
                     '/opt/verorun')
 LOG_FILE        = os.getenv('GUARDIAN_LOG_FILE',
                     '/var/log/verorun-guardian.log')
-GITHUB_RAW_BASE = os.getenv('GUARDIAN_GITHUB_RAW',
-                    'https://raw.githubusercontent.com/fanjumin/verorun-pro')
+# 远程回滚默认关闭：raw.githubusercontent 仅服务公开仓库，分发仓库为私有（raw 404），
+# 需部署方显式配置可用的 GUARDIAN_GITHUB_RAW 才启用远程回滚。
+GITHUB_RAW_BASE = os.getenv('GUARDIAN_GITHUB_RAW', '')
 
 # ── 回滚文件列表（修正点 6：扩展覆盖守护进程自身） ──
 FILES_TO_ROLLBACK = [

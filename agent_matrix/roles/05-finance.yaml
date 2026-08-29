@@ -1,6 +1,8 @@
 name: Finance
 slug: finance
 role_type: sub
+editions:
+  - finance
 description: Financial steward — plans, subscriptions, billing, orders, payment, invoices, rewards, deployment
 domain: finance
 managed_modules:

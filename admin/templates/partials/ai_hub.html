@@ -4,16 +4,17 @@
 // ============================================================
 
 window.l_ai_hub = function() {
-  document.getElementById("pt").textContent = "AI Hub";
+  document.getElementById("pt").textContent = "{{ _('AI Hub') }}";
 
   var mc = document.getElementById("mc");
   var tabs = [
-    { id: "keys",      label: "Provider Keys", icon: "🔑" },
-    { id: "models",    label: "Model Mgmt",    icon: "🔧" },
-    { id: "matrix",    label: "Matrix",        icon: "🤖" },
-    { id: "prompts",   label: "Prompts",       icon: "📝" },
-    { id: "quotas",    label: "LLM Quotas",    icon: "⚖️" },
-    { id: "tokens",    label: "Token Usage",   icon: "📈" }
+    { id: "keys",      label: "{{ _('Provider Keys') }}", icon: "🔑" },
+    { id: "models",    label: "{{ _('Model Mgmt') }}",    icon: "🔧" },
+    { id: "matrix",    label: "{{ _('Matrix') }}",        icon: "🤖" },
+    { id: "prompts",   label: "{{ _('Prompts') }}",       icon: "📝" },
+    { id: "quotas",    label: "{{ _('LLM Quotas') }}",    icon: "⚖️" },
+    { id: "tokens",    label: "{{ _('Token Usage') }}",   icon: "📈" },
+    { id: "health",    label: "{{ _('Model Health') }}",  icon: "❤️" }
   ];
 
   var h = '<div class="ai-hub">';
@@ -28,7 +29,7 @@ window.l_ai_hub = function() {
 
   // 内容区
   h += '<div class="ai-tab-content" id="aiHubContent">';
-  h += '<div class="lo"><div class="s"></div>Loading...</div>';
+  h += '<div class="lo"><div class="s"></div>{{ _('Loading...') }}</div>';
   h += '</div>';
 
   h += '</div>';
@@ -57,5 +58,6 @@ window.aiHubSwitchTab = function(tabId) {
     case 'prompts':  l_prompts_db('aiHubContent');    break;
     case 'quotas':   l_llm_quotas('aiHubContent');       break;
     case 'tokens':   l_token_monitoring('aiHubContent'); break;
+    case 'health':   l_model_health('aiHubContent');     break;
   }
 };

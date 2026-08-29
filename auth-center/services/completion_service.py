@@ -8,6 +8,7 @@ import os
 import sys
 
 import psycopg2.extras
+from i18n import _
 from models.database import get_db
 
 
@@ -28,18 +29,18 @@ def _has_user_interests(user_id):
 # Each entry: (field_key, display_name, check_fn)
 # check_fn receives a dict {user, profile} and returns bool
 FIELD_DEFS = [
-    ('display_name',     '显示名',     lambda u, p: bool((u.get('display_name') or '').strip())),
-    ('avatar_url',       '头像',       lambda u, p: bool((u.get('avatar_url') or '').strip())),
-    ('phone_verified',   '手机验证',   lambda u, p: u.get('phone_verified', 0) == 1),
-    ('gender',           '性别',       lambda u, p: bool(p and (p.get('gender') or '').strip())),
-    ('birth_date',       '出生日期',   lambda u, p: bool(p and (p.get('birth_date') or '').strip())),
-    ('profile_detail',   '详细资料',   lambda u, p: bool(p and (
+    ('display_name',     'Display name',  lambda u, p: bool((u.get('display_name') or '').strip())),
+    ('avatar_url',       'Avatar',        lambda u, p: bool((u.get('avatar_url') or '').strip())),
+    ('phone_verified',   'Phone verified',lambda u, p: u.get('phone_verified', 0) == 1),
+    ('gender',           'Gender',        lambda u, p: bool(p and (p.get('gender') or '').strip())),
+    ('birth_date',       'Date of birth', lambda u, p: bool(p and (p.get('birth_date') or '').strip())),
+    ('profile_detail',   'Profile details', lambda u, p: bool(p and (
         p.get('industry_id') or p.get('career_id') or
         (p.get('interests') or '[]') not in ('[]', '') or
         bool((p.get('bio') or '').strip())
     ))),
-    ('interests_set',    '兴趣标签',   lambda u, p: _has_user_interests(u['id'])),
-    ('email_verified',   '邮箱验证',   lambda u, p: u.get('email_verified', 0) == 1),
+    ('interests_set',    'Interest tags', lambda u, p: _has_user_interests(u['id'])),
+    ('email_verified',   'Email verified',lambda u, p: u.get('email_verified', 0) == 1),
 ]
 
 
@@ -60,7 +61,7 @@ def calc_completion(user_id):
         filled = 0
         for key, name, check_fn in FIELD_DEFS:
             done = check_fn(user, prof)
-            items.append({'key': key, 'name': name, 'done': done})
+            items.append({'key': key, 'name': _(name), 'done': done})
             if done:
                 filled += 1
 

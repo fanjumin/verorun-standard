@@ -75,6 +75,31 @@ if [ -n "${VR_THREADS:-}" ]; then
     esac
 fi
 
+# ── Edition 服务门控（与 deploy/editions/*.yaml 单一事实源对齐）──
+# 桌面包裹版（finance / research，含旧名 pro）：容器内不启动用户向 Web 服务
+# （verorun-main/8081 + verorun-auth/8083），supervisord 对应 program 关闭自动启动。
+_edition_lc="$(echo "${VR_EDITION:-}" | tr '[:upper:]' '[:lower:]')"
+case "${_edition_lc}" in
+    finance|research|pro)
+        echo "[EDITION] 桌面包裹版 ${_edition_lc}: disabling verorun-main/verorun-auth in supervisord"
+        if awk '
+            /^\[program:verorun-main\]/ || /^\[program:verorun-auth\]/ { target=1; print; next }
+            /^\[program:/ && target { target=0; print; next }
+            target && /^autostart=/ { sub(/^autostart=.*/, "autostart=false"); print; next }
+            target && /^autorestart=/ { sub(/^autorestart=.*/, "autorestart=false"); print; next }
+            { print }
+        ' /etc/supervisor/conf.d/supervisord.conf > /tmp/supervisord.conf.edition \
+            && mv /tmp/supervisord.conf.edition /etc/supervisor/conf.d/supervisord.conf; then
+            echo "[EDITION] supervisord.conf updated"
+        else
+            echo "WARN: failed to apply edition gating — keeping all programs enabled" >&2
+        fi
+        ;;
+    *)
+        # official / standard / 其他：全开（默认行为，不修改）
+        ;;
+esac
+
 # 审计 D6：Docker variant TLS —— detect mounted certificates (SSL_CERT_DIR, e.g. host /etc/letsencrypt/live)
 # If present, enable 443 ssl + HSTS; otherwise delete the placeholders to stay plain HTTP (container nginx -t passes).
 _NGINX_CONF=/etc/nginx/sites-enabled/default

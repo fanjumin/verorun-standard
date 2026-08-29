@@ -123,7 +123,7 @@ function rrDelete(id,name){
   overlay.className="modal-overlay";
   overlay.innerHTML='<div class="modal-box" style="width:420px;text-align:center">'
     +'<div style="font-size:16px;font-weight:700;margin-bottom:12px">{{ _('Confirm Delete') }}</div>'
-    +'<div style="color:var(--muted);margin-bottom:20px">'+'{{ _('Confirm Deletion Rule') }} "<b style="color:var(--text)">'+esc(name)+'</b>"? {{ _('Related Claim Records Will Also Be Cleared') }}。</div>'
+    +'<div style="color:var(--muted);margin-bottom:20px">'+'{{ _('Confirm Deletion Rule') }} "<b style="color:var(--text)">'+esc(name)+'</b>"? {{ _('Related claim records will also be cleared.') }}</div>'
     +'<div style="display:flex;gap:8px;justify-content:center">'
     +'<button class="btn bo" onclick="this.closest(\'.modal-overlay\').remove()">{{ _('Cancel') }}</button>'
     +'<button class="btn bp" style="background:#ef4444" onclick="var mo=this.closest(\'.modal-overlay\');mo.remove();rrDoDelete('+id+')">{{ _('Delete') }}</button></div></div>';

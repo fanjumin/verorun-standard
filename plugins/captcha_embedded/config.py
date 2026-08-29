@@ -14,6 +14,7 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
 CAPTCHA_TTL = 120          # challenge expires in 2 min
 RATE_LIMIT_TTL = 300       # IP window 5 min
 MAX_FAILS = 5              # max fails per IP in window
+BLOCK_TTL = 3600           # IP blocklist auto-release after 1 hour (2026-08-29)
 
 # Puzzle
 TOLERANCE = 4              # ±px

@@ -12,9 +12,73 @@ from datetime import datetime
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROLES_DIR = os.path.join(BASE_DIR, 'roles')
 
-# ── 科研版(edu) 商务/电商角色白名单屏蔽（复用 install.sh 既有 DEPLOY_TYPE=edu 机制）──
-HIDDEN_BUSINESS_SLUGS = {'business', 'finance'}
-SCIENCE_EDITION = os.getenv('DEPLOY_TYPE', '').strip().lower() == 'edu'
+# ── 发行版 edition 归一化（单一事实源：VR_EDITION / RELEASE_EDITION / DEPLOY_TYPE）──
+# 历史旧版名归一为现行版名：edu→research、pro→finance；
+# 其余（standard/official/空）视为全量版。
+def normalize_edition(e) -> str:
+    """归一化版本标识（大小写不敏感）：旧名→现行版名，空→standard。"""
+    e = (e or '').strip().lower()
+    if e in ('edu', 'research'):
+        return 'research'
+    if e in ('pro', 'finance'):
+        return 'finance'
+    return e or 'standard'
+
+
+def current_edition() -> str:
+    """全系统发行版唯一判定：VR_EDITION → RELEASE_EDITION → DEPLOY_TYPE。"""
+    return normalize_edition(os.getenv('VR_EDITION') or os.getenv('RELEASE_EDITION')
+                             or os.getenv('DEPLOY_TYPE') or '')
+
+
+# 兼容别名：早期调用方沿用下划线私有名（agent_matrix/routes.py 等）
+_current_edition = current_edition
+
+# ── Edition 服务启用/禁用（单一事实源：deploy/editions/<edition>.yaml 的 services: 段）──
+# 与角色 YAML 的 _parse_role_yaml 无关，独立解析避免影响角色加载。
+EDITIONS_DIR = os.path.join(BASE_DIR, '..', 'deploy', 'editions')
+
+
+def _parse_edition_services(text):
+    """从 edition yaml 提取 services: 段，返回 {服务名: bool}。
+
+    仅识别顶层 services: 下的缩进子键（true/false），其余内容忽略。
+    """
+    services = {}
+    in_services = False
+    for line in text.splitlines():
+        if not line.strip() or line.strip().startswith('#'):
+            continue
+        # 顶层 services: 开启块
+        if re.match(r'^services:\s*$', line):
+            in_services = True
+            continue
+        if in_services and line.startswith(' '):
+            m = re.match(r'^ +(\w[\w_]*)\s*:\s*(true|false)\s*$', line)
+            if m:
+                services[m.group(1)] = (m.group(2).lower() == 'true')
+        elif re.match(r'^\w[\w_]*\s*:', line):
+            # 遇到其他顶层 key → 离开 services 段
+            in_services = False
+    return services
+
+
+def edition_services() -> dict:
+    """当前 edition 的服务开关表；yaml 缺失 / 无 services 段 → 空 dict（调用方按全开处理）。"""
+    edition = current_edition()
+    path = os.path.join(EDITIONS_DIR, f'{edition}.yaml')
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return _parse_edition_services(f.read())
+    except Exception:
+        return {}
+
+
+def is_service_enabled(name: str) -> bool:
+    """服务是否启用：未声明（yaml 缺失 / 无 services 段 / 无该键）→ 默认 True（全开兜底）。"""
+    return edition_services().get(name, True)
 
 # ── 复用主应用 PostgreSQL 连接 ──
 sys.path.append(os.path.join(BASE_DIR, '..', 'auth-center', 'models'))
@@ -70,6 +134,7 @@ def _load_all_role_yamls():
     roles = []
     if not os.path.isdir(ROLES_DIR):
         return roles
+    _edition = _current_edition()
     for fname in sorted(os.listdir(ROLES_DIR)):
         if not fname.endswith('.yaml') and not fname.endswith('.yml'):
             continue
@@ -77,10 +142,13 @@ def _load_all_role_yamls():
         try:
             with open(fpath, 'r', encoding='utf-8') as f:
                 raw = _parse_role_yaml(f.read())
-            # 科研版跳过商务角色（其余逻辑不变）
-            if SCIENCE_EDITION and raw.get('slug') in HIDDEN_BUSINESS_SLUGS:
-                print(f'[RoleYAML] EDU edition skips business role: {raw.get("slug")}')
-                continue
+            # edition 角色集过滤（editions 字段缺省 = 全版本包含）。
+            # research/finance 分版只加载归属角色；standard/official 全量。
+            if _edition in ('research', 'finance'):
+                _owned = raw.get('editions') or []
+                if _owned and _edition not in _owned:
+                    print(f'[RoleYAML] edition {_edition} skips role: {raw.get("slug")}')
+                    continue
             # 类型转换
             raw['is_active'] = _to_int(raw.get('is_active', 1))
             raw['is_system'] = _to_int(raw.get('is_system', 0))
@@ -591,15 +659,33 @@ def seed_default_agents():
                 ))
 
         # ── Phase 2: DELETE old system roles no longer in YAML ──
+        # 护栏（架构评审 §3.2）：绝不静默删核心角色。
+        #   1) 角色集异常收缩（<5）→ 跳过删除（fail-closed）
+        #   2) 删除数量超上限 MAX_SYSTEM_ROLE_DELETE（默认 3）→ 跳过删除（fail-closed）
+        #   3) SEED_DRY_RUN=1 → 预演模式，只打印不删除
         deleted = 0
         if yaml_slugs:
-            deleted = conn.execute("""
-                DELETE FROM agent_matrix
-                WHERE is_system=1 AND slug NOT IN ({})
-                AND slug != ''
-            """.format(','.join(['%s'] * len(yaml_slugs))),
-                tuple(yaml_slugs)
-            ).rowcount
+            placeholders = ','.join(['%s'] * len(yaml_slugs))
+            stale = 0
+            if len(yaml_slugs) < 5:
+                print(f'[Seed] FAIL-CLOSED: role set shrank to {len(yaml_slugs)}, skip delete')
+            else:
+                stale = conn.execute(
+                    "SELECT COUNT(*) AS c FROM agent_matrix "
+                    "WHERE is_system=1 AND slug NOT IN ({}) AND slug != ''"
+                    .format(placeholders), tuple(yaml_slugs)
+                ).fetchone()['c'] or 0
+                max_delete = int(os.getenv('MAX_SYSTEM_ROLE_DELETE', '3'))
+                if stale > max_delete:
+                    print(f'[Seed] FAIL-CLOSED: {stale} stale roles exceed limit {max_delete}, skip delete')
+                elif os.getenv('SEED_DRY_RUN', '0') == '1':
+                    print(f'[Seed] DRY-RUN: would delete {stale} stale system roles, skipped')
+                else:
+                    deleted = conn.execute(
+                        "DELETE FROM agent_matrix "
+                        "WHERE is_system=1 AND slug NOT IN ({}) AND slug != ''"
+                        .format(placeholders), tuple(yaml_slugs)
+                    ).rowcount
         if deleted:
             print(f'[Seed] Cleaned up {deleted} old system roles')
 
@@ -794,13 +880,14 @@ def unregister_plugin_agents(plugin_id: str, metadata: dict) -> int:
 # 聚合目标为核心角色行（is_system=1），不新建独立 Agent 行。
 # ============================================================
 
-# 系统预设核心角色（agent_matrix/roles/*.yaml 种子，is_system=1）
-CORE_ROLE_SLUGS = ('athena', 'content', 'business', 'builder', 'finance', 'ops', 'service', 'vision', 'creative')
+# 系统预设核心角色 = roles/*.yaml 目录（is_system=1），单一事实源。
+# 不再维护手写 slug 元组；get_core_role_slugs() 由 YAML 动态推导，
+# edition 过滤（_load_all_role_yamls 内）自动生效。
 
 
 def get_core_role_slugs() -> list:
-    """返回系统预设核心角色 slug 列表（供校验使用）。"""
-    return list(CORE_ROLE_SLUGS)
+    """返回系统预设核心角色 slug 列表（由 roles/*.yaml 动态推导）。"""
+    return [r['slug'] for r in _load_all_role_yamls() if r.get('slug')]
 
 
 def _json_list(value) -> list:
@@ -830,7 +917,7 @@ def _merge_unique(base: list, extra: list) -> list:
 def _declared_agent_role(metadata: dict) -> str:
     """提取并校验插件声明的 agent_role，非法返回 ''。"""
     role = (metadata or {}).get('agent_role', '')
-    if role not in CORE_ROLE_SLUGS:
+    if role not in get_core_role_slugs():
         return ''
     return role
 
@@ -844,7 +931,7 @@ def attach_plugin_capabilities(plugin_id: str, metadata: dict) -> int:
     role = _declared_agent_role(metadata or {})
     if not role:
         print(f'[PluginRoles] WARNING: {plugin_id} 缺少合法 agent_role '
-              f'（须为 {list(CORE_ROLE_SLUGS)} 之一），跳过网关注册')
+              f'（须为 {get_core_role_slugs()} 之一），跳过网关注册')
         return -1
     caps = _json_list((metadata or {}).get('capabilities', []))
     with get_db() as conn:

@@ -443,7 +443,7 @@ function matNewSession(){
       if(!el)return;
       var sl=d.data;
       if(!sl.length){el.innerHTML='<div class="em">{{ _('No Chat History') }}</div>';return}
-      var sh='{{ _('<table><tr><th>Session</th><th>First Msg</th><th>Last Time</th></tr>') }}';
+      var sh='<table><tr><th>{{ _('Session') }}</th><th>{{ _('First Msg') }}</th><th>{{ _('Last Time') }}</th></tr>';
       sl.forEach(function(s){
         sh+='<tr onclick="matLoadSession(this.dataset.sid)" data-sid="'+esc(s.session_id)+'" style="cursor:pointer">';
         sh+='<td style="font-size:10px;color:var(--dim)">'+esc(s.session_id)+'</td>';
@@ -600,8 +600,8 @@ function matNewSub(){
   h+='<div class="st">+ {{ _('Add Sub') }} Agent <span style="font-size:10px;color:var(--dim);font-weight:400">｜<a href="javascript:matPromptHelp()" style="color:var(--accent)">📖 {{ _('Prompt Management Description') }}</a></span></div>';
   h+='<div class="g2">';
   // Row 1: Name + Domain
-  h+='<div><div style="font-size:11px;color:var(--dim)">{{ _('Name') }} *</div><input class="in" id="matNewName" placeholder="如：CMS Agent" style="width:100%"></div>';
-  h+='<div><div style="font-size:11px;color:var(--dim)">{{ _('Domain') }}</div><input class="in" id="matNewDomain" placeholder="如：cms" style="width:100%"></div>';
+  h+='<div><div style="font-size:11px;color:var(--dim)">{{ _('Name') }} *</div><input class="in" id="matNewName" placeholder="{{ _('e.g.') }}: CMS {{ _('Agent') }}" style="width:100%"></div>';
+  h+='<div><div style="font-size:11px;color:var(--dim)">{{ _('Domain') }}</div><input class="in" id="matNewDomain" placeholder="{{ _('e.g.') }}: cms" style="width:100%"></div>';
   // Row 2: Description (full width)
   h+='<div style="grid-column:1/3"><div style="font-size:11px;color:var(--dim)">{{ _('Description') }}</div><input class="in" id="matNewDesc" placeholder="{{ _('Role Description') }}" style="width:100%"></div>';
   // Row 3: Provider → Model cascade
@@ -858,10 +858,10 @@ function matPromptHelp(){
   h+='<br>{{ _('Located on Server') }} <code>agent_matrix/prompts/</code> {{ _('Directory') }}，{{ _('Includes Full Role Definition') }}、{{ _('Managed Modules') }}、API {{ _('Reference') }}、{{ _('Quality Standard') }}。';
   h+='<br>{{ _('Create') }} Sub Agent {{ _('Pass When') }}「System Prompt {{ _('Templates') }}」{{ _('Dropdown Select') }}，{{ _('Auto-fill to Text Field') }}。';
   h+='<br><br><b>{{ _('Custom Prompt') }}：</b>';
-  h+='<br>{{ _('Selecting') }}「{{ _('Custom Prompt') }}」后，{{ _('Directly') }} System Prompt {{ _('Write in Text Box') }}。';
+  h+='<br>{{ _("After selecting a custom prompt, write the System Prompt directly in the text box.") }}';
   h+='<br>{{ _('Supported Fields') }}：{{ _('Role Definition') }}、{{ _('Managed Modules') }}、{{ _('Core Capabilities') }}、{{ _('Quality Standard') }}、{{ _('Code of Conduct') }}、{{ _('Available') }} API {{ _('Reference') }}。';
   h+='<br><br><b>{{ _('Prompt Storage') }}：</b>';
-  h+='<br>• {{ _('If Built-in Templates Selected') }}，{{ _('Store as File Path') }}（如 prompts/sub_cms_prompt.md）';
+  h+='<br>• {{ _("If built-in templates are selected, store as file path") }} ({{ _('e.g.') }} prompts/sub_cms_prompt.md)';
   h+='<br>• {{ _('If Writing Manually') }}，{{ _('Store Full Text Content Directly') }}';
   h+='<br>• {{ _('Auto-load at Runtime') }}，{{ _('Supports Dynamic Editing') }}';
   h+='<br><br><b>{{ _('Modify Prompt') }}：</b>';
@@ -1270,14 +1270,14 @@ function aiDiscussSend() {
   inp.value = '';
 
   var msgs = document.getElementById('aiChatMsgs');
-  msgs.innerHTML += '<div style="color:var(--accent);margin:4px 0">👤 Me: ' + esc(msg) + '</div>';
+  msgs.innerHTML += '<div style="color:var(--accent);margin:4px 0">👤 {{ _('Me') }}: ' + esc(msg) + '</div>';
 
   // Progress indicator with elapsed time
   aiDiscussStartTime = Date.now();
   var progressHTML = '<div id="discussProgress" style="margin:8px 0;padding:8px 12px;' +
     'background:rgba(0,245,255,0.06);border:1px solid var(--accent);border-radius:6px;' +
     'font-size:11px;color:var(--accent)">' +
-    '🤝 Discussion starting... (0.0s)</div>';
+    '🤝 {{ _('Discussion Starting') }}... (0.0s)</div>';
   msgs.innerHTML += progressHTML;
   msgs.scrollTop = msgs.scrollHeight;
 
@@ -1298,7 +1298,7 @@ function aiDiscussSend() {
       console.error('Discussion request failed:', err);
       var progEl = document.getElementById('discussProgress');
       if (progEl) progEl.remove();
-      msgs.innerHTML += '<div style="color:#f85149;margin:4px 0">❌ Discussion request failed</div>';
+      msgs.innerHTML += '<div style="color:#f85149;margin:4px 0">❌ {{ _('Discussion Request Failed') }}</div>';
     }
   });
 }
@@ -1419,7 +1419,7 @@ function handleDiscussMessage(msg, msgs) {
         '<div id="discussApproval" style="margin:16px 0;padding:16px;' +
         'background:rgba(210,153,34,0.08);border:1px solid var(--warn);border-radius:8px">' +
         '<div style="font-size:13px;font-weight:600;color:var(--warn);margin-bottom:10px">' +
-        '⚠ ' + esc(msg.hint || 'Manual approval required') + '</div>' +
+        '⚠ ' + esc(msg.hint || {{ _('Manual Approval Required') | tojson }}) + '</div>' +
         '<textarea id="approvalSteps" style="width:100%;height:80px;' +
         'background:var(--bg);color:var(--ink);border:1px solid var(--rule);' +
         'border-radius:4px;padding:10px;font-size:12px;font-family:monospace;resize:vertical" ' +
@@ -1428,10 +1428,10 @@ function handleDiscussMessage(msg, msgs) {
         '<div style="margin-top:10px;display:flex;gap:10px">' +
         '<button onclick="aiApproveDiscussion()" style="padding:6px 18px;' +
         'background:var(--accent2);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px">' +
-        'Approve &amp; Execute</button>' +
+        '{{ _('Approve & Execute') }}</button>' +
         '<button onclick="aiRejectDiscussion()" style="padding:6px 18px;' +
         'background:var(--danger);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px">' +
-        'Reject</button>' +
+        '{{ _('Reject') }}</button>' +
         '</div></div>';
       msgs.innerHTML += approvalHTML;
       msgs.scrollTop = msgs.scrollHeight;
@@ -1507,16 +1507,16 @@ function renderDiscussMessage(msg, cssClass) {
 function aiApproveDiscussion() {
   var stepsText = document.getElementById('approvalSteps').value.trim();
   if (!stepsText) {
-    alert('Please enter execution steps as a JSON array.');
+    alert({{ _('Please enter execution steps as a JSON array.') | tojson }});
     return;
   }
 
   var steps;
   try {
     steps = JSON.parse(stepsText);
-    if (!Array.isArray(steps)) throw new Error('Expected an array');
+    if (!Array.isArray(steps)) throw new Error({{ _('Expected an array') | tojson }});
   } catch (e) {
-    alert('Invalid JSON. Expected: [{"type":"...","params":{...}}]');
+    alert({{ _('Invalid JSON. Expected') | tojson }} + ': [{"type":"...","params":{...}}]');
     return;
   }
 
@@ -1536,13 +1536,13 @@ function aiApproveDiscussion() {
       if (data.error) {
         msgs.innerHTML += renderDiscussMessage({
           agent: 'System', role: 'Execution Engine',
-          content: 'Execution failed: ' + data.error,
+          content: {{ _('Execution Failed') | tojson }} + ': ' + data.error,
           timestamp: ''
         }, 'system');
       } else {
         msgs.innerHTML += renderDiscussMessage({
           agent: 'System', role: 'Execution Engine',
-          content: 'Manually approved. ' + (data.message || ''),
+          content: {{ _('Manually Approved') | tojson }} + '. ' + (data.message || ''),
           timestamp: ''
         }, 'system');
       }
@@ -1560,7 +1560,7 @@ function aiRejectDiscussion() {
   var msgs = document.getElementById('aiChatMsgs');
   msgs.innerHTML += renderDiscussMessage({
     agent: 'System', role: 'Execution Engine',
-    content: 'Plan rejected by user. Discussion ended.',
+    content: {{ _('Plan rejected by user. Discussion ended.') | tojson }},
     timestamp: ''
   }, 'system');
   msgs.scrollTop = msgs.scrollHeight;

@@ -8,7 +8,7 @@ window.l_knowledge=function(){
   window._kbIsSuperAdmin=isSuperAdmin;
 
   // 模块外壳：标题 + 子功能 Tab（知识库 / 数据清洗）
-  h+='<div style="max-width:1100px;margin:0 auto;padding:20px">';
+  h+='<div style="padding:20px 24px">';
   h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">';
   h+='<h2>{{ _('RAG Knowledge Base') }}</h2>';
   h+='<span style="font-size:12px;color:var(--dim)">{{ _('Role') }}: '+esc(role)+'</span>';
@@ -85,6 +85,7 @@ function kbSwitchScope(scope){
   var tabUser=document.getElementById('kb-tab-user');
   if(tabSys){tabSys.style.background=scope==='system'?'var(--accent)':'var(--bg)';tabSys.style.color=scope==='system'?'#fff':'var(--fg)';}
   if(tabUser){tabUser.style.background=scope==='user'?'var(--accent)':'var(--bg)';tabUser.style.color=scope==='user'?'#fff':'var(--fg)';}
+  var _si=document.getElementById('kb-search');if(_si)_si.value='';
   kbLoad();
 }
 
@@ -127,11 +128,11 @@ function kbLoad(){
         h+='<td style="padding:8px;color:var(--dim)">'+esc(k.category||'-')+'</td>';
         h+='<td style="padding:8px"><span style="font-size:11px;padding:2px 6px;border-radius:3px;background:'+(k.scope==='system'?'#fef2f2':'#ecfdf5')+';color:'+(k.scope==='system'?'#dc2626':'#059669')+'">'+esc(k.scope||'system')+'</span></td>';
         h+='<td style="padding:8px;text-align:center">'+esc(String(k.priority||0))+'</td>';
-        h+='<td style="padding:8px;font-size:11px;color:var(--dim)">'+esc(String(k.updatedAt||'').substring(0,10))+'</td>';
+        h+='<td style="padding:8px;font-size:11px;color:var(--dim)">'+esc(String(k.updated_at||'').substring(0,10))+'</td>';
         h+='<td style="padding:8px;text-align:center">';
-        h+='<button class="btn bs" onclick="kbOpenEdit('+k.id+')">{{ _('Edit') }}</button> ';
+        h+='<button class="btn bs" onclick="kbOpenEdit(\''+String(k.id).replace(/'/g,'')+'\')">{{ _('Edit') }}</button> ';
         var canDelete=!(scope==='system');
-        h+='<button class="btn bs" style="'+(canDelete?'color:var(--rose)':'opacity:0.4;cursor:not-allowed')+'" '+(canDelete?'onclick="kbDelete('+k.id+')"':'disabled title="{{ _('System KB entries cannot be deleted') }}"')+'>{{ _('Delete') }}</button>';
+        h+='<button class="btn bs" style="'+(canDelete?'color:var(--rose)':'opacity:0.4;cursor:not-allowed')+'" '+(canDelete?'onclick="kbDelete(\''+String(k.id).replace(/'/g,'')+'\')"':'disabled title="{{ _('System KB entries cannot be deleted') }}"')+'>{{ _('Delete') }}</button>';
         h+='</td></tr>';
       });
     }
@@ -206,7 +207,7 @@ function kbSave(){
   if(!content){showToast("{{ _('Content is required') }}",'error');return;}
 
   var body={scope:scope,title:title,content:content,keywords:keywords,category:category,priority:priority};
-  if(id)body.id=parseInt(id);
+  if(id)body.id=id;
 
   fetch('/admin/knowledge/entries',{
     method:'POST',

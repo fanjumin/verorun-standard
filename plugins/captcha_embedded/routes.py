@@ -38,6 +38,12 @@ def _client_ip():
     return request.headers.get('X-Real-IP', request.remote_addr or 'unknown')
 
 
+def _require_admin():
+    """复用主系统管理员鉴权（admin API 专用端点）。"""
+    from routes.admin import _require_admin as _ra
+    return _ra()
+
+
 # ── /generate ──────────────────────────────────────────────
 
 @captcha_bp.route('/generate', methods=['GET'])
@@ -154,4 +160,7 @@ def captcha_consume():
 
 @captcha_bp.route('/admin/stats/', methods=['GET'])
 def admin_captcha_stats():
+    admin, err = _require_admin()
+    if err:
+        return err
     return jsonify(get_stats())

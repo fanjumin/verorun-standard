@@ -28,6 +28,15 @@ from routes.douyin_miniprogram import douyin_mp_bp
 
 from models import get_db
 
+# ── Edition 服务门控（单一事实源：deploy/editions/<edition>.yaml 的 services: 段）──
+try:
+    from agent_matrix.models import is_service_enabled
+except Exception as _e:
+    print(f'[Edition] ⚠️ is_service_enabled import failed, default all-enabled: {_e}')
+
+    def is_service_enabled(_name):
+        return True
+
 # 移除 auth-center sys.path
 _auth_center_norm = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', 'auth-center'))
 sys.path = [p for p in sys.path if os.path.normpath(p) != _auth_center_norm]
@@ -147,11 +156,12 @@ app.register_blueprint(douyin_mp_bp)
 app.register_blueprint(internal_api_bp)  # 内部服务 API（插件数据解耦后共享数据获取）
 # mini_program_bp 已由 PluginManager 挂载（plugins/mini_app_builder）
 
-# ── 旧用户中心路由重定向到 SPA ──
-@app.route('/user-console/')
-@app.route('/user-console/<path:subpath>')
-def redirect_user_console(subpath=''):
-    return redirect('/', 301)
+# ── 旧用户中心路由重定向到 SPA（user_console 禁用时不注册）──
+if is_service_enabled('user_console'):
+    @app.route('/user-console/')
+    @app.route('/user-console/<path:subpath>')
+    def redirect_user_console(subpath=''):
+        return redirect('/', 301)
 
 
 @app.route('/orders')

@@ -174,7 +174,7 @@ def chat_request():
                 last_user_msg = m.get('content', '')[:200]
                 break
         if last_user_msg:
-            knowledge = _rag_search(last_user_msg, top_k=5)
+            knowledge = _rag_search(last_user_msg, top_k=5, scope='user')
             if knowledge:
                 ctx = _build_rag_context(knowledge)
                 # 追加到已有的 system 消息，或新建一条
@@ -282,7 +282,7 @@ def chat_public():
             last_user_msg = m.get('content', '')[:200]
             break
     if last_user_msg:
-        knowledge = _rag_search(last_user_msg, top_k=5)
+        knowledge = _rag_search(last_user_msg, top_k=5, scope='user')
         if knowledge:
             ctx = _build_rag_context(knowledge)
             has_system = False
