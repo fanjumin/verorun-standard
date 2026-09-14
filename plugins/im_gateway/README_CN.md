@@ -247,12 +247,13 @@ im_gateway/
 +-- scheduler.py            # GATEWAY_JOBS（token 自动刷新）
 +-- routes_overview.py      # 聚合概览端点（卡片式管理 UI 数据源）
 +-- routes_developer.py     # 开发者登录 API Key 管理（Phase 4）
-+-- routes_login.py         # 第三方登录提供方管理（Phase 5）
++-- routes_login.py         # 第三方登录提供方管理（Phase 5，方案 A）
++-- routes_third_login.py   # 第三方登录 Web OAuth 闭环（Phase 5，方案 B：login/callback）
 +-- channels/
 |   +-- base.py             # BaseChannelAdapter 统一渠道抽象基类
 |   +-- social/             # 社媒渠道适配器集合（注册到统一注册表）
 +-- oauth/                  # OAuth Provider 注册表 + 各平台实现
-+-- login/                  # 登录 OAuth 提供方注册表 + 各平台实现（Phase 5）
++-- login/                  # 登录 OAuth 提供方注册表 + code→token 交换实现（Phase 5）
 ```
 
 ### 认证模式
@@ -303,7 +304,7 @@ OAuth 平台的应用凭据（client_id / client_secret / api_key 等）沿用�
 
 插件内置 WeChat / QQ / Weibo / GitHub / Google 提供方目录（`login/providers.py` 注册表），凭据存入 `im_gateway.login_providers` 表，`client_secret` 掩码显示；前端「第三方登录」tab 提供卡片列表（启用状态 / 是否配置）、凭据配置表单、启用 / 停用切换与授权 URL 测试。
 
-> 说明：本阶段仅覆盖「提供方目录 + 凭据管理 + 授权 URL 生成」。登录闭环（回调 → 用户绑定 → JWT）需要 auth-center 系统集成，属方案 B，另行立项。
+> 说明：方案 A 覆盖「提供方目录 + 凭据管理 + 授权 URL 生成（测试）」。完整登录闭环（回调 → 用户绑定 → JWT）见下方「方案 B」小节，已由 IM Gateway 实现。
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -314,9 +315,26 @@ OAuth 平台的应用凭据（client_id / client_secret / api_key 等）沿用�
 
 提供方注册表接口：`login/providers.py` 中 `list_login_providers()` 返回目录、`get_login_provider_class()` 按 id 查找提供方类。
 
+### 第三方登录闭环（Phase 5，方案 B：插件自包含）
+
+方案 B 在 IM Gateway 内实现 Web 第三方登录的**完整闭环**：授权 → 回调 → 用户绑定 → JWT。登录入口在插件（公开端点），登录内核仍为 auth-center（`session_service.issue_auth_session` 统一签发，含 2FA / 账号禁用检查），与小程序登录同架构；`oauth_config` 插件保留现状、不再扩展，二者提供方目录不同、互不影响。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/oauth/<provider>/login` | 发起授权（state 落库防 CSRF）→ 重定向平台授权页 |
+| GET | `/api/v1/oauth/<provider>/callback` | 平台回调 → code 换 token → 用户绑定 → JWT → sso_token cookie → 跳主站 |
+
+要点：
+- 平台：WeChat（开放平台扫码）/ QQ / Weibo / GitHub / Google，与方案 A 目录一致（`login/providers.py`）
+- 交换实现：`login/exchange.py`（纯标准库 urllib，零新增依赖），返回 `{openid, nickname, avatar, email}`
+- 用户绑定：统一走 `im_gateway.login_user_bindings` 表（联邦身份，同 mini_app_builder 的 platform_user_mappings 先例），不扩展主库 `users` 结构；主库用户按唯一 `username`（`<provider>_<md5(openid)前12位>`）get-or-create
+- CSRF：state 存 `im_gateway.oauth_login_states`，一次性消费 + 10 分钟过期
+- 2FA 拦截：`issue_auth_session` 抛 `TwoFactorRequired` 时跳主站 `?needs_2fa=1&challenge_token=...`
+- 回调地址：`<当前请求根>/api/v1/oauth/<provider>/callback`（login 与 callback 自动一致，需在各平台应用后台配置该地址）
+
 ### 小程序开发账户（Phase 7，集中 mini_app_builder 登录）
 
-「开发者登录」tab 分上下两块：上块为 API Key 管理（Phase 4），下块为**小程序开发账户**（Phase 7）。小程序账户复用 mini_app_builder 的 `dev_accounts` 数据层（**不重复建表、不改其代码**），在 IM Gateway 内完成 5 平台（douyin / toutiao / wechat / telegram / line）凭据的完整 CRUD 与连接测试；mini_app_builder 未启用时接口优雅降级（返回明确错误，不影响其余功能）。
+「开发者登录」tab 分上下两块（均采用**卡片网格**，与 im / social / login 各 tab 视觉对齐）：上块为 API Key 管理（Phase 4），下块为**小程序开发账户**（Phase 7）。小程序账户复用 mini_app_builder 的 `dev_accounts` 数据层（**不重复建表、不改其代码**），在 IM Gateway 内完成 5 平台（douyin / toutiao / wechat / telegram / line）凭据的完整 CRUD 与连接测试；mini_app_builder 未启用时接口优雅降级（返回明确错误，不影响其余功能）。
 
 各平台小程序登录方式（供前端展示）：
 

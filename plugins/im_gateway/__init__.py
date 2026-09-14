@@ -117,12 +117,13 @@ class ImGatewayPlugin(BasePlugin):
                     pass
 
     def _start_token_refresh_scheduler(self):
-        """插件内自调度：每日 04:00 扫描刷新临近过期 token。
+        """插件内自调度：每日 04:00 扫描刷新临近过期 token（进程内兜底）。
 
-        框架当前无 register_jobs() 消费方（admin/app.py 仅硬编码订阅任务），
-        故在插件内自建 daemon BackgroundScheduler；多 worker 下由
-        scheduler.refresh_expiring_tokens() 内的 PG advisory lock 保证单实例执行。
-        保留 register_jobs() 以兼容框架未来契约。
+        框架已具备 register_jobs() 消费方（manager.register_all_plugin_jobs），
+        但框架注册仅在 admin 进程执行；本插件若同时被其他 app 进程加载，
+        仍需进程内自建 daemon BackgroundScheduler 兜底。两处可能同时注册，
+        由 scheduler.refresh_expiring_tokens() 内的 PG advisory lock 保证
+        单实例执行，重复调度仅冗余、无副作用。
         """
         self._token_scheduler = None
         try:
@@ -149,7 +150,8 @@ class ImGatewayPlugin(BasePlugin):
         from .routes_login import login_bp
         from .routes_miniapp import miniapp_bp
         from .routes_mini_login import mini_login_bp
-        return [im_bp, oauth_bp, webhook_bp, overview_bp, developer_bp, login_bp, miniapp_bp, mini_login_bp]
+        from .routes_third_login import third_login_bp
+        return [im_bp, oauth_bp, webhook_bp, overview_bp, developer_bp, login_bp, miniapp_bp, mini_login_bp, third_login_bp]
 
     def register_jobs(self):
         """新增：统一网关定时任务（token 自动刷新）"""

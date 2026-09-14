@@ -92,12 +92,10 @@ def _app_creds(channel: str) -> dict:
 
 GATEWAY_JOBS = [
     {
-        'job_id': 'gateway_token_refresh',
+        'id': 'gateway_token_refresh',
         'func': refresh_expiring_tokens,
         'trigger': 'cron',
-        'kwargs': {'hour': 4, 'minute': 0},
-        'priority': 'normal',
-        'max_retries': 2,
-        'description': 'Daily refresh of expiring social channel tokens',
+        'hour': 4,
+        'minute': 0,
     },
 ]

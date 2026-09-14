@@ -9,7 +9,7 @@
       "praw": "Reddit 渠道弱依赖，缺失时自动降级（见 _ensure_deps）"
     }
   },
-  "version": "2.0.0",
+  "version": "2.1.1",
   "category": "system",
   "tags": [
     "im",
@@ -21,6 +21,8 @@
   ],
   "icon": "channels",
   "description": "IM Gateway — Unified instant-messaging channel gateway (Feishu / WeCom / QQ / DingTalk), extensible to Telegram / LINE",
+  "tagline": "统一即时消息通道网关",
+  "tagline_subtitle": "飞书 · 企业微信 · QQ · 钉钉，可扩展 Telegram/LINE",
   "author": "VeroRun",
   "min_app_version": "0.10.0",
   "agent_role": "service",

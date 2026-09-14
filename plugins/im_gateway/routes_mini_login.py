@@ -41,6 +41,19 @@ def _err(msg, code=400):
     return jsonify({'success': False, 'error': msg}), code
 
 
+def _issue_platform_jwt(user_id):
+    """统一登录签发（与 routes_third_login / 主站同通道：session_service）。
+
+    services.jwt_service 无 generate_token，历史代码引用了不存在的函数，
+    导致所有平台登录 500；此处收敛到全站唯一签发入口。
+    平台用户非管理员：is_admin 走默认 False。
+    返回 JWT 字符串（签发失败抛异常由调用方兜底为 500）。
+    """
+    from services.session_service import issue_auth_session
+    result = issue_auth_session(user_id, '', app_name='main')
+    return result['token']
+
+
 def _require_auth():
     """Require valid JWT token, return (user_id, error_response)"""
     auth = request.headers.get('Authorization', '')
@@ -132,11 +145,23 @@ def _douyin_login(data):
         domain = (request.headers.get('Host', '') or '').split(':')[0]
         if domain.startswith('www.'):
             domain = domain[4:]
+
+        # P0-3 fail-closed：oauth_config stub 模式下 code2session 会伪造 openid，
+        # 登录网关必须拒绝，否则任意 code 皆可换取系统 JWT。
+        try:
+            from plugins.oauth_config.services.douyin_service import miniprogram_is_stub
+            if miniprogram_is_stub(site_domain=domain):
+                return _err('Douyin mini-program credentials not configured for this site', 503)
+        except ImportError:
+            pass
+
         result = code2session(code, site_domain=domain) if code2session else None
         if not result or not result.get('openid'):
             return _err('Failed to exchange code with Douyin', 400)
 
         openid = result['openid']
+        if openid.startswith('stub_'):
+            return _err('Douyin mini-program credentials not configured for this site', 503)
         nickname = data.get('nickname', '') or ''
         avatar = data.get('avatar', '') or ''
         username = 'dy_' + hashlib.md5(openid.encode()).hexdigest()[:12]
@@ -149,13 +174,7 @@ def _douyin_login(data):
         from plugins.mini_app_builder.platform_users import upsert_mapping
         upsert_mapping('douyin', openid, user['id'], username, display_name, avatar)
 
-        from services.jwt_service import generate_token
-        token = generate_token({
-            'user_id': user['id'],
-            'username': user['username'],
-            'platform': 'douyin',
-            'platform_user_id': openid,
-        })
+        token = _issue_platform_jwt(user['id'])
 
         return _ok({
             'token': token,
@@ -187,12 +206,27 @@ def _wechat_login(data):
         except ImportError:
             get_openid_by_code = None
 
-        session_info = get_openid_by_code(code) if get_openid_by_code else None
+        domain = (request.headers.get('Host', '') or '').split(':')[0]
+        if domain.startswith('www.'):
+            domain = domain[4:]
+
+        # P0-3 fail-closed：stub 模式下 get_openid_by_code 返回 stub_open_/stub_union
+        # 假身份（unionid 恒定还导致所有伪造者共享同一账号），网关侧必须拒绝。
+        try:
+            from plugins.oauth_config.services.wechat_service import is_stub
+            if is_stub(site_domain=domain):
+                return _err('WeChat credentials not configured for this site', 503)
+        except ImportError:
+            pass
+
+        session_info = get_openid_by_code(code, site_domain=domain) if get_openid_by_code else None
         if not session_info or not session_info.get('openid'):
             return _err('Failed to exchange code with WeChat', 400)
 
         openid = session_info.get('openid', '')
         unionid = session_info.get('unionid', openid)
+        if openid.startswith('stub_') or str(unionid).startswith('stub_'):
+            return _err('WeChat credentials not configured for this site', 503)
 
         username = 'wx_' + hashlib.md5(openid.encode()).hexdigest()[:12]
         nickname = data.get('nickname', '') or 'WeChat User'
@@ -205,13 +239,7 @@ def _wechat_login(data):
         from plugins.mini_app_builder.platform_users import upsert_mapping
         upsert_mapping('wechat', unionid, user['id'], username, nickname, avatar)
 
-        from services.jwt_service import generate_token
-        token = generate_token({
-            'user_id': user['id'],
-            'username': user['username'],
-            'platform': 'wechat',
-            'platform_user_id': unionid,
-        })
+        token = _issue_platform_jwt(user['id'])
 
         return _ok({
             'token': token,
@@ -293,13 +321,7 @@ def _telegram_login(data):
         from plugins.mini_app_builder.platform_users import upsert_mapping
         upsert_mapping('telegram', tg_user_id, user['id'], username, display_name, '')
 
-        from services.jwt_service import generate_token
-        token = generate_token({
-            'user_id': user['id'],
-            'username': user['username'],
-            'platform': 'telegram',
-            'platform_user_id': tg_user_id,
-        })
+        token = _issue_platform_jwt(user['id'])
 
         return _ok({
             'token': token,
@@ -369,13 +391,7 @@ def _line_login(data):
         from plugins.mini_app_builder.platform_users import upsert_mapping
         upsert_mapping('line', user_id, user['id'], username, display_name, avatar)
 
-        from services.jwt_service import generate_token
-        token = generate_token({
-            'user_id': user['id'],
-            'username': user['username'],
-            'platform': 'line',
-            'platform_user_id': user_id,
-        })
+        token = _issue_platform_jwt(user['id'])
 
         return _ok({
             'token': token,

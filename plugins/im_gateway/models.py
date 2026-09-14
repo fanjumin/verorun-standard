@@ -82,6 +82,38 @@ def init_im_db():
                 updated_at      TEXT DEFAULT NOW()
             )
         """)
+        # 第三方登录用户绑定表（Phase 5，方案 B：统一走绑定表，联邦身份）
+        # 五平台（wechat/qq/weibo/github/google）登录用户统一落此表，
+        # 不做主库 users 结构扩展；JWT 仍由 auth-center 签发。
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS login_user_bindings (
+                id               BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                provider         TEXT NOT NULL,
+                provider_user_id TEXT NOT NULL,
+                user_id          BIGINT NOT NULL,
+                username         TEXT NOT NULL DEFAULT '',
+                display_name     TEXT NOT NULL DEFAULT '',
+                avatar           TEXT NOT NULL DEFAULT '',
+                created_at       TIMESTAMPTZ DEFAULT NOW(),
+                updated_at       TIMESTAMPTZ DEFAULT NOW(),
+                CONSTRAINT uq_login_bindings UNIQUE (provider, provider_user_id)
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_login_bindings_user_id
+                ON login_user_bindings(user_id)
+        """)
+        # 第三方登录 CSRF state 表（一次性、10 分钟过期）
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS oauth_login_states (
+                id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                state      TEXT NOT NULL UNIQUE,
+                provider   TEXT NOT NULL DEFAULT '',
+                consumed   BIGINT DEFAULT 0,
+                expires_at TIMESTAMPTZ NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
         for channel, is_enabled in _SEED_CHANNELS:
             exists = conn.execute(
                 "SELECT id FROM channel_configs WHERE channel=%s", (channel,)

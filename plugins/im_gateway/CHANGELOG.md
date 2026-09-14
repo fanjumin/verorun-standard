@@ -1,5 +1,27 @@
 # Changelog
 
+## v2.1.0 — 2026-08-30
+
+### Changes
+
+- Version bump from v2.0.0
+
+## v2.1.0 — 2026-08-30
+
+### New features
+
+- 第三方登录完整闭环（Phase 5 方案 B）：IM Gateway 提供 Web OAuth 登录
+  （wechat / qq / weibo / github / google），新增公开端点
+  `GET /api/v1/oauth/<provider>/login` 与 `GET /api/v1/oauth/<provider>/callback`
+- 登录内核复用 auth-center `session_service.issue_auth_session`（统一签发 JWT，
+  含 2FA / 账号禁用检查）；`oauth_config` 插件保留现状、不再扩展
+- 新增 im_gateway 表：`login_user_bindings`（联邦身份绑定，不扩展主库 users 结构）、
+  `oauth_login_states`（CSRF state，一次性消费 + 10 分钟过期）
+- 新增 `login/exchange.py`：五平台 code→token→userinfo 交换（纯标准库 urllib，
+  零新增 pip 依赖）
+- 管理端 UI 对齐：开发者登录 tab 由表格改为卡片网格（API Key + 小程序开发账户
+  两块），与 im / social / login 各 tab 视觉统一（纯前端，后端 API 不变）
+
 ## v2.0.0 — 2026-08-25
 
 ### Security / Stability fixes (第三方安全审计后修复)

@@ -401,18 +401,22 @@ function _ovRenderDeveloper(){
   if(keys.length===0){
     h+='<div class="em">{{ _('No developer API keys yet') }}</div>';
   }else{
-    h+='<table class="tbl" style="width:100%;border-collapse:collapse;font-size:13px">';
-    h+='<tr><th style="text-align:left;padding:6px">{{ _('Name') }}</th><th style="text-align:left;padding:6px">{{ _('Key Prefix') }}</th><th style="text-align:left;padding:6px">{{ _('Expires') }}</th><th style="text-align:left;padding:6px">{{ _('Status') }}</th><th style="padding:6px"></th></tr>';
+    // 卡片网格，与其余 tab（im / social / login）视觉对齐
+    h+='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px">';
     keys.forEach(function(k){
-      h+='<tr><td style="padding:6px">'+esc(k.name||k.key_prefix||'-')+'</td>';
-      h+='<td style="padding:6px"><code style="color:var(--dim)">'+esc(k.key_prefix||'')+'</code></td>';
-      h+='<td style="padding:6px">'+(k.expire_at?esc(k.expire_at):'—')+'</td>';
-      h+='<td style="padding:6px">'+esc(k.status||'')+'</td>';
-      h+='<td style="padding:6px;white-space:nowrap">';
+      var statusHtml=(k.status==='active')?'<span class="bdg on">'+esc(k.status||'')+'</span>':'<span class="bdg off">'+esc(k.status||'')+'</span>';
+      h+='<div class="cd" style="display:flex;flex-direction:column;gap:8px">';
+      h+='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">';
+      h+='<span style="font-weight:600;font-size:13px">'+esc(k.name||k.key_prefix||'-')+'</span>';
+      h+=statusHtml;
+      h+='</div>';
+      h+='<div style="font-size:12px"><code style="color:var(--accent)">'+esc(k.key_prefix||'')+'</code> · '+esc(k.key_type||'')+'</div>';
+      h+='<div style="font-size:12px;color:var(--dim)">{{ _('Expires') }}: '+(k.expire_at?esc(k.expire_at):'—')+'</div>';
+      h+='<div style="display:flex;gap:6px;margin-top:auto">';
       if(k.status==='active'){h+='<button class="btn bs" onclick="_ovDevRevoke('+k.id+')">{{ _('Revoke') }}</button>';}
-      h+='</td></tr>';
+      h+='</div></div>';
     });
-    h+='</table>';
+    h+='</div>';
   }
 
   // ── 下块：小程序开发账户（Phase 7，集中 mini_app_builder 登录）──
@@ -435,24 +439,26 @@ function _ovRenderMiniList(){
     el.innerHTML='<div class="em">{{ _('No mini-program accounts yet') }}</div>';
     return;
   }
-  var h='<table class="tbl" style="width:100%;border-collapse:collapse;font-size:13px">';
-  h+='<tr><th style="text-align:left;padding:6px">{{ _('Platform') }}</th><th style="text-align:left;padding:6px">{{ _('Account Name') }}</th><th style="text-align:left;padding:6px">{{ _('App ID') }}</th><th style="text-align:left;padding:6px">{{ _('Login Method') }}</th><th style="text-align:left;padding:6px">{{ _('Status') }}</th><th style="padding:6px"></th></tr>';
+  // 卡片网格，与其余 tab（im / social / login）视觉对齐
+  var h='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px">';
   items.forEach(function(m){
     var methodLabel=_ovMiniMethodLabel(m.method_type);
     var statusHtml=(m.is_active===1)?'<span class="bdg on">{{ _('Active') }}</span>':'<span class="bdg off">{{ _('Disabled') }}</span>';
-    h+='<tr>';
-    h+='<td style="padding:6px"><code style="color:var(--accent);font-size:12px">'+esc(m.platform)+'</code></td>';
-    h+='<td style="padding:6px">'+esc(m.account_name)+'</td>';
-    h+='<td style="padding:6px">'+esc(m.app_id||'-')+'</td>';
-    h+='<td style="padding:6px;font-size:12px;color:var(--dim)">'+methodLabel+'</td>';
-    h+='<td style="padding:6px">'+statusHtml+'</td>';
-    h+='<td style="padding:6px;white-space:nowrap">';
+    h+='<div class="cd" style="display:flex;flex-direction:column;gap:8px">';
+    h+='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">';
+    h+='<code style="color:var(--accent);font-size:12px;font-weight:600">'+esc(m.platform)+'</code>';
+    h+=statusHtml;
+    h+='</div>';
+    h+='<div style="font-size:13px;font-weight:500">'+esc(m.account_name)+'</div>';
+    h+='<div style="font-size:12px;color:var(--dim)">{{ _('App ID') }}: '+(m.app_id?esc(m.app_id):'-')+'</div>';
+    h+='<div style="font-size:12px;color:var(--dim)">{{ _('Login Method') }}: '+methodLabel+'</div>';
+    h+='<div style="display:flex;gap:6px;margin-top:auto;flex-wrap:wrap">';
     h+='<button class="btn bs" onclick="_ovMiniEdit('+m.id+')">{{ _('Edit') }}</button> ';
     h+='<button class="btn bs" onclick="_ovMiniTest('+m.id+',this)">{{ _('Test') }}</button> ';
     h+='<button class="btn bs" style="color:#f85149" onclick="_ovMiniDelete('+m.id+',\''+escAttr(m.account_name)+'\')">{{ _('Delete') }}</button>';
-    h+='</td></tr>';
+    h+='</div></div>';
   });
-  h+='</table>';
+  h+='</div>';
   el.innerHTML=h;
 }
 
@@ -515,13 +521,8 @@ function _ovMiniForm(){
   var b=document.getElementById('mini-form');
   if(!b)return;
   _ovMiniEditId=null;
-  b.innerHTML='<div class="cdf" style="border:1px solid var(--bd);border-radius:8px;padding:14px;margin-bottom:14px">';
-  b.innerHTML+=_ovMiniFields(null);
-  b.innerHTML+='<label class="srv" style="margin:10px 0"><input type="checkbox" id="mini-active" checked><span>{{ _('Active') }}</span></label>';
-  b.innerHTML+='<div style="display:flex;gap:8px">';
-  b.innerHTML+='<button class="btn bp" onclick="_ovMiniSave()">{{ _('Create') }}</button>';
-  b.innerHTML+='<button class="btn bo" onclick="_ovMiniCancel()">{{ _('Cancel') }}</button>';
-  b.innerHTML+='</div><div id="mini-msg" style="margin-top:10px"></div></div>';
+  // 单列 cdf 卡片，与第三方 OAuth 登录表单 (_ovLoginConfig) 一致
+  b.innerHTML='<div class="cdf" style="max-width:540px">'+_ovMiniFields(null)+'</div>';
 }
 
 function _ovMiniEdit(id){
@@ -531,14 +532,7 @@ function _ovMiniEdit(id){
   var b=document.getElementById('mini-form');
   if(!b)return;
   _ovMiniEditId=id;
-  b.innerHTML='<div class="cdf" style="border:1px solid var(--bd);border-radius:8px;padding:14px;margin-bottom:14px">';
-  b.innerHTML+='<div style="font-size:12px;color:var(--dim);margin-bottom:8px">{{ _('Editing') }}: <code style="color:var(--accent)">'+esc(item.account_name)+'</code></div>';
-  b.innerHTML+=_ovMiniFields(item);
-  b.innerHTML+='<label class="srv" style="margin:10px 0"><input type="checkbox" id="mini-active"'+(item.is_active===1?' checked':'')+'><span>{{ _('Active') }}</span></label>';
-  b.innerHTML+='<div style="display:flex;gap:8px">';
-  b.innerHTML+='<button class="btn bp" onclick="_ovMiniSave()">{{ _('Save') }}</button>';
-  b.innerHTML+='<button class="btn bo" onclick="_ovMiniCancel()">{{ _('Cancel') }}</button>';
-  b.innerHTML+='</div><div id="mini-msg" style="margin-top:10px"></div></div>';
+  b.innerHTML='<div class="cdf" style="max-width:540px"><div style="font-size:12px;color:var(--dim);margin-bottom:8px">{{ _('Editing') }}: <code style="color:var(--accent)">'+esc(item.account_name)+'</code></div>'+_ovMiniFields(item)+'</div>';
 }
 
 function _ovMiniFields(m){
@@ -547,13 +541,14 @@ function _ovMiniFields(m){
   ['douyin','toutiao','wechat','telegram','line'].forEach(function(p){
     sel+='<option value="'+p+'"'+(m.platform===p?' selected':'')+'>'+p+'</option>';
   });
-  var blank="{{ _('Leave blank to keep unchanged') }}";
+  // 敏感字段留空保持原值，与 OAuth 表单文案统一
+  var blank="{{ _('Leave blank to keep current') }}";
   function f(id,label,val,ph,type){
     type=type||'text';
-    return '<div><div style="font-size:13px;color:var(--dim);margin-bottom:5px">'+label+'</div><input id="'+id+'" class="in" type="'+type+'" value="'+escAttr(val||'')+'" placeholder="'+ph+'" style="width:100%"></div>';
+    return '<div style="font-size:13px;color:var(--dim);margin-bottom:5px">'+label+'</div><input id="'+id+'" class="in" type="'+type+'" value="'+escAttr(val||'')+'" placeholder="'+ph+'" style="width:100%;margin-bottom:10px">';
   }
-  var h='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">';
-  h+='<div><div style="font-size:13px;color:var(--dim);margin-bottom:5px">{{ _('Platform') }} *</div><select id="mini-platform" class="in" style="width:100%">'+sel+'</select></div>';
+  var h='<div style="font-size:13px;color:var(--dim);margin-bottom:5px">{{ _('Platform') }} *</div>';
+  h+='<select id="mini-platform" class="in" style="width:100%;margin-bottom:10px">'+sel+'</select>';
   h+=f('mini-name','{{ _('Account Name') }} *',m.account_name,'my_account','text');
   h+=f('mini-appid','{{ _('App ID') }}',m.app_id,'App ID','text');
   h+=f('mini-appsecret','{{ _('App Secret') }}',m.app_secret,blank,'password');
@@ -561,7 +556,12 @@ function _ovMiniFields(m){
   h+=f('mini-channelid','{{ _('Channel ID') }}',m.channel_id,'Channel ID','text');
   h+=f('mini-channelsc','{{ _('Channel Secret') }}',m.channel_secret,blank,'password');
   h+=f('mini-accesstoken','{{ _('Access Token') }}',m.access_token,blank,'password');
-  h+='</div>';
+  // 启用开关：视觉与 OAuth 表单一致，后端仍提交 is_active（不改表）
+  h+='<label class="srv" style="margin:4px 0 14px"><input type="checkbox" id="mini-active"'+(m.is_active===1||m.is_active===undefined?' checked':'')+'><span>{{ _('Enabled') }}</span></label>';
+  h+='<div style="display:flex;gap:10px;flex-wrap:wrap">';
+  h+='<button class="btn bp" onclick="_ovMiniSave()">{{ _('Save Config') }}</button>';
+  h+='<button class="btn bs bo" onclick="_ovMiniCancel()">← {{ _('Back') }}</button>';
+  h+='</div><div id="mini-msg" style="margin-top:10px"></div>';
   return h;
 }
 
