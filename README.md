@@ -1,6 +1,6 @@
 # VeroRun — Enterprise Multi-Core AI Operating System
 
-[![Version](https://img.shields.io/badge/version-0.62.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.62.3-blue.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-EULA%20v1.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)]()
 [![Plugins](https://img.shields.io/badge/plugins-42-orange.svg)]()
@@ -18,7 +18,8 @@ The engine core provides five intelligent execution primitives: **Multi-Agent co
 - **Dynamic Prompt System**: database-driven `PromptResolver`, four-layer assembly + scenario differentiation + multi-version management.
 - **Cognitive Evolution Engine (CogEvolution)**: RAG vector retrieval, layered memory, Reflexion learning, Prompt Evolution, forming a "memory → reflection → optimization → behavioral evolution" loop.
 - **Visual Workflow Engine**: DAG node orchestration, Cron scheduling, tiered worker pools — a general execution carrier for any process.
-- **Multi-Provider LLM Gateway (UnifiedLLM)**: provider-agnostic unified API, 7 native + 2 dynamically resolved providers, transparent model substitution, automatic failover, key management, budget gate, 4-level quota.
+- **Multi-Provider LLM Gateway (UnifiedLLM)**: provider-agnostic unified API, 7 native + 2 dynamically resolved providers + 25 first-party local model seeds (Ollama: Qwen3/Gemma3-Gemma4/Mistral/Llama3.1/Mixtral/Phi-4/DeepSeek-R1/nomic-embed-text/bge-m3), transparent model substitution, automatic failover, key management, budget gate, 4-level quota — **zero kernel hardcoded provider/model** (engine.py PROVIDER_CONFIGS removed, all provider/model resolved from `system_config` + database seed, tools.py markdown/docx unified).
+- **Runtime-Free Plugin Config**: plugin-level provider/model no longer hardcoded — both `enterprise_verify` OCR + audit and plugins that previously had fallback literals (`mini_app_builder`, `analytics`) now read from `system_config` keys (`ai_text_provider` / `ai_text_model` / `enterprise_verify_ocr_*` / `enterprise_verify_audit_*`).
 - **VeroGuard Guard Layer**: health monitoring + integrity verification + encrypted heartbeat, dual-process mutual protection, client-side asset protection; Ed25519-signed releases, integrity manifests, and source watermarks guard the supply chain.
 - **Plugin Ecosystem**: 42 built-in plugins carry any business form, full lifecycle management, plugin marketplace, licensing engine.
 
@@ -426,7 +427,7 @@ VeroRun/
 
 ## Codebase Metrics
 
-Measured on the v0.62.0 working copy (2026-10-03) with a `cloc`-style single-pass scan that classifies every line of every source file as **code / comment / blank** using language-specific comment syntax. Excluded from the count: build artifacts and vendored third-party code (`__pycache__`, `node_modules`, `backups/`, `data/`, `tmp/`, `outputs/`, `server_backup/`, `_ssh/`, hidden dependency caches such as `.stock_deps/`, minified bundles), and the internal engineering documents under `docs/` (plans, session handoffs, audit reports) — so the numbers reflect first-party product source only.
+Measured on the v0.62.3 working copy (2026-10-05) with a `cloc`-style single-pass scan that classifies every line of every source file as **code / comment / blank** using language-specific comment syntax. Excluded from the count: build artifacts and vendored third-party code (`__pycache__`, `node_modules`, `backups/`, `data/`, `tmp/`, `outputs/`, `server_backup/`, `_ssh/`, hidden dependency caches such as `.stock_deps/`, minified bundles), and the internal engineering documents under `docs/` (plans, session handoffs, audit reports) — so the numbers reflect first-party product source only.
 
 **Total: 300,787 code lines across 1,874 files** (plus 47,686 comment and 48,550 blank lines). Excluding prompt/documentation formats (Markdown, Text), executable code + markup ≈ **280,200 lines**.
 

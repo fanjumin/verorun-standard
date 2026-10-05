@@ -1,6 +1,6 @@
 # VeroRun — 企业多核 AI 操作系统
 
-[![Version](https://img.shields.io/badge/version-0.62.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.62.3-blue.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-EULA%20v1.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)]()
 [![Plugins](https://img.shields.io/badge/plugins-42-orange.svg)]()
@@ -18,7 +18,8 @@
 - **动态提示词系统**：数据库驱动的 `PromptResolver`，四层组装 + 场景差异化 + 多版本管理。
 - **认知进化引擎（CogEvolution）**：RAG 向量检索、分层记忆、Reflexion 反思学习、Prompt Evolution 版本进化，形成"记忆 → 反思 → 优化 → 行为进化"闭环。
 - **可视化工作流引擎**：DAG 节点编排、Cron 调度、分级 Worker 池，任意流程的通用执行载体。
-- **多供应商 LLM 网关（UnifiedLLM）**：provider-agnostic 统一 API，7 家原生 + 2 家动态解析，透明模型替换、自动故障转移、密钥管理、预算闸门、4 级配额。
+- **多供应商 LLM 网关（UnifiedLLM）**：provider-agnostic 统一 API，7 家原生 + 2 家动态解析 + **25 条本地模型种子**（Ollama：Qwen3/Gemma3-Gemma4/Mistral/Llama3.1/Mixtral/Phi-4/DeepSeek-R1/nomic-embed-text/bge-m3），透明模型替换、自动故障转移、密钥管理、预算闸门、4 级配额——**内核零硬编码 provider/model**（engine.py PROVIDER_CONFIGS 已移除，provider/model 统一由 `system_config` + 数据库种子解析，markdown/docx 工具收编进网关）。
+- **插件配置零字面量**：插件级 provider/model 不再硬编码——`enterprise_verify` 的 OCR + 审核配置、`mini_app_builder` 与 `analytics` 的兜底字面量，统一改为读取 `system_config` 键（`ai_text_provider` / `ai_text_model` / `enterprise_verify_ocr_*` / `enterprise_verify_audit_*`）。
 - **VeroGuard 守护层**：健康监控 + 完整性校验 + 加密心跳，双进程互护，客户侧资产守护；Ed25519 签名发布、完整性清单与来源水印守护供应链。
 - **插件生态**：42 个内置插件承载任意业务形态，全生命周期管理、插件商店、许可引擎。
 

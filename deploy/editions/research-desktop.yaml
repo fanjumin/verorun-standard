@@ -1,5 +1,5 @@
 # VeroRun 科研桌面版发行配置（单一事实源：插件白名单 + 角色集 + 核心文件）
-# 由 sync-to-edu.yml 消费；verify-edition-payload.sh 校验产物一致性。
+# 由 sync-to-research.yml 消费（打包 + Release 上传）；verify-edition-payload.sh 校验产物一致性。
 edition: research-desktop
 label: 科研桌面版
 # 服务启用与禁用（edition 门控，deploy/editions/*.yaml 单一事实源）
