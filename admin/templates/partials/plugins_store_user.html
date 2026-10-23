@@ -545,11 +545,11 @@ function devBadge(p){
   return '<span class="bdg" style="background:rgba(240,158,64,.12);color:#f09e40;font-size:10px">'+_('Third-party')+'</span>'+
          (p.developer_org?' '+esc(p.developer_org):'');
 }
-/* 使用说明渲染：Quill 富文本（HTML）走白名单清洗；本地 USAGE.md（markdown）走简易转换 */
+/* 使用说明渲染：Quill 富文本（HTML）走白名单清洗；本地 USAGE.md（markdown）走共享渲染器 */
 function _renderUsageGuide(mdOrHtml){
   var s=mdOrHtml||'';
   if(/<\/?[a-z][^>]*>/i.test(s)){return _sanitizeHtml(s)}
-  return _simpleMarkdown(s);
+  return window.VeroMarkdown?VeroMarkdown.render(s):s;
 }
 /* 白名单 HTML 清洗（防 XSS） */
 function _sanitizeHtml(html){
@@ -659,6 +659,10 @@ function showPluginDetail(pid){
     if(hasReadme){
       tabsHtml+='<div class="tab-item" data-tab="readme" onclick="switchDetailTab(this,\'readme\');loadReadme(\''+escAttr(p.identifier)+'\',\''+escAttr(p.readme_url)+'\')" style="padding:8px 16px;cursor:pointer;border-bottom:2px solid transparent;font-size:13px">{{ _('README') }}</div>';
     }
+    if(p.installed){
+      tabsHtml+='<div class="tab-item" data-tab="whitepaper" onclick="switchDetailTab(this,\'whitepaper\');loadPluginDoc(\''+escAttr(p.identifier)+'\',\'whitepaper\')" style="padding:8px 16px;cursor:pointer;border-bottom:2px solid transparent;font-size:13px">{{ _('Whitepaper') }}</div>';
+      tabsHtml+='<div class="tab-item" data-tab="guide" onclick="switchDetailTab(this,\'guide\');loadPluginDoc(\''+escAttr(p.identifier)+'\',\'usage\')" style="padding:8px 16px;cursor:pointer;border-bottom:2px solid transparent;font-size:13px">{{ _('Guide') }}</div>';
+    }
     tabsHtml+='<div class="tab-item" data-tab="reviews" onclick="switchDetailTab(this,\'reviews\');loadReviews(\''+escAttr(pid)+'\')" style="padding:8px 16px;cursor:pointer;border-bottom:2px solid transparent;font-size:13px">{{ _('Reviews') }} ('+reviewTotal+')</div>'+
       '</div>';
     box.innerHTML+=tabsHtml;
@@ -674,6 +678,10 @@ function showPluginDetail(pid){
     if(hasReadme){
       box.innerHTML+='<div id="detailTabReadme" class="detail-tab-content" style="display:none;font-size:13px">'+
         '<div class="lo"><div class="s"></div>{{ _('Loading README') }}...</div></div>';
+    }
+    if(p.installed){
+      box.innerHTML+='<div id="detailTabWhitepaper" class="detail-tab-content" style="display:none;font-size:13px"><div class="lo"><div class="s"></div>{{ _('Loading') }}...</div></div>';
+      box.innerHTML+='<div id="detailTabGuide" class="detail-tab-content" style="display:none;font-size:13px"><div class="lo"><div class="s"></div>{{ _('Loading') }}...</div></div>';
     }
     box.innerHTML+='<div id="detailTabReviews" class="detail-tab-content" style="display:none;font-size:13px"><div class="lo"><div class="s"></div></div></div>';
 
@@ -818,8 +826,10 @@ function _localizedReadmeUrl(readmeUrl){
   return readmeUrl;
 }
 function _renderReadmeTab(tab,text){
-  var html=_simpleMarkdown(text);
-  tab.innerHTML='<div style="max-height:400px;overflow-y:auto;padding-right:8px">'+html+'</div>';
+  if(!window.VeroMarkdown){tab.textContent=text;return}
+  var html=VeroMarkdown.render(text);
+  tab.innerHTML='<div style="max-height:420px;overflow-y:auto;padding-right:8px">'+html+'</div>';
+  VeroMarkdown.runMermaid(tab);
 }
 function _renderReadmeFail(tab,readmeUrl){
   tab.innerHTML='<div style="padding:20px;text-align:center;color:var(--dim)">'+
@@ -838,29 +848,28 @@ function loadReadme(identifier,readmeUrl){
   }).catch(function(){_renderReadmeFail(tab,readmeUrl)});
 }
 
-/* ★ 插件商店改造：简易 Markdown → HTML 转换 */
-function _simpleMarkdown(md){
-  var html=esc(md);
-  var codeBlocks=[];
-  html=html.replace(/```([\s\S]*?)```/g,function(m,c){
-    codeBlocks.push('<pre style="background:var(--bg-secondary);padding:10px;border-radius:4px;overflow-x:auto;margin:8px 0;font-size:0.8rem"><code>'+c+'</code></pre>');
-    return '\x00CODE'+ (codeBlocks.length-1) +'\x00';
+/* Load WHITEPAPER.md / USAGE.md from the installed plugin docs/ folder */
+function loadPluginDoc(identifier,kind){
+  var cap=kind==='whitepaper'?'Whitepaper':'Guide';
+  var tab=document.getElementById('detailTab'+cap);
+  if(!tab)return;
+  if(tab.getAttribute('data-loaded')==='1')return;
+  fetch('/admin/plugins/store/'+encodeURIComponent(identifier)+'/doc?kind='+kind,
+    {headers:{'Authorization':'Bearer '+T}})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    if(d&&d.success&&d.data&&d.data.text){
+      tab.innerHTML='<div style="max-height:460px;overflow-y:auto;padding-right:8px">'+VeroMarkdown.render(d.data.text)+'</div>';
+      VeroMarkdown.runMermaid(tab);
+      tab.setAttribute('data-loaded','1');
+    }else{
+      tab.innerHTML='<div style="padding:20px;text-align:center;color:var(--dim)">{{ _('Document is not available') }}</div>';
+    }
+  }).catch(function(){
+    tab.innerHTML='<div style="padding:20px;text-align:center;color:var(--dim)">{{ _('README load failed') }}</div>';
   });
-  html=html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g,'<img src="$2" alt="$1" style="max-width:100%;border-radius:6px;margin:8px 0">');
-  html=html.replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2" target="_blank" style="color:var(--accent)">$1</a>');
-  html=html.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
-  html=html.replace(/\*([^*\n]+)\*/g,'<em>$1</em>');
-  html=html.replace(/~~(.+?)~~/g,'<del>$1</del>');
-  html=html.replace(/^### (.+)$/gm,'<h4 style="margin:12px 0 4px">$1</h4>');
-  html=html.replace(/^## (.+)$/gm,'<h3 style="margin:16px 0 6px">$1</h3>');
-  html=html.replace(/^# (.+)$/gm,'<h2 style="margin:20px 0 8px;font-size:1.1rem">$1</h2>');
-  html=html.replace(/^&gt; (.+)$/gm,'<blockquote style="border-left:3px solid var(--accent);margin:8px 0;padding:4px 12px;color:var(--dim)">$1</blockquote>');
-  html=html.replace(/^[\-\*] (.+)$/gm,'<li style="margin-left:1.5rem;list-style:disc">$1</li>');
-  html=html.replace(/^\d+\. (.+)$/gm,'<li style="margin-left:1.5rem;list-style:decimal">$1</li>');
-  html=html.replace(/`([^`]+)`/g,'<code style="background:var(--bg-secondary);padding:0.1em 0.3em;border-radius:3px;font-size:0.85em">$1</code>');
-  html=html.replace(/^(---|\*\*\*|___)$/gm,'<hr style="border:none;border-top:1px solid var(--bd);margin:16px 0">');
-  html=html.replace(/\n\n/g,'</p><p style="margin:8px 0">');
-  html=html.replace(/\n/g,'<br>');
-  html=html.replace(/\x00CODE(\d+)\x00/g,function(m,i){return codeBlocks[parseInt(i)];});
-  return '<div style="line-height:1.7"><p style="margin:8px 0">'+html+'</p></div>';
 }
+
+/* Markdown rendering is provided by the shared /admin/static/js/markdown-view.js
+   (VeroMarkdown.render / runMermaid): GFM tables, nested lists, Mermaid diagrams,
+   escaped code blocks. The legacy local _simpleMarkdown has been removed. */

@@ -195,8 +195,19 @@ class _NoOpCursor:
     def __enter__(self): return self
     def __exit__(self, *a): pass
 
+# 建连失败的进程级记忆：DB 不可达时，14 个模块级迁移块会各等满 connect_timeout，
+# 串行累积可达数分钟（实测 PG_HOST 丢包时 import 耗时 180.5s），本地/CI 直接挂死。
+# 记一次失败后剩余模块级块直接走 no-op；import 结束由文件末尾重置，不影响运行时行为。
+_MIGRATION_IMPORT_PHASE = True
+_MIGRATION_CONN_FAILED = False
+
 @contextmanager
 def _safe_get_db_for_migration():
+    global _MIGRATION_CONN_FAILED
+    if _MIGRATION_IMPORT_PHASE and _MIGRATION_CONN_FAILED:
+        # 本进程已确认连不上库 → 模块级建表语句无需再逐个重试
+        yield _NoOpDb()
+        return
     db = None
     try:
         with get_db() as db:
@@ -208,6 +219,7 @@ def _safe_get_db_for_migration():
         logger.warning(f"Module-level migration skipped (DB not ready / concurrent DDL): {e}")
         if db is None:
             # 连接阶段就失败（DB 未就绪/已关闭）→ 用 no-op 实现走完模块级语句
+            _MIGRATION_CONN_FAILED = True
             yield _NoOpDb()
         # 异常来自 with 体（并发 DDL UniqueViolation 等）→ 停止生成器，
         # contextlib 判定正常结束并吞掉异常，模块正常导入；下次启动自动补迁移。
@@ -481,6 +493,17 @@ def init_db():
                 expired_at      TIMESTAMP
             );
             CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id);
+
+            -- A2：跨 worker 的流式取消标记。_STREAM_RUNS 是进程内字典，
+            -- /agent/cancel 打到另一个 worker 时 Event 永远不会被 set，
+            -- 取消静默失效（admin 是 -w 2，约 50% 概率落空）。这里登记
+            -- 运行中的 run_id，取消方写 cancel_requested=1，持有流的进程
+            -- 由后台轮询线程把它转成本地 Event。
+            CREATE TABLE IF NOT EXISTS agent_stream_runs (
+                run_id           TEXT PRIMARY KEY,
+                cancel_requested SMALLINT DEFAULT 0,
+                created_at       TIMESTAMP DEFAULT NOW()
+            );
             
             CREATE TABLE IF NOT EXISTS agent_experiences (
                 id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -569,6 +592,10 @@ def init_db():
                 slug            TEXT NOT NULL UNIQUE DEFAULT '',
                 name            TEXT NOT NULL DEFAULT '',
                 description     TEXT NOT NULL DEFAULT '',
+                -- 供应商级调用端点（模型层 endpoint_url 仅保留图片/TTS 等异构覆盖）
+                endpoint_url    TEXT NOT NULL DEFAULT '',
+                -- 供应商类型：vendor=自研厂商；aggregator=多厂商模型聚合平台（百炼/TokenHub/千帆等）
+                kind            TEXT NOT NULL DEFAULT 'vendor',
                 is_active       BIGINT DEFAULT 1,
                 created_at      TIMESTAMP DEFAULT NOW(),
                 updated_at      TIMESTAMP DEFAULT NOW()
@@ -1116,30 +1143,46 @@ def init_db():
         # Ensure new tables exist (CREATE TABLE IF NOT EXISTS handles fresh installs)
         # Ensure UNIQUE index to prevent duplicate model seeds
         m.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_pm_provider_model_unique ON provider_models(provider_id, model_name)')
-        # Seed providers
+        # Seed providers —— 第 4 项 kind：vendor=自研厂商 / aggregator=多厂商聚合平台
         provider_seeds = [
-            ('dashscope',  '阿里云 DashScope', 'Qwen LLM, image gen, CosyVoice'),
-            ('deepseek',   'DeepSeek', 'DeepSeek large language models'),
-            ('openai',     'OpenAI', 'GPT-4o, DALL-E, TTS'),
-            ('openrouter', 'OpenRouter', 'Multi-model aggregation router'),
-            ('ollama',     'Ollama', 'Local open-source model deployment'),
-            ('siliconflow','SiliconFlow', 'SiliconFlow model platform (DeepSeek-OCR etc.)'),
-            ('gemini',     'Google Gemini', 'Gemini 2.5 Flash/Pro'),
-            ('grok',       'xAI Grok', 'Grok-3 Beta'),
-            ('kimi',       'KIMI / 月之暗面', 'Moonshot AI large language models'),
-            ('zhipu',      'Zhipu / 智谱 AI', 'ChatGLM large language models'),
-            ('anthropic',  'Anthropic',   'Claude series models (OpenAI-compatible endpoint)'),
-            ('hunyuan',    'Tencent Hunyuan', 'Tencent Hunyuan large language models'),
-            ('edge_tts',   'Microsoft Edge TTS', 'Free Edge browser TTS — no key required, same neural voices'),
+            ('dashscope',  '阿里百炼（DashScope）', 'Alibaba Bailian — Qwen 自研 + DeepSeek 等第三方聚合，OpenAI 兼容', 'aggregator'),
+            ('deepseek',   'DeepSeek', 'DeepSeek large language models', 'vendor'),
+            ('openai',     'OpenAI', 'GPT-4o, DALL-E, TTS', 'vendor'),
+            ('openrouter', 'OpenRouter', 'Multi-model aggregation router', 'aggregator'),
+            ('ollama',     'Ollama', 'Local open-source model deployment', 'vendor'),
+            ('siliconflow','SiliconFlow', 'SiliconFlow model platform (DeepSeek-OCR etc.)', 'aggregator'),
+            ('gemini',     'Google Gemini', 'Gemini 2.5 Flash/Pro', 'vendor'),
+            ('grok',       'xAI Grok', 'Grok-3 Beta', 'vendor'),
+            ('kimi',       'KIMI / 月之暗面', 'Moonshot AI large language models', 'vendor'),
+            ('zhipu',      'Zhipu / 智谱 AI', 'ChatGLM large language models', 'vendor'),
+            ('anthropic',  'Anthropic',   'Claude series models (OpenAI-compatible endpoint)', 'vendor'),
+            # 腾讯侧统一使用 TokenHub（混元自研 + DeepSeek/GLM/Kimi 等第三方中转，OpenAI 兼容）；
+            # 原 hunyuan 直连供应商已下线（存量库由模块级迁移清理），混元模型在 TokenHub 下对齐。
+            ('tokenhub',   '腾讯云 TokenHub', 'Tencent Cloud TokenHub — 混元自研 + DeepSeek/GLM/Kimi 等第三方中转，OpenAI 兼容', 'aggregator'),
+            # 百度千帆 v2：ERNIE 自研 + DeepSeek/GLM/Kimi/Qwen 等第三方中转，OpenAI 兼容（/v2）。
+            ('qianfan',    '百度千帆', 'Baidu Qianfan v2 — ERNIE 自研 + DeepSeek/GLM/Kimi/Qwen 等第三方中转，OpenAI 兼容', 'aggregator'),
+            ('edge_tts',   'Microsoft Edge TTS', 'Free Edge browser TTS — no key required, same neural voices', 'vendor'),
         ]
-        for slug, name, desc in provider_seeds:
+        # 旧库守卫：providers.endpoint_url / kind 由模块级迁移补；全新库建表已含列，此处幂等兜底
+        cols_p = get_table_columns(m, 'providers')
+        if 'endpoint_url' not in cols_p:
+            m.execute("ALTER TABLE providers ADD COLUMN endpoint_url TEXT NOT NULL DEFAULT ''")
+        if 'kind' not in cols_p:
+            m.execute("ALTER TABLE providers ADD COLUMN kind TEXT NOT NULL DEFAULT 'vendor'")
+        for slug, name, desc, kind in provider_seeds:
             m.execute(
-                "INSERT INTO providers (slug, name, description) VALUES (%s,%s,%s) ON CONFLICT (slug) DO NOTHING",
-                (slug, name, desc)
+                "INSERT INTO providers (slug, name, description, kind) VALUES (%s,%s,%s,%s) "
+                "ON CONFLICT (slug) DO UPDATE SET kind = EXCLUDED.kind",
+                (slug, name, desc, kind)
             )
+        # 旧库显示名一次性正名（仅当仍是旧名时；用户自定义名不覆盖）
+        m.execute(
+            "UPDATE providers SET name=%s WHERE slug='dashscope' AND name=%s",
+            ('阿里百炼（DashScope）', '阿里云 DashScope')
+        )
         # Resolve provider IDs
         pids = {slug: m.execute("SELECT id FROM providers WHERE slug = %s", (slug,)).fetchone()['id']
-                for slug, _, _ in provider_seeds}
+                for slug, _, _, _ in provider_seeds}
         # Seed provider_models
         model_seeds = [
             # Alibaba Cloud DashScope
@@ -1150,9 +1193,12 @@ def init_db():
             (pids['dashscope'],  'DeepSeek R1',          'deepseek-r1',            'https://dashscope.aliyuncs.com/compatible-mode/v1',          'dashscope_text_key',    'text',     14),
             (pids['dashscope'],  'DeepSeek V3',          'deepseek-v3',            'https://dashscope.aliyuncs.com/compatible-mode/v1',          'dashscope_text_key',    'text',     15),
             (pids['dashscope'],  'Image Gen Wan2.7',      'wan2.7-image',           'https://dashscope.aliyuncs.com/api/v1/services/aigc/image-generation/generation', 'dashscope_api_key', 'image', 20),
+            # Qwen2-Audio：音频语义理解（OpenAI 兼容 chat + input_audio part）
+            # 经 UnifiedLLM chat() 走 compatible-mode 端点，调用样例见 agent_matrix/audio.py::analyze_audio
+            (pids['dashscope'],  'Qwen2 Audio',           'qwen2-audio-instruct',   'https://dashscope.aliyuncs.com/compatible-mode/v1',          'dashscope_text_key',    'audio',    22),
             (pids['dashscope'],  'CosyVoice Clone',   'cosyvoice-v1',           'https://dashscope.aliyuncs.com/api/v1/services/audio/tts',  'dashscope_api_key',     'voice',    21),
             # DeepSeek
-            (pids['deepseek'],   'DeepSeek V4 Flash',   'deepseek-v4-flash',      'https://api.deepseek.com',                                  'deepseek_api_key',      'text',     30),
+            (pids['deepseek'],   'DeepSeek Flash',      'deepseek-flash',         'https://api.deepseek.com',                                  'deepseek_api_key',      'text',     30),
             (pids['deepseek'],   'DeepSeek V4 Pro',     'deepseek-v4-pro',        'https://api.deepseek.com',                                  'deepseek_api_key',      'text',     31),
             # OpenAI
             (pids['openai'],     'GPT-4o',               'gpt-4o',                 'https://api.openai.com/v1',                                 'openai_api_key',        'text',     40),
@@ -1180,7 +1226,7 @@ def init_db():
             (pids['siliconflow'], 'DeepSeek R1 0528',    'deepseek-ai/DeepSeek-R1-0528',   'https://api.siliconflow.cn/v1',            'siliconflow_api_key',   'text',     65),
             (pids['siliconflow'], 'QwQ-32B',             'Qwen/QwQ-32B',                    'https://api.siliconflow.cn/v1',            'siliconflow_api_key',   'text',     66),
             # Google Gemini (OpenAI-compatible endpoint)
-            (pids['gemini'],     'Gemini 3.0 Pro',       'gemini-3.0-pro',         'https://generativelanguage.googleapis.com/v1beta/openai/',     'gemini_api_key',        'text',     63),
+            (pids['gemini'],     'Gemini 3.1 Pro Preview', 'gemini-3.1-pro-preview', 'https://generativelanguage.googleapis.com/v1beta/openai/',     'gemini_api_key',        'text',     63),
             (pids['gemini'],     'Gemini 2.5 Pro',       'gemini-2.5-pro',         'https://generativelanguage.googleapis.com/v1beta/openai/',     'gemini_api_key',        'text',     64),
             (pids['gemini'],     'Gemini 2.5 Flash',     'gemini-2.5-flash',       'https://generativelanguage.googleapis.com/v1beta/openai/',     'gemini_api_key',        'text',     65),
             (pids['gemini'],     'Gemini 2.5 Flash Lite','gemini-2.5-flash-lite',  'https://generativelanguage.googleapis.com/v1beta/openai/',     'gemini_api_key',        'text',     66),
@@ -1195,19 +1241,14 @@ def init_db():
             (pids['kimi'],       'Moonshot v1 128K',    'moonshot-v1-128k',       'https://api.moonshot.cn/v1',                                  'kimi_api_key',          'text',     75),
             (pids['kimi'],       'K2',                   'kimi-k2',                'https://api.moonshot.cn/v1',                                  'kimi_api_key',          'text',     76),
             # Zhipu / ChatGLM (OpenAI-compatible)
-            (pids['zhipu'],      'GLM-4',               'glm-4',                  'https://open.bigmodel.cn/api/paas/v4',                        'zhipu_api_key',         'text',     77),
-            (pids['zhipu'],      'GLM-4 Flash',         'glm-4-flash',            'https://open.bigmodel.cn/api/paas/v4',                        'zhipu_api_key',         'text',     78),
-            (pids['zhipu'],      'GLM-4 Plus',          'glm-4-plus',             'https://open.bigmodel.cn/api/paas/v4',                        'zhipu_api_key',         'text',     79),
+            (pids['zhipu'],      'GLM-4.5',             'glm-4.5',                'https://open.bigmodel.cn/api/paas/v4',                        'zhipu_api_key',         'text',     77),
+            (pids['zhipu'],      'GLM-5',               'glm-5',                  'https://open.bigmodel.cn/api/paas/v4',                        'zhipu_api_key',         'text',     78),
+            (pids['zhipu'],      'GLM-5.2',             'glm-5.2',                'https://open.bigmodel.cn/api/paas/v4',                        'zhipu_api_key',         'text',     79),
             (pids['zhipu'],      'GLM-4V Plus',          'glm-4v-plus',            'https://open.bigmodel.cn/api/paas/v4',                        'zhipu_api_key',         'vision',   80),
             (pids['zhipu'],      'CogView-4',            'cogview-4',              'https://open.bigmodel.cn/api/paas/v4',                        'zhipu_api_key',         'image',    81),
             # Anthropic (official OpenAI-compatible endpoint)
             (pids['anthropic'],  'Claude Sonnet 4.5',   'claude-sonnet-4-5',      'https://api.anthropic.com/v1/',                              'anthropic_api_key',     'text',     82),
             (pids['anthropic'],  'Claude Opus 4.1',     'claude-opus-4-1',        'https://api.anthropic.com/v1/',                              'anthropic_api_key',     'text',     83),
-            # Tencent Hunyuan (OpenAI-compatible)
-            (pids['hunyuan'],    'Hunyuan TurboS',      'hunyuan-turbos',         'https://api.hunyuan.cloud.tencent.com/v1',                   'hunyuan_api_key',       'text',     84),
-            (pids['hunyuan'],    'Hunyuan Large',       'hunyuan-large',          'https://api.hunyuan.cloud.tencent.com/v1',                   'hunyuan_api_key',       'text',     85),
-            (pids['hunyuan'],    'Hunyuan T1',          'hunyuan-t1',             'https://api.hunyuan.cloud.tencent.com/v1',                   'hunyuan_api_key',       'text',     86),
-            (pids['hunyuan'],    'Hunyuan Standard',    'hunyuan-standard',       'https://api.hunyuan.cloud.tencent.com/v1',                   'hunyuan_api_key',       'text',     87),
             # Edge-TTS (free, no key needed)
             (pids['edge_tts'],   'Edge TTS Neural',      'edge-tts-neural',        '',                                                              '',                     'tts',      100),
             # Ollama 本地小模型（endpoint 行级可改；key 留空 = 本地服务无需凭证）
@@ -1246,6 +1287,18 @@ def init_db():
             (pids['ollama'],     'Qwen3.5 9B (local)',    'qwen3.5:9b',             'http://127.0.0.1:11434/v1',                                     '',                     'text',     142),
             (pids['ollama'],     'Qwen3.5 27B (local)',   'qwen3.5:27b',            'http://127.0.0.1:11434/v1',                                     '',                     'text',     143),
             (pids['ollama'],     'Qwen3.6 27B (local)',   'qwen3.6:27b',            'http://127.0.0.1:11434/v1',                                     '',                     'text',     144),
+            # ── 腾讯云 TokenHub（中转站示例：同一 DeepSeek 亦可在此选，模型 id 取自官方语言模型列表；余量由 AI Hub「对齐供应商」实时拉 /models 补齐）──
+            (pids['tokenhub'],   'DeepSeek V4.1 Flash', 'deepseek-v4.1-flash',   'https://tokenhub.tencentmaas.com/v1',  'tokenhub_api_key',    'text',     200),
+            (pids['tokenhub'],   'DeepSeek V4 Pro',     'deepseek-v4-pro',       'https://tokenhub.tencentmaas.com/v1',  'tokenhub_api_key',    'text',     201),
+            (pids['tokenhub'],   '混元 Hy3',            'hy3',                   'https://tokenhub.tencentmaas.com/v1',  'tokenhub_api_key',    'text',     202),
+            (pids['tokenhub'],   '智谱 GLM-5',          'glm-5',                 'https://tokenhub.tencentmaas.com/v1',  'tokenhub_api_key',    'text',     203),
+            (pids['tokenhub'],   'Kimi K2.6',           'kimi-k2.6',             'https://tokenhub.tencentmaas.com/v1',  'tokenhub_api_key',    'text',     204),
+            # ── 百度千帆 v2（中转站示例：ERNIE 自研 + 第三方转发；型号 id 取自官方支持列表）──
+            (pids['qianfan'],    '文心 ERNIE 4.5 Turbo 128K', 'ernie-4.5-turbo-128k', 'https://qianfan.baidubce.com/v2', 'qianfan_api_key',     'text',     210),
+            (pids['qianfan'],    'DeepSeek V4.1 Flash', 'deepseek-v4.1-flash',   'https://qianfan.baidubce.com/v2',      'qianfan_api_key',     'text',     211),
+            (pids['qianfan'],    'DeepSeek V4 Pro',     'deepseek-v4-pro',       'https://qianfan.baidubce.com/v2',      'qianfan_api_key',     'text',     212),
+            (pids['qianfan'],    '智谱 GLM-5.2',        'glm-5.2',               'https://qianfan.baidubce.com/v2',      'qianfan_api_key',     'text',     213),
+            (pids['qianfan'],    'Qwen3.5 27B',         'qwen3.5-27b',           'https://qianfan.baidubce.com/v2',      'qianfan_api_key',     'text',     214),
         ]
         for pid, name, model, url, key_ref, caps, sort in model_seeds:
             m.execute(
@@ -1266,6 +1319,29 @@ def init_db():
               AND pak.provider = p.slug
               AND pm.api_key_id IS NULL
         """)
+        m.commit()
+        # Backfill providers.endpoint_url：供应商端点归属后，从该供应商现有模型行
+        # 回填一个文本端点（text 能力优先、sort_order 次序；图片/TTS 等异构端点留在模型行不被取作默认）。
+        # 仅回填空值，已配置的供应商端点不覆盖。
+        ep_rows = m.execute("""
+            SELECT provider_id, endpoint_url, capabilities, sort_order
+            FROM provider_models
+            WHERE endpoint_url <> ''
+            ORDER BY provider_id,
+                     CASE WHEN capabilities = 'text' THEN 0 ELSE 1 END,
+                     sort_order
+        """).fetchall()
+        _ep_seen = set()
+        for r in ep_rows:
+            _pid = r['provider_id'] if isinstance(r, dict) else r[0]
+            _url = r['endpoint_url'] if isinstance(r, dict) else r[1]
+            if _pid in _ep_seen:
+                continue
+            _ep_seen.add(_pid)
+            m.execute(
+                "UPDATE providers SET endpoint_url=%s WHERE id=%s AND endpoint_url=''",
+                (_url, _pid)
+            )
         m.commit()
         logger.info('[Migration] Providers + provider_models seed data added')
 
@@ -2130,6 +2206,9 @@ def init_db():
             ('quality_score', "REAL DEFAULT 0.5"),
             ('updated_at',    "TIMESTAMP DEFAULT NULL"),
             ('deleted_at',    "TIMESTAMP DEFAULT NULL"),
+            # C-1-strict 研报回流去重锚：sha256(归一化 content)，
+            # 使同一文件重传（新 doc_id）能被识别并合并，不再新旧并存
+            ('content_hash',  "VARCHAR(64) DEFAULT NULL"),
         ]:
             if col_name not in kb_cols:
                 try:
@@ -2146,6 +2225,7 @@ def init_db():
             ('idx_kb_quality',   'quality_score'),
             ('idx_kb_deleted',   'deleted_at'),
             ('idx_kb_hit_count', 'hit_count'),
+            ('idx_kb_content_hash', 'content_hash'),
         ]:
             try:
                 m.execute(f"CREATE INDEX IF NOT EXISTS {idx_name} ON knowledge_blocks({idx_col})")
@@ -2330,6 +2410,13 @@ def _table_exists(m, table: str) -> bool:
         "WHERE table_schema=ANY(current_schemas(false)) AND table_name=%s",
         (table,),
     ).fetchone()
+    # DB 未就绪时 _safe_get_db_for_migration 会 yield _NoOpDb（本文件 :179-192），其
+    # fetchone() 恒为 None；此处必须容忍 None，否则模块级迁移探针在无 PG 的环境
+    # （CI / 离线单测）import 即 TypeError，连带 agent_matrix.models 及依赖它的插件
+    # 测试全数报错（CI run 38542472938 实证）。语义保持 fail-safe：取不到行数即视为
+    # 表不存在，no-op 连接上的 CREATE TABLE IF NOT EXISTS 本就是空操作，下次启动补迁移。
+    if not row:
+        return False
     return bool(row['c'])
 
 
@@ -2657,7 +2744,6 @@ with _safe_get_db_for_migration() as m:
         ('KIMI',                     '', 'kimi',      'Moonshot AI / 月之暗面 API Key'),
         ('Zhipu',                    '', 'zhipu',     '智谱 AI / ChatGLM API Key'),
         ('Anthropic',                '', 'anthropic', 'Claude series models API Key'),
-        ('Tencent Hunyuan',          '', 'hunyuan',   'Tencent Hunyuan API Key'),
     ]
     for name, key_val, provider, desc in seed_keys:
         m.execute(
@@ -2693,6 +2779,61 @@ with _safe_get_db_for_migration() as m:
     except Exception:
         m.rollback()
 
+# ── Migration: AI Hub 三模块重构（2026-10）──
+#   1) providers.endpoint_url（供应商级端点）/ kind（vendor|aggregator）补列
+#   2) agent_key_bindings：Agent 角色 ↔「供应商模型 + 密钥」关联表，
+#      一行 = Agent 角色卡片上添加的一条；一个角色可挂多模型/多 Key/多厂家
+#   3) hunyuan 直连供应商下线：腾讯侧统一使用 TokenHub（含完整混元模型，用户已确认）
+with _safe_get_db_for_migration() as m:
+    try:
+        p_cols = get_table_columns(m, 'providers')
+        if p_cols:
+            if 'endpoint_url' not in p_cols:
+                m.execute("ALTER TABLE providers ADD COLUMN endpoint_url TEXT NOT NULL DEFAULT ''")
+                logger.info('[Migration] providers.endpoint_url added')
+            if 'kind' not in p_cols:
+                m.execute("ALTER TABLE providers ADD COLUMN kind TEXT NOT NULL DEFAULT 'vendor'")
+                logger.info('[Migration] providers.kind added')
+
+        m.execute('''
+            CREATE TABLE IF NOT EXISTS agent_key_bindings (
+                id                BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                agent_id          BIGINT NOT NULL,
+                provider_model_id BIGINT NOT NULL REFERENCES provider_models(id) ON DELETE CASCADE,
+                api_key_id        BIGINT NOT NULL REFERENCES provider_api_keys(id) ON DELETE CASCADE,
+                created_at        TIMESTAMP DEFAULT NOW(),
+                UNIQUE(agent_id, api_key_id)
+            )
+        ''')
+        m.execute('CREATE INDEX IF NOT EXISTS idx_akb_agent ON agent_key_bindings(agent_id)')
+        m.execute('CREATE INDEX IF NOT EXISTS idx_akb_model ON agent_key_bindings(provider_model_id)')
+
+        # ── hunyuan 存量清理（幂等；种子已移除，全新库查不到此行直接跳过）──
+        if p_cols:
+            _hy = m.execute("SELECT id FROM providers WHERE slug = %s", ('hunyuan',)).fetchone()
+            if _hy:
+                _hy_pid = _hy['id'] if isinstance(_hy, dict) else _hy[0]
+                _hy_models = m.execute(
+                    "SELECT id FROM provider_models WHERE provider_id = %s", (_hy_pid,)
+                ).fetchall()
+                _hy_model_ids = [r['id'] if isinstance(r, dict) else r[0] for r in _hy_models]
+                # 解除同库两张消费者表对 hunyuan 模型的引用（混元模型需在 TokenHub 下重新对齐，无 1:1 自动映射）
+                for _tbl in ('agents', 'agent_matrix'):
+                    if 'provider_model_id' in get_table_columns(m, _tbl):
+                        for _mid in _hy_model_ids:
+                            m.execute(
+                                "UPDATE %s SET provider_model_id = NULL WHERE provider_model_id = %%s" % _tbl,
+                                (_mid,)
+                            )
+                if _hy_model_ids:
+                    m.execute("DELETE FROM provider_models WHERE provider_id = %s", (_hy_pid,))
+                m.execute("DELETE FROM provider_api_keys WHERE provider = %s", ('hunyuan',))
+                m.execute("DELETE FROM providers WHERE id = %s", (_hy_pid,))
+                logger.info('[Migration] legacy hunyuan provider removed; Tencent models now served by tokenhub')
+        m.commit()
+    except Exception:
+        m.rollback()
+
 # ── Migration: provider_models.embedding_dim（embedding 向量维度）──
 with _safe_get_db_for_migration() as m:
     try:
@@ -2700,13 +2841,19 @@ with _safe_get_db_for_migration() as m:
         if 'embedding_dim' not in pm_cols:
             m.execute('ALTER TABLE provider_models ADD COLUMN embedding_dim INTEGER NOT NULL DEFAULT 1536')
             logger.info('[Migration] provider_models.embedding_dim added')
-        # Google text-embedding-004 实际输出 768 维，更新种子数据
-        m.execute(
-            "UPDATE provider_models SET embedding_dim = 768"
-            " WHERE model_name = 'text-embedding-004'"
-            " AND capabilities LIKE '%embedding%'"
-            " AND embedding_dim <> 768"
-        )
+        # embedding 模型真实输出维登记（pgvector 向量列不固定维，仅修 provider_models.embedding_dim 记账，
+        # 零 schema 风险、无需重嵌入）：Google text-embedding-004=768、Ollama nomic-embed-text=768、
+        # bge-m3=1024。缺登记会回退默认 1536，与实输出不符 → 跨维混用致 RAG 向量路报错降级关键词。
+        for _emb_name, _emb_dim in (
+            ('text-embedding-004', 768),
+            ('nomic-embed-text', 768),
+            ('bge-m3', 1024),
+        ):
+            m.execute(
+                "UPDATE provider_models SET embedding_dim = %s"
+                " WHERE model_name = %s AND capabilities LIKE %s AND embedding_dim <> %s",
+                (_emb_dim, _emb_name, '%embedding%', _emb_dim),
+            )
         m.commit()
     except Exception:
         m.rollback()
@@ -2899,6 +3046,11 @@ with _safe_get_db_for_migration() as m:
     )
     m.commit()
     logger.info('[Migration] base_plans + plugin_products + user_subscriptions + subscription_addons created')
+
+# 模块级迁移块已全部执行完 → 关掉 import 期短路，运行时调用恢复"每次都尝试连库"。
+# （放这里而不是函数内判断，是为了不改变任何运行期重试语义。）
+_MIGRATION_IMPORT_PHASE = False
+
 
 if __name__ == "__main__":
     init_db()

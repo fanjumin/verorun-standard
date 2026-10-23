@@ -44,6 +44,9 @@ def _load_yaml(locale: str = None) -> dict:
         _yaml_cache[locale] = data
         return data
     except FileNotFoundError:
+        # 负缓存：文件不存在是静态事实，进程内不会变化；
+        # 不缓存会导致非 catalog locale（如 ja）每次 _() 都重新打开+告警
+        _yaml_cache[locale] = {}
         print(f'[i18n] Warning: YAML file not found: {yml_path}')
         return {}
     except Exception as e:
@@ -105,14 +108,25 @@ SUPPORTED_LOCALES = ('en', 'zh-CN')
 
 
 def _normalize_locale(value) -> str:
-    """将任意语言标识规范化：zh* → 'zh-CN'，en* → 'en'，未知返回 None。"""
+    """将任意语言标识规范化为已知 locale 代码；未知返回 None。
+
+    与 prompt_resolver._assemble 的 known_codes 白名单保持一致
+    （LLM 输出语言层支持 8 种）。UI 翻译层仍只有 en/zh-CN 两个
+    语言包（SUPPORTED_LOCALES），缺失语言包的 locale 由 _() 回退
+    原文，不影响 LLM 语言指令注入。
+    """
     value = (value or '').strip().lower().replace('_', '-')
     if not value:
         return None
+    if value.startswith('zh-tw') or value.startswith('zh-hk') or value.startswith('zh-mo'):
+        return 'zh-TW'
     if value.startswith('zh'):
         return 'zh-CN'
     if value.startswith('en'):
         return 'en'
+    for code in ('ja', 'ko', 'fr', 'de', 'es'):
+        if value.startswith(code):
+            return code
     return None
 
 

@@ -307,8 +307,13 @@ class ModulePolicyEngine:
         if not user_id:
             return (True, '')  # 无用户上下文，放行
 
-        state = self._get_module_state(user_id, module_key)
-
+        state, state_err = self._get_module_state_ex(user_id, module_key)
+        if state_err is not None:
+            # G4：读不到状态 ≠ 首次使用。开试用会把已过期的试用重新计时，
+            # 一次 DB 抖动就白送一轮付费模块 —— 付费门禁这里必须 fail-closed。
+            logger.error("[ModulePolicy] module state unavailable for user=%s module=%s: %s; "
+                         "denying access (fail-closed)", user_id, module_key, state_err)
+            return (False, f'Module {module_key} is temporarily unavailable, please retry later')
         if state is None:
             # 首次使用 → 自动开启试用
             self.start_trial(user_id, module_key)
@@ -563,8 +568,23 @@ class ModulePolicyEngine:
 
     def _get_module_state(self, user_id: int, module_key: str) -> dict:
         """从 subscriptions.module_states 读取单个模块状态"""
+        state, _err = self._get_module_state_ex(user_id, module_key)
+        return state
+
+    def _get_module_state_ex(self, user_id: int, module_key: str):
+        """读取模块状态，并区分"首次使用"与"查询失败"。
+
+        G4：原实现把 DB 异常也返回 None，与"该模块从未使用过"完全无法区分，
+        check_access 于是走"首次使用 → 自动开试用"分支 —— 一次 DB 抖动就等于
+        **免费放行**，而且 start_trial 会把已经过期的试用重新计时（等于白送一轮）。
+        付费门禁必须 fail-closed：读不到就不放行。
+
+        Returns: (state: dict | None, error: str | None)
+          state=None 且 error=None → 首次使用（无状态记录）
+          state=None 且 error!=None → 查询失败，调用方应拒绝而不是开试用
+        """
         if not self._get_main_db:
-            return None
+            return None, None
         try:
             with self._get_main_db() as conn:
                 row = conn.execute(
@@ -572,12 +592,12 @@ class ModulePolicyEngine:
                     (user_id,)
                 ).fetchone()
                 if not row or not row['module_states']:
-                    return None
+                    return None, None
                 states = json.loads(row['module_states'] or '{}')
-                return states.get(module_key)
+                return states.get(module_key), None
         except Exception as e:
             logger.warning(f"[ModulePolicy] _get_module_state failed: {e}")
-            return None
+            return None, str(e)
 
     def _save_module_state(self, user_id: int, module_key: str, state: dict):
         """写入单个模块状态到 subscriptions.module_states"""

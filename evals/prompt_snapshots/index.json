@@ -6,24 +6,24 @@
     {
       "key": "critique_self_eval",
       "file": "agent_matrix/agent_runner.py",
-      "anchor": "你是严格的质量审查员",
-      "line": 403,
-      "chars": 154,
-      "sha256": "d73cd3396888e5828e9f50d1496a4cd8931360fb8adca2f3ab12469bb6a79687"
+      "anchor": "You are a strict quality reviewer",
+      "line": 859,
+      "chars": 282,
+      "sha256": "9135433ba6d32320e6b30abd515f3cff4f24446d421bec5675707a86ab564873"
     },
     {
       "key": "intent_classify",
       "file": "agent_matrix/intent.py",
-      "anchor": "分析以下用户消息，输出 JSON",
+      "anchor": "Analyze the following user message and output JSON only",
       "line": 24,
-      "chars": 206,
-      "sha256": "2aada851c0fd042625ef48dcbe9a785a97012fe7d52c23465a862b538013cc63"
+      "chars": 356,
+      "sha256": "bb34fc59b1ec82861a408b7c2ff3bb9058be0ddd5269493b2efea0cdc7e1608c"
     },
     {
       "key": "ppt_outline",
       "file": "agent_matrix/routes.py",
       "anchor": "你是一个PPT大纲生成器",
-      "line": 904,
+      "line": 938,
       "chars": 183,
       "sha256": "1d9ccd597a0581211025c7c954e82c95fcbcae9fc60ed555f8375d39a3218036"
     },
@@ -46,16 +46,16 @@
     {
       "key": "task_decompose",
       "file": "agent_matrix/orchestrator.py",
-      "anchor": "请按以下 JSON 格式输出任务分解方案",
-      "line": 380,
-      "chars": 593,
-      "sha256": "a4bf7e100101b49b20f37227e3b6e38c44561352abc5bc56da1e645b35cb9885"
+      "anchor": "Output the task decomposition in the following JSON format",
+      "line": 426,
+      "chars": 995,
+      "sha256": "3982bf24868c5aae74b7b6cd578ff4fe4860a47ea511af5e5ef2ca8b5405538b"
     },
     {
       "key": "tool_router",
       "file": "agent_matrix/routes.py",
       "anchor": "你是一个意图分析器",
-      "line": 567,
+      "line": 601,
       "chars": 1252,
       "sha256": "ab9530ce3db159f96be1453f331d217c57031622a882cd3fb5ba543f848d640c"
     }

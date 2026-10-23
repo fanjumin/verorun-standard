@@ -14,8 +14,8 @@
       "file": "agent_matrix/agent_runner.py",
       "must_contain": [
         "\"confidence\": 0.0-1.0",
-        "\"issues\": [\"问题1\"",
-        "\"suggestion\": \"改进建议\""
+        "\"issues\": [\"issue 1\"",
+        "\"suggestion\": \"improvement suggestion\""
       ],
       "note": "自评提示词 JSON 契约不得再被 i18n 工具写成 _(\"...\")，且键名必须是 confidence"
     },
@@ -162,6 +162,27 @@
       "must_contain": ["def require_admin_or_none("],
       "pending": true,
       "note": "WP-B1 未启动。该模块落地后本断言自动生效（(payload, err) 与 payload|None 两种返回契约必须同时导出，直接统一会把 44 处调用点改坏）"
+    },
+    {
+      "id": "C1.owner_isolation_predicate",
+      "file": "agent_matrix/rag_retriever.py",
+      "must_contain": [
+        "AND (owner_id IS NULL OR owner_id = %s)",
+        "AND owner_id IS NULL"
+      ],
+      "note": "C-1-strict owner 隔离谓词：viewer 提供→共享块+本人私有块；viewer 为空（匿名/主站）→仅共享块，永不外泄私有块"
+    },
+    {
+      "id": "C1.inject_knowledge_viewer_wired",
+      "file": "agent_matrix/routes.py",
+      "must_contain": ["viewer_id=admin.get('user_id')"],
+      "note": "chat_stream_sse 管理员会话把当前 user_id 传入 _inject_knowledge，使其可见本人私有研报块"
+    },
+    {
+      "id": "C1.list_knowledge_owner_scope",
+      "file": "main_site/routes/api_v1.py",
+      "must_contain": ["AND (owner_id IS NULL OR owner_id = %s)"],
+      "note": "知识库列表与计数查询对非管理员加 owner 隔离，堵住任一登录用户读取他人私有块（回流研报块/记忆沉淀块）的越权面"
     }
   ]
 }

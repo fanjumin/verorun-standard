@@ -1,0 +1,281 @@
+// ============================================================
+// AI Hub · 角色设置（Demo 模块③）
+// 主体是 Agent 角色。在任意角色上点「+ 添加」，按二级菜单依次选择
+// ① 模型供应商 → ② 该供应商下的模型（Model ID）→ ③ 本条密钥角色
+// primary/backup/dedicated → ④ 填写 Key，即添加一条。
+// 一个角色可以拥有：多把 Key、多个模型、多个厂家的任意组合。
+// 内置角色（is_system=1）与主控角色禁止删除，仅用户自建角色可删。
+// ============================================================
+
+var _rsTargetId=null;
+var _rsProvCache=null;   // cache of /admin/providers
+var _rsModelCache=null;  // cache of /admin/provider-models
+
+window.l_role_settings=function(targetId){
+  if(!targetId) document.getElementById("pt").textContent="{{ _('Role Settings') }}";
+  _rsTargetId=targetId||"mc";
+  _rsProvCache=null;_rsModelCache=null;
+  var _target=document.getElementById(_rsTargetId);
+  _target.innerHTML='<div class="lo"><div class="s"></div>{{ _('Loading...') }}</div>';
+  // 先并行拉供应商/模型元数据（添加弹窗用），再拉角色看板
+  Promise.all([
+    fetch("/admin/providers",{headers:{"Authorization":"Bearer "+T}}).then(function(r){return r.json()}),
+    fetch("/admin/provider-models",{headers:{"Authorization":"Bearer "+T}}).then(function(r){return r.json()})
+  ]).then(function(meta){
+    if(!meta[0].success||!meta[1].success){_target.innerHTML='<div class="em">{{ _('Load failed') }}</div>';return}
+    _rsProvCache=meta[0].data||[];
+    _rsModelCache=meta[1].data||[];
+    fetch("/admin/agent-matrix/dashboard",{headers:{"Authorization":"Bearer "+T}})
+      .then(function(r){return r.json()})
+      .then(function(d){
+        if(!d.success){_target.innerHTML='<div class="em">{{ _('Load failed') }}</div>';return}
+        rsRender(d.data.active_agents||[]);
+      }).catch(function(){_target.innerHTML='<div class="em">{{ _('Connection Failed') }}, {{ _('Please Confirm Service is Running') }}</div>'});
+  }).catch(function(){_target.innerHTML='<div class="em">{{ _('Load failed') }}</div>'});
+};
+
+function rsModelCount(slug){
+  var p=_rsProvCache.filter(function(x){return x.slug===slug})[0];
+  return p?(p.models||[]).length:0;
+}
+
+// 密钥角色徽标（primary/backup/dedicated 配色，内联样式避免依赖不存在的 bdg 子类）
+function rsRoleBadge(role){
+  role=role||'primary';
+  var st='display:inline-block;padding:1px 8px;border-radius:10px;font-size:9px;font-weight:600';
+  if(role==='backup')return '<span style="'+st+';background:var(--warn-bg);color:var(--warn)">'+role+'</span>';
+  if(role==='dedicated')return '<span style="'+st+';background:rgba(160,32,240,.12);color:var(--accent2)">'+role+'</span>';
+  return '<span style="'+st+';background:rgba(0,245,255,.12);color:var(--accent)">'+role+'</span>';
+}
+
+function rsRender(agents){
+  var h='<div class="cd">';
+  h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">';
+  h+='<h3 style="margin:0;font-size:16px;color:var(--accent)">{{ _('Role Settings') }}</h3>';
+  h+='<span style="flex:1"></span>';
+  h+='<button class="bp" onclick="rsNewRoleForm()" style="padding:6px 16px;font-size:13px;cursor:pointer">+ {{ _('Create Agent') }}</button>';
+  h+='</div>';
+  h+='<div style="font-size:11px;color:var(--dim);background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;margin-bottom:12px">';
+  h+='{{ _('On any role click Add, then select provider, model, key role and key to add one entry; repeat to add more') }}<br>';
+  h+=rsRoleBadge('primary')+' {{ _('Rotates to absorb rate limits') }}；'+rsRoleBadge('backup')+' {{ _('Activates when all Primary keys are cooling down') }}；'+rsRoleBadge('dedicated')+' {{ _('Only used when explicitly bound to a model/agent') }}';
+  h+='</div>';
+  h+='</div>';
+  h+='<div id="rsCards"></div>';
+  var _target=document.getElementById(_rsTargetId);
+  var wrapped=_rsTargetId!=="mc"?'<div class="ai-hub-subtitle">{{ _('AI Hub') }} <span style="color:var(--dim)">&rsaquo;</span> {{ _('Role Settings') }}</div>'+h:h;
+  _target.innerHTML=wrapped;
+  // 并行拉每个角色的密钥条目并渲染卡片
+  agents.forEach(function(a){rsRenderCard(a)});
+}
+
+function rsRenderCard(a){
+  var box=document.getElementById("rsCards");
+  if(!box)return;
+  var card=document.createElement("div");
+  card.id="rsCard-"+a.id;
+  card.style.cssText="margin:0 0 14px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:8px;overflow:hidden;background:var(--bg2)";
+  card.innerHTML='<div style="padding:10px 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--bg2);border-bottom:1px solid var(--border)">'+
+    '<b style="font-size:14px">'+esc(a.name)+'</b>'+
+    (a.role_type==="master"?' <span class="bdg on" style="font-size:9px">{{ _('Main Agent') }}</span>':'')+
+    (a.is_system?' <span class="bdg off" style="font-size:9px">{{ _('Built-in') }}</span>':' <span class="bdg on" style="font-size:9px">{{ _('Custom') }}</span>')+
+    '<span id="rsStat-'+a.id+'" style="font-size:11px;color:var(--dim)"></span>'+
+    '<span style="flex:1"></span>'+
+    '<button class="bp" style="padding:3px 12px;font-size:12px;cursor:pointer" onclick="rsAddEntryForm('+a.id+',\''+escJs(a.name)+'\')">+ {{ _('Add') }}</button>'+
+    ((!a.is_system&&a.role_type!=="master")?' <button class="bo" style="padding:3px 12px;font-size:12px;color:var(--rose);cursor:pointer" onclick="rsDeleteRole('+a.id+',\''+escJs(a.name)+'\')">{{ _('Delete') }}</button>':'')+
+    '</div>'+
+    '<div id="rsEntries-'+a.id+'" style="padding:6px 10px"><div class="lo"><div class="s"></div>{{ _('Loading') }}...</div></div>';
+  box.appendChild(card);
+  rsLoadEntries(a.id);
+}
+
+function rsLoadEntries(aid){
+  fetch('/admin/agent-matrix/agents/'+aid+'/keys',{headers:{"Authorization":"Bearer "+T}})
+    .then(function(r){return r.json()})
+    .then(function(d){
+      if(!d.success){document.getElementById('rsEntries-'+aid).innerHTML='<div class="em" style="margin:8px">{{ _('Load failed') }}</div>';return}
+      rsRenderEntries(aid,d.data||[]);
+    }).catch(function(){document.getElementById('rsEntries-'+aid).innerHTML='<div class="em" style="margin:8px">{{ _('Request Failed') }}</div>'});
+}
+
+function rsRenderEntries(aid,rows){
+  var stat=document.getElementById('rsStat-'+aid);
+  if(stat){
+    var provs={},models={};
+    rows.forEach(function(b){provs[b.provider_slug]=1;models[b.model_name]=1});
+    stat.textContent='　'+rows.length+' {{ _('entries') }} · '+Object.keys(provs).length+' {{ _('providers') }} · '+Object.keys(models).length+' {{ _('models') }}';
+  }
+  var el=document.getElementById('rsEntries-'+aid);
+  if(!el)return;
+  var h='';
+  if(rows.length){
+    h+='<table><tr><th>{{ _('Provider') }}</th><th>{{ _('Model ID') }}</th><th>{{ _('Key Role') }}</th><th>{{ _('API Key') }}</th><th>{{ _('Status') }}</th><th>{{ _('Actions') }}</th></tr>';
+    rows.forEach(function(b){
+      var st=b.key_active?(b.cooling?'<span class="bdg off">{{ _('Cooling') }}</span>':'<span class="bdg on">{{ _('Normal') }}</span>'):'<span class="bdg off">{{ _('Disable') }}</span>';
+      h+='<tr>'+
+        '<td>'+esc(b.provider_name||b.provider_slug)+' <code style="font-size:10px;color:var(--accent2)">'+esc(b.provider_slug)+'</code></td>'+
+        '<td><code style="font-size:11px;color:var(--accent)">'+esc(b.model_name)+'</code></td>'+
+        '<td>'+rsRoleBadge(b.pool_role)+'</td>'+
+        '<td style="color:var(--dim);font-family:monospace;font-size:11px">'+esc(b.key_preview||'***')+'</td>'+
+        '<td>'+st+'</td>'+
+        '<td><button class="btn bo bs" style="color:#f85149" onclick="rsDelEntry('+aid+','+b.id+')">{{ _('Delete') }}</button></td>'+
+        '</tr>';
+    });
+    h+='</table>';
+  }else{
+    h+='<div class="em" style="margin:8px">{{ _('No data') }} — {{ _('On any role click Add, then select provider, model, key role and key to add one entry; repeat to add more') }}</div>';
+  }
+  el.innerHTML=h;
+}
+
+// ── 添加一条：① 供应商 → ② 模型联动 → ③ 密钥角色 → ④ Key ──
+window.rsAddEntryForm=function(aid,aname){
+  if(!_rsModelCache||!_rsModelCache.length){showToast('{{ _('Model cannot be empty') }}','error');return}
+  var pOpts='';
+  _rsProvCache.forEach(function(p){
+    var cnt=rsModelCount(p.slug);
+    pOpts+='<option value="'+escAttr(p.slug)+'"'+(cnt?'':' disabled')+'>'+esc(p.name)+' ('+esc(p.slug)+')'+(cnt?'':' — '+esc('{{ _('No Models') }}'))+'</option>';
+  });
+  var h='<div class="modal-overlay" onclick="rsCloseModal()"><div class="modal-box" onclick="event.stopPropagation()" style="max-width:520px;width:90%">';
+  h+='<h3 style="margin:0 0 14px;color:var(--accent)">{{ _('Add Key') }} — '+esc(aname)+'</h3>';
+  h+='<div class="g2">';
+  h+='<div><div style="font-size:11px;color:var(--dim);margin-bottom:4px">① {{ _('Provider') }}</div><select class="sl" id="rsProv" style="width:100%" onchange="rsProvChange()">'+pOpts+'</select></div>';
+  h+='<div><div style="font-size:11px;color:var(--dim);margin-bottom:4px">② {{ _('Model ID') }}</div><select class="sl" id="rsModel" style="width:100%"></select></div>';
+  h+='<div><div style="font-size:11px;color:var(--dim);margin-bottom:4px">③ {{ _('Key Role') }}</div><select class="sl" id="rsRole" style="width:100%">';
+  h+='<option value="primary">primary — {{ _('Rotates to absorb rate limits') }}</option>';
+  h+='<option value="backup">backup — {{ _('Activates when all Primary keys are cooling down') }}</option>';
+  h+='<option value="dedicated">dedicated — {{ _('Only used when explicitly bound to a model/agent') }}</option>';
+  h+='</select></div>';
+  h+='<div><div style="font-size:11px;color:var(--dim);margin-bottom:4px">④ {{ _('API Key') }} *</div><input class="in" id="rsKey" type="password" placeholder="sk-..." style="width:100%" autocomplete="off"></div>';
+  h+='</div>';
+  h+='<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">';
+  h+='<button class="bo" onclick="rsCloseModal()" style="padding:6px 16px">{{ _('Cancel') }}</button>';
+  h+='<button class="bp rs-save-btn" onclick="rsSaveEntry('+aid+')" style="padding:6px 16px">{{ _('Add') }}</button>';
+  h+='</div></div></div>';
+  var old=document.getElementById('modal-root');if(old)old.remove();
+  var overlay=document.createElement('div');
+  overlay.id='modal-root';
+  overlay.innerHTML=h;
+  document.body.appendChild(overlay);
+  rsProvChange();
+};
+
+window.rsProvChange=function(){
+  var slug=document.getElementById('rsProv').value;
+  var sel=document.getElementById('rsModel');
+  if(!sel)return;
+  sel.innerHTML='';
+  _rsModelCache.filter(function(m){return m.provider_slug===slug}).forEach(function(m){
+    var o=document.createElement('option');o.value=m.id;o.textContent=m.model_name;sel.appendChild(o);
+  });
+  if(!sel.options.length){
+    var o=document.createElement('option');o.value='';o.textContent='— {{ _('No Models') }} —';sel.appendChild(o);
+  }
+};
+
+window.rsSaveEntry=function(aid){
+  var pm=parseInt(document.getElementById('rsModel').value);
+  var role=document.getElementById('rsRole').value;
+  var key=document.getElementById('rsKey').value.trim();
+  if(!pm){showToast('{{ _('Model cannot be empty') }}','error');return}
+  if(!key){showToast('{{ _('API Key cannot be empty') }}','error');return}
+  var saveBtn=document.querySelector('#modal-root .rs-save-btn');
+  if(saveBtn){saveBtn.disabled=true;saveBtn.textContent='{{ _('Saving...') }}';}
+  fetch('/admin/agent-matrix/agents/'+aid+'/keys',{
+    method:'POST',
+    headers:{"Authorization":"Bearer "+T,"Content-Type":"application/json"},
+    body:JSON.stringify({provider_model_id:pm,pool_role:role,api_key:key})
+  }).then(function(r){return r.json()}).then(function(d){
+    if(d.success){rsCloseModal();rsLoadEntries(aid);showToast('{{ _('Entry added; click Add to add more') }}','success')}
+    else{showToast(d.error||'{{ _('Add Failed') }}','error');if(saveBtn){saveBtn.disabled=false;saveBtn.textContent='{{ _('Add') }}';}}
+  }).catch(function(){showToast('{{ _('Request Failed') }}','error');if(saveBtn){saveBtn.disabled=false;saveBtn.textContent='{{ _('Add') }}';}});
+};
+
+window.rsDelEntry=function(aid,bid){
+  var h='<div class="modal-overlay" onclick="rsCloseModal()"><div class="modal-box" onclick="event.stopPropagation()" style="max-width:400px;width:90%">';
+  h+='<h3 style="margin:0 0 12px;color:var(--rose)">{{ _('Confirm Deletion') }}</h3>';
+  h+='<p style="margin:0 0 20px;font-size:14px;color:var(--ink)">{{ _('Delete this key binding?') }}</p>';
+  h+='<div style="display:flex;gap:8px;justify-content:flex-end">';
+  h+='<button class="bo" onclick="rsCloseModal()" style="padding:6px 16px">{{ _('Cancel') }}</button>';
+  h+='<button class="bp rs-del-btn" style="padding:6px 16px;background:var(--rose);border-color:var(--rose);color:#fff" onclick="rsConfirmDelEntry('+aid+','+bid+')">{{ _('Delete') }}</button>';
+  h+='</div></div></div>';
+  var old=document.getElementById('modal-root');if(old)old.remove();
+  var overlay=document.createElement('div');
+  overlay.id='modal-root';
+  overlay.innerHTML=h;
+  document.body.appendChild(overlay);
+};
+
+window.rsConfirmDelEntry=function(aid,bid){
+  var btn=document.querySelector('#modal-root .rs-del-btn');
+  if(btn){btn.disabled=true;btn.textContent='{{ _('Deleting...') }}';}
+  fetch('/admin/agent-matrix/agents/'+aid+'/keys/'+bid,{method:'DELETE',headers:{"Authorization":"Bearer "+T}})
+    .then(function(r){return r.json()}).then(function(d){
+      if(d.success){rsCloseModal();rsLoadEntries(aid);showToast('{{ _('Deleted') }}','success')}
+      else{rsCloseModal();showToast(d.error||'{{ _('Delete failed') }}','error')}
+    }).catch(function(){rsCloseModal();showToast('{{ _('Network error') }}','error')});
+};
+
+// ── 新建角色 ──
+window.rsNewRoleForm=function(){
+  var h='<div class="modal-overlay" onclick="rsCloseModal()"><div class="modal-box" onclick="event.stopPropagation()" style="max-width:420px;width:90%">';
+  h+='<h3 style="margin:0 0 14px;color:var(--accent)">{{ _('Create Agent') }}</h3>';
+  h+='<div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--dim);margin-bottom:4px">{{ _('Name') }} *</label>';
+  h+='<input id="rsRoleName" class="in" style="width:100%" placeholder="{{ _('e.g.') }}: {{ _('Agent') }}"></div>';
+  h+='<p style="margin:0 0 16px;font-size:11px;color:var(--dim)">{{ _('After creation, add model keys on its card') }}</p>';
+  h+='<div style="display:flex;gap:8px;justify-content:flex-end">';
+  h+='<button class="bo" onclick="rsCloseModal()" style="padding:6px 16px">{{ _('Cancel') }}</button>';
+  h+='<button class="bp rs-role-save-btn" onclick="rsSaveRole()" style="padding:6px 16px">{{ _('Save') }}</button>';
+  h+='</div></div></div>';
+  var old=document.getElementById('modal-root');if(old)old.remove();
+  var overlay=document.createElement('div');
+  overlay.id='modal-root';
+  overlay.innerHTML=h;
+  document.body.appendChild(overlay);
+};
+
+window.rsSaveRole=function(){
+  var name=document.getElementById('rsRoleName').value.trim();
+  if(!name){showToast('{{ _('Agent name cannot be empty') }}','error');return}
+  var saveBtn=document.querySelector('#modal-root .rs-role-save-btn');
+  if(saveBtn){saveBtn.disabled=true;saveBtn.textContent='{{ _('Saving...') }}';}
+  fetch('/admin/agent-matrix/agents',{
+    method:'POST',
+    headers:{"Authorization":"Bearer "+T,"Content-Type":"application/json"},
+    body:JSON.stringify({name:name})
+  }).then(function(r){return r.json()}).then(function(d){
+    if(d.success){rsCloseModal();showToast('{{ _('Added') }}','success');l_role_settings(_rsTargetId==='mc'?null:_rsTargetId)}
+    else{showToast(d.error||'{{ _('Creation Failed') }}','error');if(saveBtn){saveBtn.disabled=false;saveBtn.textContent='{{ _('Save') }}';}}
+  }).catch(function(){showToast('{{ _('Request Failed') }}','error');if(saveBtn){saveBtn.disabled=false;saveBtn.textContent='{{ _('Save') }}';}});
+};
+
+// ── 删除角色（仅用户自建；内置/主控前端隐藏，后端再守卫）──
+window.rsDeleteRole=function(aid,aname){
+  var h='<div class="modal-overlay" onclick="rsCloseModal()"><div class="modal-box" onclick="event.stopPropagation()" style="max-width:400px;width:90%">';
+  h+='<h3 style="margin:0 0 12px;color:var(--rose)">{{ _('Confirm Deletion') }}</h3>';
+  h+='<p style="margin:0 0 6px;font-size:14px;color:var(--ink)">{{ _('Are you sure you want to delete') }} <strong>'+esc(aname)+'</strong>?</p>';
+  h+='<p style="margin:0 0 20px;font-size:12px;color:var(--dim)">{{ _('This action cannot be undone.') }}</p>';
+  h+='<div style="display:flex;gap:8px;justify-content:flex-end">';
+  h+='<button class="bo" onclick="rsCloseModal()" style="padding:6px 16px">{{ _('Cancel') }}</button>';
+  h+='<button class="bp rs-role-del-btn" style="padding:6px 16px;background:var(--rose);border-color:var(--rose);color:#fff" onclick="rsConfirmDelRole('+aid+')">{{ _('Delete') }}</button>';
+  h+='</div></div></div>';
+  var old=document.getElementById('modal-root');if(old)old.remove();
+  var overlay=document.createElement('div');
+  overlay.id='modal-root';
+  overlay.innerHTML=h;
+  document.body.appendChild(overlay);
+};
+
+window.rsConfirmDelRole=function(aid){
+  var btn=document.querySelector('#modal-root .rs-role-del-btn');
+  if(btn){btn.disabled=true;btn.textContent='{{ _('Deleting...') }}';}
+  fetch('/admin/agent-matrix/agents/'+aid,{method:'DELETE',headers:{"Authorization":"Bearer "+T}})
+    .then(function(r){return r.json()}).then(function(d){
+      if(d.success){rsCloseModal();showToast('{{ _('Deleted') }}','success');l_role_settings(_rsTargetId==='mc'?null:_rsTargetId)}
+      else{rsCloseModal();showToast(d.error||'{{ _('Delete failed') }}','error')}
+    }).catch(function(){rsCloseModal();showToast('{{ _('Network error') }}','error')});
+};
+
+window.rsCloseModal=function(){
+  var m=document.getElementById('modal-root');
+  if(m)m.remove();
+};

@@ -413,7 +413,7 @@ async function pwdLogin() {
       body: JSON.stringify({ username, password, client_type: getClientType() })
     });
     const d = await r.json();
-    if (d.success) {
+    if (d.ok) {
       toast("{{ _('Login successful, redirecting...') }}", 'success');
       setTimeout(() => {
         const rd = new URLSearchParams(location.search).get('redirect') || '/admin';
@@ -488,7 +488,7 @@ async function codeLogin() {
       body: JSON.stringify({ username, code, client_type: getClientType() })
     });
     const d = await r.json();
-    if (d.success) {
+    if (d.ok) {
       toast("{{ _('Login successful, redirecting...') }}", 'success');
       setTimeout(() => {
         const rd = new URLSearchParams(location.search).get('redirect') || '/admin';

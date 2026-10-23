@@ -873,6 +873,14 @@ def list_knowledge():
             if category:
                 query += " AND category=%s"
                 params.append(category)
+
+            # C-1-strict owner 隔离：非管理员只能看到"共享块 + 自己的私有块"，
+            # 否则任一登录用户都能读到他人私有块（回流研报块、记忆沉淀块等）。
+            kb_role = payload.get('role', 'user')
+            kb_viewer = payload.get('user_id')
+            if kb_role not in ('super_admin', 'admin'):
+                query += " AND (owner_id IS NULL OR owner_id = %s)"
+                params.append(kb_viewer)
             
             query += " ORDER BY priority DESC, created_at DESC"
             
@@ -919,6 +927,10 @@ def list_knowledge():
             if category:
                 count_query += " AND category=%s"
                 count_params.append(category)
+            # 与列表查询同一谓词，否则 total 会把不可见块计入（总数≠可见数）
+            if kb_role not in ('super_admin', 'admin'):
+                count_query += " AND (owner_id IS NULL OR owner_id = %s)"
+                count_params.append(kb_viewer)
             
             total = db.execute(count_query, count_params).fetchone()['total']
             

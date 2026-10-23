@@ -907,11 +907,20 @@ EOF
 # ══════════════════════════════════════════════════════════════════════
 # systemd services (four services + the guardian daemon)
 # ══════════════════════════════════════════════════════════════════════
-# 精简版（edu / minipro）：无声用户控制台服务（verorun-auth / 8083），只有 Admin 身份。
+# 精简版（edu / minipro / omni-service）：无声用户控制台服务（verorun-auth / 8083），只有 Admin 身份。
 # 其他版本（production / lan / code / dev）完整保留 8083 平台用户控制台。
 _skip_user_console() {
     case "${DEPLOY_TYPE:-production}" in
-        edu|minipro) return 0 ;;
+        edu|minipro|omni-service) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# 服务器裁剪版（omni-service）：额外关闭用户登录服务（verorun-main / 8081）。
+# 其余版本（含精简版 edu/minipro）保留 8081 用户登录。
+_skip_user_login() {
+    case "${DEPLOY_TYPE:-production}" in
+        omni-service) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -965,8 +974,12 @@ SVCEOF
         systemctl daemon-reload
         systemctl enable "${name}"
     }
-    # 8081 — Main site (homepage public_home.html)
-    write_one_service "verorun-main" 8081 "auth_server" "--timeout 120 --log-level warning"
+    # 8081 — Main site (homepage public_home.html)；omni-service 服务器裁剪用户登录
+    if _skip_user_login; then
+        echo -e "${INFO} ${DEPLOY_TYPE:-production}: skipping verorun-main (8081, user login)"
+    else
+        write_one_service "verorun-main" 8081 "auth_server" "--timeout 120 --log-level warning"
+    fi
     # 8083 — Platform / User Console (skipped in 精简版 edu/minipro, only Admin identity)
     if _skip_user_console; then
         echo -e "${INFO} 精简版 ${DEPLOY_TYPE:-production}: skipping verorun-auth (8083, user console)"
@@ -986,7 +999,11 @@ SVCEOF
 write_guardian_service() {
     local file="${SERVICE_DIR}/verorun-guardian.service"
     # 精简版（edu/minipro）无 verorun-auth(8083)，Wants 不含该服务
+    local _gmain="verorun-main.service"
     local _gwants="verorun-auth.service"
+    if _skip_user_login; then
+        _gmain="#verorun-main.service"
+    fi
     if _skip_user_console; then
         _gwants="#verorun-auth.service"
     fi
@@ -994,7 +1011,7 @@ write_guardian_service() {
 [Unit]
 Description=VeroGuard — Unified Guardian Daemon (Health + Integrity + Heartbeat)
 After=network.target postgresql.service
-Wants=verorun-health.service verorun-main.service verorun-admin.service GDPLATFORM
+Wants=verorun-health.service GDMAIN verorun-admin.service GDPLATFORM
 
 [Service]
 Type=simple
@@ -1018,6 +1035,7 @@ TimeoutStopSec=30
 WantedBy=multi-user.target
 GDEVEOF
     sed -i "s|GDPLATFORM|${_gwants}|g" "${file}"
+    sed -i "s|GDMAIN|${_gmain}|g" "${file}"
     sed -i "s|GDEVDIR|${APP_HOME}|g" "${file}"
     systemctl daemon-reload
     # STD-4 修复（2026-08-29 标准版部署测试）：非官方版 Guardian 依赖 Nuitka 产物
@@ -1085,17 +1103,22 @@ GENVEOF
 # ══════════════════════════════════════════════════════════════════════
 write_sudoers() {
     local sudoers_file="/etc/sudoers.d/verorun"
-    # 精简版（edu/minipro）无 verorun-auth(8083)，不授予其 restart 权限
+    # 精简版（edu/minipro）无 verorun-auth(8083)，不授予其 restart 权限；
+    # 服务器裁剪版（omni-service）同时无 verorun-main(8081)，亦不授予。
     local _auth_sudoers=""
     if ! _skip_user_console; then
         _auth_sudoers="${APP_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl restart verorun-auth"
+    fi
+    local _main_sudoers="${APP_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl restart verorun-main"
+    if _skip_user_login; then
+        _main_sudoers="#${_main_sudoers}"
     fi
     cat > "${sudoers_file}" << SUEOF
 # Managed by VeroRun ${INSTALL_SCRIPT} — regenerated on every install/update
 # Grants ${APP_USER} passwordless one-click update for VeroRun services
 ${APP_USER} ALL=(root) NOPASSWD: /bin/bash ${APP_HOME}/deploy/${INSTALL_SCRIPT} update
 ${APP_USER} ALL=(root) NOPASSWD: /bin/bash ${APP_HOME}/deploy/${INSTALL_SCRIPT} restart
-${APP_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl restart verorun-main
+${_main_sudoers}
 ${_auth_sudoers}
 ${APP_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl restart verorun-admin
 ${APP_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl restart verorun-health
@@ -1115,7 +1138,10 @@ SUEOF
 # Service restart (with startup-wait polling + nginx)
 # ══════════════════════════════════════════════════════════════════════
 restart_services() {
-    local services=("verorun-admin" "verorun-main" "verorun-health" "verorun-guardian")
+    local services=("verorun-admin" "verorun-health" "verorun-guardian")
+    if ! _skip_user_login; then
+        services+=("verorun-main")
+    fi
     if ! _skip_user_console; then
         services+=("verorun-auth")
     fi
@@ -1292,7 +1318,9 @@ health_check() {
         fi
     }
 
-    check_port 8081 "verorun-main"
+    if ! _skip_user_login; then
+        check_port 8081 "verorun-main"
+    fi
     if ! _skip_user_console; then
         check_port 8083 "verorun-auth"
     fi
@@ -1308,7 +1336,10 @@ health_check() {
 
     echo ""
     echo -e "${INFO} Migration log check:"
-    local _mig_services=("verorun-admin" "verorun-main")
+    local _mig_services=("verorun-admin")
+    if ! _skip_user_login; then
+        _mig_services+=("verorun-main")
+    fi
     if ! _skip_user_console; then
         _mig_services+=("verorun-auth")
     fi
@@ -1471,7 +1502,9 @@ do_rollback() {
         echo -e "${WARN} Failed to create safety branch — proceeding anyway"
     fi
     if git reset --hard "${target_commit}"; then
-        if _skip_user_console; then
+        if _skip_user_login; then
+            systemctl restart verorun-admin verorun-health verorun-guardian
+        elif _skip_user_console; then
             systemctl restart verorun-admin verorun-main verorun-health verorun-guardian
         else
             systemctl restart verorun-admin verorun-auth verorun-main verorun-health verorun-guardian
@@ -1741,7 +1774,121 @@ server {
     return 444;
 }"
         fi
-        cat > "${nginx_conf}" << NGXEOF
+        if _skip_user_login; then
+            # ── omni-service 精简模板：服务器裁剪 8081(用户登录)/8083(网站)，仅反代 admin(8084)；
+            #    桌面轻壳经公网 IP 接 /admin/ 与 /plugin/*（均落在 8084）。health(8085) 仅本地健康检查，不经 nginx。
+            cat > "${nginx_conf}" << OMNI_NGXEOF
+# VeroRun Nginx — omni-service mode (auto-generated by ${INSTALL_SCRIPT})
+# 全网智能客服服务版：用户登录(8081)/网站(8083)已裁剪，仅保留 admin(8084) 反代。
+
+# 审计 M5：rate limiting for the auth/admin surfaces at the nginx layer (http-level zone, referenced by locations inside servers)
+limit_req_zone \$binary_remote_addr zone=verorun_auth:10m rate=10r/s;
+limit_req_status 429;   # D-14：超限返回 429 而非默认 503（避免客户端误判服务宕机）
+
+# 审计 M9：access_log redaction — use \$uri (without query) instead of \$request,
+# preventing URL query-string tokens such as JWT/sso_token from landing in logs (log leakage equals session hijacking)
+log_format verorun_redact '\$remote_addr - \$remote_user [\$time_local] "\$request_method \$uri \$server_protocol" \$status \$body_bytes_sent "\$http_referer"';
+
+# 审计 P1-2：unknown Hosts rejected — default_server catch-all (prevents Host-header injection / cache poisoning)
+server {
+    listen 80 default_server;
+    server_name _;
+    access_log off;
+    return 444;
+}
+${_default_ssl_server}
+# ── Main domain（仅 admin）────────────────────────
+server {
+    listen 80;
+    server_name ${DOMAIN} www.${DOMAIN};
+    server_tokens off;
+    access_log /var/log/nginx/verorun-access.log verorun_redact;
+${_http_redirect}
+${_ssl_listen}
+${_ssl_cert}
+${_sec_headers}
+
+    # ── Admin ─────────────────────────────────
+    location /admin/ {
+        client_max_body_size 100M;
+        limit_req zone=verorun_auth burst=20 nodelay;
+${_auth_basic_on}
+        proxy_pass http://127.0.0.1:8084;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        # 审计 M1：XFF overwritten with the direct IP (\$remote_addr), not appending client-forged values
+        proxy_set_header X-Forwarded-For \$remote_addr;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 300s;
+    }
+
+    # 审计 D1：debug-jwt removed; nginx-layer defense in depth returns 404 directly
+    location = /admin/debug-jwt {
+        return 404;
+    }
+
+    # 审计 M17：HTML/SVG in admin upload directories forced to download, preventing stored XSS (regex has the highest priority)
+    location ~* ^/admin/static/uploads/.*\.(html?|svg)$ {
+        add_header Content-Disposition "attachment; filename=download" always;
+        proxy_pass http://127.0.0.1:8084;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$remote_addr;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    # AI 浮窗探测端点（DEF-04）：由 site_builder 插件挂在 8084，须在 location / 之前精确命中
+    location = /api/v1/site-chat {
+        proxy_pass http://127.0.0.1:8084/plugin/site_builder/api/v1/site-chat;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$remote_addr;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 300s;
+    }
+
+    # 默认根路由 → admin(8084)：桌面轻壳的 /plugin/* 等 API 全部经此反代
+    location / {
+        client_max_body_size 100M;
+        proxy_pass http://127.0.0.1:8084;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        # 审计 M1：XFF overwritten with the direct IP (\$remote_addr), not appending client-forged values
+        proxy_set_header X-Forwarded-For \$remote_addr;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 300s;
+    }
+}
+
+# ── Agent subdomain ────────────────────────────
+server {
+    listen 80;
+    server_name agent.${DOMAIN};
+    server_tokens off;
+    access_log /var/log/nginx/verorun-access.log verorun_redact;
+${_http_redirect}
+${_ssl_listen}
+${_ssl_cert}
+    client_max_body_size 100M;
+${_sec_headers}
+
+    # 审计 P1-2/P2-4：debug-jwt removed; nginx-layer defense in depth returns 404 directly (agent subdomain too)
+    location = /admin/debug-jwt {
+        return 404;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:8084;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        # 审计 M1：XFF overwritten with the direct IP (\$remote_addr), not appending client-forged values
+        proxy_set_header X-Forwarded-For \$remote_addr;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+OMNI_NGXEOF
+        else
+            cat > "${nginx_conf}" << NGXEOF
 # VeroRun Nginx — auto-generated by ${INSTALL_SCRIPT}
 
 # 审计 M5：rate limiting for the auth/admin surfaces at the nginx layer (http-level zone, referenced by locations inside servers)
@@ -1944,6 +2091,7 @@ ${_sec_headers}
     }
 }
 NGXEOF
+        fi
     else
         # ── No-domain mode: single default_server server (/admin/ uniformly includes client_max_body_size 100M, 审计 R4 L-B) ──
         # 审计 M11：detect local LAN IPs for the server_name whitelist (unknown Hosts hit a 444 rejection)
@@ -1970,7 +2118,94 @@ NGXEOF
     ssl_session_cache shared:SSL:10m;
     ssl_session_timeout 1d;"
         fi
-        cat > "${nginx_conf}" << NGXEOF
+        if _skip_user_login; then
+            # ── omni-service 精简模板（no-domain）：仅反代 admin(8084)；轻壳经公网 IP 直连。
+            cat > "${nginx_conf}" << OMNI_NGXEOF
+# VeroRun Nginx — omni-service no-domain mode (auto-generated by ${INSTALL_SCRIPT})
+# 全网智能客服服务版：用户登录(8081)/网站(8083)已裁剪，仅保留 admin(8084) 反代。
+
+# 审计 M5：rate limiting for the auth/admin surfaces at the nginx layer (http-level zone, referenced by locations inside servers)
+limit_req_zone \$binary_remote_addr zone=verorun_auth:10m rate=10r/s;
+limit_req_status 429;   # D-14：超限返回 429 而非默认 503（避免客户端误判服务宕机）
+
+# 审计 M9：access_log redaction — use \$uri (without query) instead of \$request, preventing token leakage into logs
+log_format verorun_redact '\$remote_addr - \$remote_user [\$time_local] "\$request_method \$uri \$server_protocol" \$status \$body_bytes_sent "\$http_referer"';
+
+server {
+    listen 80;
+${_lan_ssl_listen}
+${_lan_ssl_cert}
+    # 审计 M11：restrict server_name to the local localhost/LAN IPs; unknown Hosts no longer hit this block
+    server_name ${_lan_server_name};
+    server_tokens off;
+    access_log /var/log/nginx/verorun-access.log verorun_redact;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header Content-Security-Policy "default-src 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' ws: wss: https:; frame-ancestors 'self'" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # ── Admin panel ─────────────────────────
+    location /admin/ {
+        client_max_body_size 100M;
+        limit_req zone=verorun_auth burst=20 nodelay;
+${_auth_basic_on}
+        proxy_pass http://127.0.0.1:8084;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        # 审计 M1：XFF overwritten with the direct IP (\$remote_addr), not appending client-forged values
+        proxy_set_header X-Forwarded-For \$remote_addr;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 300s;
+    }
+
+    # 审计 D1：debug-jwt removed; nginx-layer defense in depth returns 404 directly
+    location = /admin/debug-jwt {
+        return 404;
+    }
+
+    # 审计 M17：HTML/SVG in admin upload directories forced to download, preventing stored XSS (regex has the highest priority)
+    location ~* ^/admin/static/uploads/.*\.(html?|svg)$ {
+        add_header Content-Disposition "attachment; filename=download" always;
+        proxy_pass http://127.0.0.1:8084;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$remote_addr;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    # AI 浮窗探测端点（DEF-04）：由 site_builder 插件挂在 8084，须在 location / 之前精确命中
+    location = /api/v1/site-chat {
+        proxy_pass http://127.0.0.1:8084/plugin/site_builder/api/v1/site-chat;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$remote_addr;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 300s;
+    }
+
+    # 默认根路由 → admin(8084)：桌面轻壳的 /plugin/* 等 API 全部经此反代
+    location / {
+        client_max_body_size 100M;
+        proxy_pass http://127.0.0.1:8084;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        # 审计 M1：XFF overwritten with the direct IP (\$remote_addr), not appending client-forged values
+        proxy_set_header X-Forwarded-For \$remote_addr;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 300s;
+    }
+}
+
+# 审计 M11：unknown Hosts rejected (prevents Host-header injection / cache poisoning) — default_server as the catch-all
+server {
+    listen 80 default_server;
+    server_name _;
+    access_log off;
+    return 444;
+}
+OMNI_NGXEOF
+        else
+            cat > "${nginx_conf}" << NGXEOF
 # VeroRun Nginx — no-domain mode (auto-generated by ${INSTALL_SCRIPT})
 
 # 审计 M5：rate limiting for the auth/admin surfaces at the nginx layer (http-level zone, referenced by locations inside servers)
@@ -2114,6 +2349,7 @@ server {
     return 444;
 }
 NGXEOF
+        fi
     fi
 
     # 审计 M-2 fix：back up the default site before removing it (idempotent — an existing backup is not overwritten),

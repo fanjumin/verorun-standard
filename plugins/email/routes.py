@@ -56,6 +56,10 @@ def admin_email_inbox():
     from plugins.email.services import fetch_inbox
     try:
         emails = fetch_inbox(per_page=50, keyword=request.args.get('q', ''))
+        # fetch_inbox 失败时返回 {error, items: []}；旧实现仍包 success:True，
+        # 于是"IMAP 连不上"在界面上表现为"收件箱为空"。
+        if emails.get('error'):
+            return jsonify({'success': False, 'error': emails['error'], 'data': emails}), 502
         return jsonify({'success': True, 'data': emails})
     except Exception:
         logger.exception('[email] inbox failed')
@@ -102,11 +106,16 @@ def admin_email_send():
                              reply_to=reply_to_uid,
                              attachments=attachments)
         if not ok:
+            # 失败也必须留痕：否则后台看到的"已发送列表"永远为空
+            from plugins.email.services import log_failed_send
+            log_failed_send(to_addr, subject, body or body_html, msg)
             return jsonify({'success': False, 'error': msg}), 400
         _log(admin['user_id'], 'send_email', 'email', '', f'To: {to_addr}, Subject: {subject}')
         return jsonify({'success': True, 'data': {'message': msg}})
     except Exception:
         logger.exception('[email] send failed')
+        from plugins.email.services import log_failed_send
+        log_failed_send(to_addr, subject, body or body_html, _("Internal error, please check server logs"))
         return jsonify({'success': False, 'error': _("Internal error, please check server logs")}), 500
 
 
@@ -364,7 +373,16 @@ def admin_email_test_config():
             logger.exception('[email] test-config imap failed')
             result['imap']['err'] = _("Connection failed") + ": " + type(e).__name__
 
-    return jsonify({'success': True, 'data': result})
+    # 子项失败必须提升为业务失败：旧实现无论如何都返回 success:True，
+    # 前端/集成方会把"连不上、认证失败"当成配置正常。
+    imap_required = bool(imap_host and imap_port)
+    ok = bool(result['smtp']['ok']) and (bool(result['imap']['ok']) or not imap_required)
+    body = {'success': ok, 'data': result}
+    if not ok:
+        body['error'] = '; '.join(
+            v['err'] for v in result.values() if not v['ok'] and v.get('err')
+        ) or 'mail check failed'
+    return jsonify(body)
 
 
 # ── GET /admin/email/attachment/<uid>/<filename> ──
@@ -463,8 +481,10 @@ def admin_email_folders():
     from plugins.email.services import list_folders
     try:
         result = list_folders()
-        if result.get('error'):
-            return jsonify({'success': False, 'error': result['error'], 'data': {'folders': []}}), 502
+        # 契约与 /inbox 对齐（2026-10-13 修复）：IMAP 失败此前返回 502，浏览器
+        # 控制台必然出现红色 "Failed to load resource: 502"，而 /inbox 对同一
+        # 失败返回 200 + data.error —— 同错两契约。统一为 200 + data.error，
+        # 前端 loadFolders 走 success 分支自然降级为空列表，错误文案仍在体内。
         return jsonify({'success': True, 'data': result})
     except Exception:
         logger.exception('[email] folders failed')

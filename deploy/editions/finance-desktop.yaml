@@ -21,23 +21,38 @@ plugins:
   #      （非插件）；2026-10-01：加入 multi_asset 后为 _base + 7 个业务插件；同日再加入
   #      project_workspace、neural_flow 后，include 定稿为 _base + 9 个业务插件
   #      （ai_relay 属官方服务端能力，不进金融版发布包）。
+  #      2026-10-06：加入 content_factory（资讯采集）后为 _base + 10 个业务插件。
+  #      2026-10-12：加入 bayes_engine、butterfly_engine（用户裁决"两个插件都放行"：
+  #      104 整盒 VR_EDITION 切 finance，二者 compatible_editions 分别为 [] 与
+  #      ["finance"]，不登记进 include 则 enable 被 not_in_edition_include 拒、
+  #      运行期不可见）后为 _base + 12 个业务插件。
+  #      2026-10-13：加入 hr_recruit、visitor_profile、coupons（用户裁决：104 为测试机，
+  #      所有插件都应能测到；本版角色与插件清单随业务增减，非固定量）后为
+  #      _base + 15 个业务插件。
+  #      2026-10-14：加入 chaos_engine（描述性混沌/非线性动力学风险原语，非交易信号；
+  #      风控官 rs_risk 经 managed_modules 认领，plugin.json compatible_editions=["finance"]）
+  #      后为 _base + 16 个业务插件。
   #      2026-09-21：currency_converter（多币种）整插件移出 —— 本版无结算/换算场景，
   #      留着只是"设置页一张卡 + 一个无归属插件"。
   #      2026-10-01：multi_asset（多资产：期货/期权/基金/债券）移入 —— 其
   #      plugin.json 已声明 compatible_editions 含 finance，且其余 6 项均不提供
   #      多资产行情，缺它则本版"能力声明与发行载荷"自相矛盾。
-  #   ② 运行时：声明 runtime_whitelist: false，让 include 退出运行时门控，可见性回到
-  #      「默认放行 + 显式隐藏」。这一条是必须的 —— 商店上架的适用插件不在 include 里，
-  #      若 include 兼任运行时白名单，装完会被门控跳过（_edition_hidden_map 的隐藏集
-  #      只做并集，没有"反隐藏"路径），"上架后可加载"就不成立。
-  #   ③ "本版不适用"由 plugin_distribution_rules 表达（与商店准入共用
-  #      distribution.resolve_visible_set）：单插件规则的 editions 不含本版 → 隐藏，
-  #      reason = not_in_rule_editions；无规则的插件（含商店新上架的）默认可见。
+  #   ② 运行时：★ 2026-10-06 决策变更 —— 声明 runtime_whitelist: true，让 include
+  #      **兼任运行期白名单**。金融桌面版的插件集是**固定 12 个**（见下方 include），
+  #      插件中心 / discover / enable / unified 四处门控同源，只放行这 12 个；包外插件
+  #      （ads / shop / site_builder …）不出现在列表、不可启用。
+  #      代价（显式接受）：商店新上架的适用插件若不在 include 中即不可见，需随发行版
+  #      一起更新本清单；换来的是"界面所见 == 本版固定插件集"。
+  #      历史：2026-09-21 曾用 runtime_whitelist: false 走「默认放行 + 显式隐藏」，
+  #      但本版 plugin_distribution_rules 表为空 → 运行期隐藏集只剩 exclude，插件中心
+  #      实测列出磁盘上全部 ~39 个插件（用户报告"未裁剪为 9 个固定插件"）。
+  #   ③ （保留路径）"本版不适用"亦可用 plugin_distribution_rules 表达（与商店准入共用
+  #      distribution.resolve_visible_set）；本版该表当前为空，不参与判定。
   #
-  #   health_check：不在 include（不进包），且已由上述分流规则显式隐藏 —— 单机桌面版
-  #   （Windows / macOS）无巡检意义。它与服务端 health_service(8085) 无关（后者是核心
-  #   组件，不依赖本插件），但其定时巡检任务在本版不再注册，此为预期。
-  runtime_whitelist: false
+  #   health_check：不在 include（不进包），现已由上述 include 白名单在运行期隐藏 ——
+  #   单机桌面版（Windows / macOS）无巡检意义。它与服务端 health_service(8085) 无关
+  #   （后者是核心组件，不依赖本插件），但其定时巡检任务在本版不再注册，此为预期。
+  runtime_whitelist: true
   include:
     - _base
     - stock_analysis
@@ -45,21 +60,40 @@ plugins:
     - im_gateway
     - email
     - memory_engine
+    - bayes_engine
+    - butterfly_engine
+    - chaos_engine
     - vault
     - net_proxy
     - project_workspace
     - neural_flow
+    - content_factory
+    # 2026-10-13 用户裁决：104 为测试机，「所有插件都应该能测到」；金融版角色与插件
+    # 清单随业务增减、不是固定量。放行以下三项以在 104 管理端可测（归属走下方
+    # roles/finance-desktop/ops.yaml 的 managed_modules 认领通道，与 email /
+    # im_gateway / content_factory / project_workspace 同一既有惯例，
+    # 见 agent_matrix/models.py resolve_agent_roles ②）：
+    #   hr_recruit      招聘管理（agent_role=office，本版由 ops 认领）
+    #   visitor_profile 访客画像（agent_role=business，本版由 ops 认领）
+    #   coupons         智能优惠券（奖励规则页 bridge 依赖，本版由 ops 认领）
+    - hr_recruit
+    - visitor_profile
+    - coupons
+    # 2026-10-18：search_hub 通用检索接入层（agent_role=content，本版由 ops 认领，
+    # 走下方 ops.yaml managed_modules 通道）。今日唯一保留项。
+    - search_hub
   # ⚠️ 运行时无效（勿依赖）：agent_matrix.models.edition_plugin_excludes() 已废弃、恒返回
   #   空列表 —— 插件可见性现由各插件 plugin.json 的 compatible_editions 决定。
   #   本段保留仅作"本版明确不提供"的登记与发包侧参考；**实际运行时闸门是上面的 include**。
   #   若将来要恢复黑名单语义，须先改 edition_plugin_excludes()，否则这里写了也不会生效。
   exclude:
     - veroscholar
-    # hr_recruit：其 agent_role=office 在 agent_matrix/roles/09-office.yaml 声明 editions:[official]，
-    # 金融版按 edition 过滤角色集后，discovery 的「agent_role 须为核心角色」校验必然失败
-    # （R1 注册表 last_error 即此）。金融版不承载 HR 招聘域 → 显式排除；
-    # 不把 agent_role 改成 ops：那会为修一个版本的报错而改掉另一版本已成立的角色契约。
-    - hr_recruit
+    # hr_recruit：2026-10-13 起**移出本排除表、改列入上方 include**（用户在 104 测试机
+    # 上要测到它）。历史留档：其 agent_role=office 在 agent_matrix/roles/09-office.yaml
+    # 声明 editions:[official]，金融版角色集过滤后 discovery 的「agent_role 须为核心角色」
+    # 校验会失败 —— 现按本版既有惯例由 roles/finance-desktop/ops.yaml 的
+    # managed_modules 认领（resolve_agent_roles ②），**不改插件侧 agent_role**，
+    # 官方版契约保持不变。
     # cogevolution_substrate：物联网（边缘）场景的认知进化，金融桌面版不适用。
     # 当前核心仓库尚未收录该插件目录，此处先登记 —— 将来它若被同步进仓库，
     # 打包与门控会自动排除，无需再想起来处理（源中不存在时打包断言亦容忍）。

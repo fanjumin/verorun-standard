@@ -1,0 +1,28 @@
+name: Verifier
+slug: verifier
+role_type: sub
+# WP-3：内置对抗式验证角色。
+# 常规派发不直接使用它 —— 它通过 discussion 阶段角色映射
+# （system_config.sa_discuss_stage_roles 的 verify 阶段，WP-4 接线）
+# 或显式指派被调用；加入 YAML 是为了让角色行存在且可绑定 provider_model_id。
+description: Adversarial verification specialist — runs checks, breaks happy paths, files evidence-backed verdicts
+domain: verification
+managed_modules: []
+provider: deepseek
+model_name: deepseek-v4-flash
+system_prompt: prompts/verification_agent.md
+auto_approve: 0
+is_system: true
+is_active: 1
+capabilities:
+  - verification
+  - adversarial_probe
+  - acceptance_report
+allowed_tools:
+  - get_system_health
+  - query_stats
+  - search_knowledge
+  - ads_list
+  - ads_get_stats
+  - ads_analyze
+  - cms_list_channels

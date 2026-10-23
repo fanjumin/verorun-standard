@@ -15,6 +15,7 @@ import time as _time
 from cryptography.fernet import InvalidToken  # SB-BUG-1：解密失败显式告警
 
 from agent_matrix.cache_utils import get_llm_cache
+from agent_matrix.llm_text import ERROR_SENTINEL
 
 logger = logging.getLogger(__name__)
 
@@ -63,9 +64,11 @@ class _ProviderKeyPool:
     def _is_cooling(row):
         return bool(row.get('cooling'))
 
-    def pick(self, provider_slug, prefer_key_id=None):
+    def pick(self, provider_slug, prefer_key_id=None, allowed_key_ids=None):
         """从池中选一把 Key。返回 (key_id, key_str)；无可用 Key 返回 (None, '')。
-        prefer_key_id：显式绑定（dedicated 语义），命中且 active 则直接返回，不轮转不冷却。"""
+        prefer_key_id：显式绑定（dedicated 语义），命中且 active 则直接返回，不轮转不冷却。
+        allowed_key_ids：可选的候选收窄集合（AI Hub 角色绑定：该 Agent 为该供应商配置的 Key id）。
+                         传入且命中时，仅在该子集内轮转/冷却降级；子集为空则回退全池（向后兼容）。"""
         if not provider_slug:
             return None, ''
         try:
@@ -88,6 +91,16 @@ class _ProviderKeyPool:
 
         if not rows:
             return None, ''
+
+        # 角色绑定收窄：若该 Agent 为此供应商配置了绑定 Key，则只在绑定的 Key 内调度
+        if allowed_key_ids:
+            try:
+                _allow = {int(x) for x in allowed_key_ids}
+            except (TypeError, ValueError):
+                _allow = set()
+            narrowed = [r for r in rows if r['id'] in _allow]
+            if narrowed:
+                rows = narrowed
 
         # 显式绑定优先（含 dedicated）：仅要求 active + 有值
         if prefer_key_id:
@@ -221,7 +234,8 @@ def _resolve_agent_model_config(config: dict) -> dict:
         from models import get_db
         with get_db() as conn:
             pm = conn.execute(
-                "SELECT pm.*, p.slug as provider_slug FROM provider_models pm "
+                "SELECT pm.*, p.slug as provider_slug, p.endpoint_url as provider_endpoint_url "
+                "FROM provider_models pm "
                 "JOIN providers p ON p.id=pm.provider_id "
                 "WHERE pm.id=%s AND pm.is_active=1 AND p.is_active=1",
                 (pm_id,)
@@ -230,7 +244,8 @@ def _resolve_agent_model_config(config: dict) -> dict:
             pm = dict(pm)
             config['provider'] = pm['provider_slug']
             config['model_name'] = pm['model_name']
-            config['base_url'] = pm['endpoint_url']
+            # 端点归属：模型行端点优先（图片/TTS 等异构），为空则回退供应商级端点
+            config['base_url'] = pm['endpoint_url'] or pm.get('provider_endpoint_url')
             config['api_key_ref'] = pm['api_key_ref']
             config['api_key_id'] = pm.get('api_key_id')
             if 'capabilities' not in config or not config.get('capabilities'):
@@ -296,6 +311,18 @@ _AI_BUDGET_DEFAULTS = {
 }
 
 
+def _rate_worker_divisor() -> int:
+    """A3：声明部署副本数（gunicorn -w N），把速率窗口按副本数摊薄。
+
+    未配置时视为 1（单进程），行为与改动前一致；配置后全站配额才等于
+    system_config 里的 ai_rate_max_calls，而不是 N 倍。
+    """
+    try:
+        return max(1, int(os.environ.get('AI_RATE_WORKERS', '1') or 1))
+    except (TypeError, ValueError):
+        return 1
+
+
 def _get_ai_budget_config() -> dict:
     """从 system_config 读取 AI 闸门阈值，缺失则用默认值。"""
     cfg = dict(_AI_BUDGET_DEFAULTS)
@@ -354,13 +381,19 @@ def check_ai_budget(scene: str = '') -> tuple:
     max_calls = cfg.get('ai_rate_max_calls', 0) or 0
     window = cfg.get('ai_rate_window_sec', 60) or 60
     if max_calls > 0:
+        # A3：窗口是每 worker 一份。gunicorn -w 2 时"30 次/60 秒"实际是 60 次。
+        # 用 AI_RATE_WORKERS 声明副本数，把每个进程的窗口按副本数摊薄，
+        # 使全站实际配额回到配置值（每进程至少留 1 次，避免配成 0 而彻底禁掉）。
+        workers = _rate_worker_divisor()
+        per_worker = max(1, max_calls // workers)
         now = _time.time()
         with _AI_RATE_LOCK:
             while _AI_CALL_TIMES and now - _AI_CALL_TIMES[0] > window:
                 _AI_CALL_TIMES.popleft()
-            if len(_AI_CALL_TIMES) >= max_calls:
-                logger.warning("[AIBudget] rate limit hit (scene=%s): %d/%ds",
-                               scene, max_calls, window)
+            if len(_AI_CALL_TIMES) >= per_worker:
+                logger.warning("[AIBudget] rate limit hit (scene=%s): %d/%ds "
+                               "(per-worker share of %d over %d worker(s))",
+                               scene, per_worker, window, max_calls, workers)
                 return False, f'AI 调用速率超限（{max_calls} 次/{window} 秒），请稍后再试'
             _AI_CALL_TIMES.append(now)
 
@@ -384,6 +417,101 @@ def check_ai_budget(scene: str = '') -> tuple:
 #   1. provider_model_id（推荐）
 #   2. provider + model（兼容旧代码）
 # 所有调用统一写入 agent_token_logs + agent_token_daily。
+
+
+# ── 流式 tool_calls 聚合（WP-4） ──
+# chat_stream 本身通过 **kwargs 天然透传 tools/tool_choice；本函数把
+# 流式 chunk 序列聚合成一条完整 assistant 消息，供 iter_react() 使用。
+# 放模块级（而非类方法）便于单测直接导入、与桩引擎解耦。
+
+def aggregate_stream_message(chunk_iter):
+    """把 chat_stream 产出聚合成完整 assistant 消息 dict（WP-4）。
+
+    兼容三种帧：``None``（跳过）、``str``（`Error:` 前缀错误帧原样返回）、
+    chunk 对象（解包 ``delta.content`` 与 ``delta.tool_calls``）。
+
+    tool_calls 按 ``index`` 分桶累积 id / name / arguments 增量片段；
+    **arguments 非完整 JSON 的 tool_call 不产出**（日志告警后跳过），
+    保证 OpenAI 兼容协议结构合法性——`assistant.tool_calls` 与
+    `role=tool` 响应必须配对（对齐 context_manager 单元铁律）。
+
+    Returns:
+        dict  {role, content, tool_calls}——可直入 messages；
+        str   `Error:` 前缀错误帧（交调用方判定/重试）；
+        None  空流（无 content 也无 tool_calls）。
+    """
+    content_parts = []
+    calls = {}          # index -> {'id','type','function':{'name','arguments'}}
+    order = []
+    error_frame = None
+
+    for chunk in chunk_iter:
+        if chunk is None:
+            continue
+        if isinstance(chunk, str):
+            if chunk.startswith(ERROR_SENTINEL):
+                error_frame = chunk
+            else:
+                content_parts.append(chunk)
+            continue
+        choices = getattr(chunk, 'choices', None)
+        if not choices:
+            continue
+        delta = getattr(choices[0], 'delta', None)
+        if delta is None:
+            continue
+        dc = getattr(delta, 'content', None)
+        if dc:
+            content_parts.append(dc)
+        for tcd in (getattr(delta, 'tool_calls', None) or []):
+            try:
+                idx = tcd.index
+            except (AttributeError, TypeError):
+                idx = 0
+            slot = calls.setdefault(
+                idx, {'id': '', 'type': 'function',
+                      'function': {'name': '', 'arguments': ''}})
+            fn = getattr(tcd, 'function', None)
+            if fn is not None:
+                if fn.name:
+                    slot['function']['name'] += fn.name
+                if fn.arguments:
+                    slot['function']['arguments'] += fn.arguments
+            if tcd.id:
+                slot['id'] = tcd.id
+            if idx not in order:
+                order.append(idx)
+
+    if error_frame:
+        return error_frame
+
+    tool_calls = []
+    for idx in order:
+        slot = calls[idx]
+        args = slot['function']['arguments'] or ''
+        if args.strip():
+            try:
+                json.loads(args)
+            except (ValueError, TypeError):
+                logger.warning(
+                    '[aggregate_stream_message] tool_call #%s arguments '
+                    '非完整 JSON，跳过该工具批（name=%s）',
+                    idx, slot['function']['name'])
+                continue
+        tool_calls.append({
+            'id': slot['id'],
+            'type': slot.get('type', 'function'),
+            'function': {'name': slot['function']['name'], 'arguments': args},
+        })
+
+    content = ''.join(content_parts)
+    if not content and not tool_calls:
+        return None
+    msg = {'role': 'assistant', 'content': content}
+    if tool_calls:
+        msg['tool_calls'] = tool_calls
+    return msg
+
 
 class UnifiedLLM:
     """统一 LLM 入口。
@@ -439,7 +567,6 @@ class UnifiedLLM:
             'gemini': 'https://generativelanguage.googleapis.com/v1beta/openai/',
             'grok': 'https://api.x.ai/v1',
             'anthropic': 'https://api.anthropic.com/v1/',
-            'hunyuan': 'https://api.hunyuan.cloud.tencent.com/v1',
         }
         return defaults.get(provider, '')
 
@@ -463,7 +590,6 @@ class UnifiedLLM:
             'gemini': 'GEMINI_API_KEY',
             'grok': 'XAI_API_KEY',
             'anthropic': 'ANTHROPIC_API_KEY',
-            'hunyuan': 'HUNYUAN_API_KEY',
         }
         key_name = env_map.get(provider, '')
         if key_name:
@@ -480,10 +606,32 @@ class UnifiedLLM:
             'gemini': 'gemini_api_key',
             'grok': 'grok_api_key',
             'anthropic': 'anthropic_api_key',
-            'hunyuan': 'hunyuan_api_key',
         }
         config_key = key_map.get(provider, f'{provider}_api_key')
         return _get_system_key(config_key)
+
+    def _agent_bound_key_ids(self, provider_slug):
+        """该 Agent 在此供应商下绑定的 Key id 集合（AI Hub 角色矩阵）。
+        无绑定/查询失败返回 None → 调用方回退全池（向后兼容）。"""
+        agent_id = getattr(self, '_agent_id', None)
+        if not agent_id:
+            return None
+        try:
+            with self._get_conn() as conn:
+                rows = conn.execute(
+                    "SELECT b.api_key_id AS kid "
+                    "FROM agent_key_bindings b "
+                    "JOIN provider_models pm ON pm.id = b.provider_model_id "
+                    "JOIN providers p ON p.id = pm.provider_id "
+                    "WHERE b.agent_id = %s AND p.slug = %s",
+                    (agent_id, provider_slug)
+                ).fetchall()
+            ids = [(r['kid'] if isinstance(r, dict) else r[0]) for r in rows]
+            ids = [i for i in ids if i is not None]
+            return set(ids) if ids else None
+        except Exception as e:
+            logger.debug(f"[UnifiedLLM] agent binding lookup skipped: {e}")
+            return None
 
     def _resolve_api_key_pair(self, provider_slug, api_key_id=None):
         """返回 (picked_key_id, key)。优先显式 api_key_id（dedicated），否则走 Key 连接池，最后回退 env/system_config。"""
@@ -500,7 +648,9 @@ class UnifiedLLM:
             except Exception as e:
                 logger.warning(f"[UnifiedLLM] api_key_id={api_key_id} lookup failed: {e}")
         # 降级路径：按 provider slug 从 Key 连接池轮转取（BUG-001 修复）
-        picked_id, key = _key_pool.pick(provider_slug)
+        # AI Hub 角色绑定时，仅在「该 Agent 为此供应商配置的 Key」内调度；无绑定则全池。
+        picked_id, key = _key_pool.pick(
+            provider_slug, allowed_key_ids=self._agent_bound_key_ids(provider_slug))
         if key:
             return picked_id, key
         return None, self._fallback_key(provider_slug)
@@ -515,7 +665,7 @@ class UnifiedLLM:
             with self._get_conn() as conn:
                 pm = conn.execute(
                     """SELECT pm.model_name, pm.endpoint_url, pm.api_key_id,
-                              p.slug as provider_slug
+                              p.slug as provider_slug, p.endpoint_url as provider_endpoint_url
                        FROM provider_models pm
                        JOIN providers p ON p.id = pm.provider_id
                        WHERE pm.id = %s AND pm.is_active = 1 AND p.is_active = 1""",
@@ -524,7 +674,9 @@ class UnifiedLLM:
             if pm is None:
                 raise ValueError(f'Model not found or inactive: id={provider_model_id}')
             pm = dict(pm)
-            base_url = self._normalize_base_url(pm['endpoint_url'], pm['provider_slug'])
+            # 端点归属：模型行端点优先（图片/TTS 等异构），为空则回退供应商级端点
+            base_url = self._normalize_base_url(
+                pm['endpoint_url'] or pm.get('provider_endpoint_url'), pm['provider_slug'])
             picked_id, api_key = self._resolve_api_key_pair(pm['provider_slug'], pm.get('api_key_id'))
             return {
                 'provider': pm['provider_slug'],
@@ -541,7 +693,7 @@ class UnifiedLLM:
             with self._get_conn() as conn:
                 pm = conn.execute(
                     """SELECT pm.id, pm.model_name, pm.endpoint_url, pm.api_key_id,
-                              p.slug as provider_slug
+                              p.slug as provider_slug, p.endpoint_url as provider_endpoint_url
                        FROM provider_models pm
                        JOIN providers p ON p.id = pm.provider_id AND p.slug = %s
                        WHERE pm.model_name = %s AND pm.is_active = 1 AND p.is_active = 1
@@ -550,7 +702,8 @@ class UnifiedLLM:
                 ).fetchone()
             if pm:
                 pm = dict(pm)
-                base_url = self._normalize_base_url(pm['endpoint_url'], provider)
+                base_url = self._normalize_base_url(
+                    pm['endpoint_url'] or pm.get('provider_endpoint_url'), provider)
                 picked_id, api_key = self._resolve_api_key_pair(provider, pm.get('api_key_id'))
                 return {
                     'provider': pm['provider_slug'],
@@ -719,7 +872,7 @@ class UnifiedLLM:
             return True, ''  # fail-open
 
     def chat(self, messages, provider_model_id=None, provider=None, model=None,
-             temperature=0.7, max_tokens=4096, module='unknown',
+             temperature=0.7, max_tokens=8192, module='unknown',
              raw_response=False, **kwargs):
         """统一 chat 接口
         实例模式：自动使用 self 配置
@@ -751,7 +904,9 @@ class UnifiedLLM:
             _cache_usr = next((m['content'] for m in reversed(messages) if m['role'] == 'user'), '')
             _cache_hist = [m for m in messages if m['role'] not in ('system',)]
             _cache_hist = _cache_hist[:-1] if _cache_hist else []
-            _cached = get_llm_cache().get_response(cfg['model'], _cache_sys, _cache_usr, _cache_hist)
+            _cached = get_llm_cache().get_response(
+                cfg['model'], _cache_sys, _cache_usr, _cache_hist,
+                provider=cfg.get('provider', ''))
             if _cached is not None:
                 return _cached
 
@@ -794,8 +949,10 @@ class UnifiedLLM:
 
         result = resp.choices[0].message.content
 
-        # SB-BUG-5 诊断：content 为空时记录 finish_reason / usage / reasoning 字段，
-        # 便于区分「推理 token 耗尽 max_tokens」与「真空回复」（仅日志，不改返回值）
+        # SB-BUG-5 v2（2026-10-16 D3-L4 修复）：
+        #   推理模型复杂任务（verifier / 长讨论）常因 max_tokens 耗尽导致
+        #   finish_reason='length' 且 content 空 → fail-open warn → 不触发 revision。
+        #   升级：检测到此条件时自动翻倍 max_tokens 重跑一次（仅一次，防无限循环）。
         if not result:
             try:
                 _choice = resp.choices[0]
@@ -805,11 +962,49 @@ class UnifiedLLM:
                 if _msg is not None:
                     _reasoning = str(getattr(_msg, 'reasoning_content', None) or '')[:120]
                 logger.warning(
-                    '[UnifiedLLM] empty content returned module=%s model=%s finish_reason=%s '
+                    '[UnifiedLLM] empty content module=%s model=%s finish_reason=%s '
                     'usage=%s reasoning_head=%r',
                     module, used_cfg['model'], _finish,
                     (usage.prompt_tokens if usage else None, usage.completion_tokens if usage else None),
                     _reasoning)
+
+                # 自动重试：仅当 finish_reason=length（token 耗尽）时翻倍 max_tokens
+                if _finish == 'length' and max_tokens < 32768:
+                    _retry_tokens = min(max_tokens * 2, 32768)
+                    logger.warning(
+                        '[UnifiedLLM] SB-BUG-5 RETRY module=%s max_tokens %d → %d (finish_reason=length)',
+                        module, max_tokens, _retry_tokens)
+                    try:
+                        def _retry_call_once(cfg_, is_fallback=False):
+                            _msgs = _fallback_msgs if (is_fallback and _fallback_msgs) else messages
+                            def _retry_do(c):
+                                client_ = self._get_client(c['base_url'], c['api_key'])
+                                return client_.chat.completions.create(
+                                    model=c['model'],
+                                    messages=_msgs,
+                                    temperature=temperature,
+                                    max_tokens=_retry_tokens,
+                                    **kwargs)
+                            return self._call_with_key_retry(cfg_, _retry_do)
+                        _retry_resp, _retry_cfg = _failover_engine.call_with_failover(
+                            cfg, self._build_fallback_cfgs(cfg), _retry_call_once,
+                            request_id='chat_sb_bug_5_retry')
+                        result = _retry_resp.choices[0].message.content
+                        if _retry_resp.usage:
+                            self._log_usage(
+                                _retry_cfg['model_id'], _retry_cfg['model'], _retry_cfg['provider'],
+                                _retry_resp.usage.prompt_tokens or 0,
+                                _retry_resp.usage.completion_tokens or 0,
+                                _retry_resp.usage.total_tokens or 0,
+                                'chat_sb_bug_5_retry', module,
+                                elapsed_ms=int(_time.time() - start_time) * 1000)
+                        logger.info(
+                            '[UnifiedLLM] SB-BUG-5 RETRY OK module=%s content_len=%d',
+                            module, len(result or ''))
+                    except Exception as _retry_err:
+                        logger.warning(
+                            '[UnifiedLLM] SB-BUG-5 RETRY FAILED module=%s err=%s',
+                            module, _retry_err)
             except Exception as _e:  # 诊断失败绝不影响主流程
                 logger.warning('[UnifiedLLM] empty content (diagnostic unavailable): %s', _e)
 
@@ -817,7 +1012,11 @@ class UnifiedLLM:
         if temperature == 0 and not raw_response:
             get_llm_cache().set_response(
                 used_cfg['model'], _cache_sys, _cache_usr, result,
+                # G5: history must be passed here too -- get_response() includes
+                # it in the key, so omitting it made every entry unreachable.
+                history=_cache_hist,
                 tokens_used=usage.total_tokens if usage else 0,
+                provider=used_cfg.get('provider', ''),
             )
 
         if raw_response:
@@ -1079,9 +1278,13 @@ class UnifiedLLM:
         messages.append({"role": "user", "content": user_query})
         # WP-A（6.3）：统一 token 预算层；预算为 0 或任意异常时原样返回（fail-open）
         from agent_matrix.context_manager import _fit
-        return self.chat(_fit(messages), temperature=temperature, module='ask_history')
+        # 传模型信息让预算按真实窗口收口；缺省 None 会退回 DEFAULT_MODEL_WINDOW，
+        # 与 agent_runner 路径的窗口感知结果不一致（挂长窗口模型时会被过度压缩）。
+        return self.chat(_fit(messages, model={'provider': self._provider,
+                                               'model': self._model}),
+                         temperature=temperature, module='ask_history')
 
-    def chat_with_tools(self, messages, tools, temperature=0.7, max_tokens=4096):
+    def chat_with_tools(self, messages, tools, temperature=0.7, max_tokens=8192):
         return self.chat(messages, temperature=temperature, max_tokens=max_tokens,
                          module='tool_call', raw_response=True, tools=tools,
                          tool_choice="auto")
@@ -1107,7 +1310,10 @@ class UnifiedLLM:
         messages.append({"role": "user", "content": user_query})
         # WP-A（6.3）：与 ask_with_history 同构。本函数当前全仓无调用者，属防御性覆盖
         from agent_matrix.context_manager import _fit
-        yield from self.chat_stream(_fit(messages), temperature=temperature, module='ask_history')
+        yield from self.chat_stream(
+            _fit(messages, model={'provider': self._provider,
+                                  'model': self._model}),
+            temperature=temperature, module='ask_history')
 
     def is_ready(self):
         """P2-F17: 检查 AI 引擎是否就绪（provider 存在且能解析出 API key）。
@@ -1135,7 +1341,7 @@ class UnifiedLLM:
             API 调用使用 model_name（缓存于 self._embed_model_name）。
         """
         # 动态切换 embedding 供应商：system_config.embedding_provider 指定 provider slug
-        # （如 'hunyuan'）。为空时回退到 ORDER BY sort_order 默认第一条，行为与升级前一致。
+        # （如 'tokenhub'）。为空时回退到 ORDER BY sort_order 默认第一条，行为与升级前一致。
         pref_provider = None
         try:
             from agent_matrix.models import get_db as _embed_get_db
@@ -1150,7 +1356,7 @@ class UnifiedLLM:
         try:
             with self._get_conn() as conn:
                 sql = ("""SELECT pm.id AS model_id, pm.model_name, pm.endpoint_url,
-                              pm.api_key_id, p.slug AS provider_slug,
+                              pm.api_key_id, p.slug AS provider_slug, p.endpoint_url AS provider_endpoint_url,
                               COALESCE(pm.embedding_dim, 1536) AS dim
                        FROM provider_models pm
                        JOIN providers p ON p.id = pm.provider_id
@@ -1169,7 +1375,8 @@ class UnifiedLLM:
                 logger.warning('[Embedding] no active embedding model configured')
                 return (None, None, None, None)
             row = dict(row)
-            base_url = row['endpoint_url'] or self._default_base_url(row['provider_slug'])
+            base_url = (row['endpoint_url'] or row.get('provider_endpoint_url')
+                        or self._default_base_url(row['provider_slug']))
             if not base_url:
                 logger.warning('[Embedding] no base_url for provider %s', row['provider_slug'])
                 return (None, None, None, None)

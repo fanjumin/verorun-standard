@@ -1,0 +1,50 @@
+# VeroRun 全网智能客服桌面版发行配置（单一事实源：插件白名单 + 角色集 + 核心文件）
+# 桌面壳接线方案 §3.1：edition key = omni（桌面壳），主仓 edition 文件 = omni-desktop.yaml。
+# 服务器部署版名为 omni-service（用户 2026-10-21 裁决：omni 仅作桌面壳打包 edition key，
+# 不扩散到内核 edition / 插件 compatible_editions；内核侧一律保持官方默认）。
+# 由 stage-verorun-core.mjs 消费（打包 + 烧录形态标记）；verify-edition-plugins.mjs 校验产物一致性。
+edition: omni-desktop
+label: 全网智能客服桌面版
+# 服务启用与禁用（edition 门控，deploy/editions/*.yaml 单一事实源）
+# 轻壳语义：桌面壳不托管本地用户向 Web 服务 → services 全关 → stage 烧录
+# .verorun-desktop-edition=ops（thin 轻壳形态），壳层只负责远程接线，不 spawn 本地内核。
+services:
+  user_login: false
+  user_console: false
+  main_site: false
+plugins:
+  # 白名单语义（用户 2026-10-21 裁决）：白名单多少就是多少，白名单外的插件在本版
+  # **不存在**（不是隐藏）。include 兼任运行期白名单（runtime_whitelist: true），
+  # 插件中心 / discover / enable / unified 四处门控同源，只放行以下 11 项（含 _base）。
+  runtime_whitelist: true
+  include:
+    - _base
+    - omni_service
+    - im_gateway
+    - chatbot
+    - visitor_profile
+    - memory_engine
+    - vault
+    - sms
+    - email
+    - project_workspace
+    - site_domains
+  # 本版明确不提供（白名单之外，完全不存在）：
+  #   veroscholar        科研检索（白名单外）
+  #   stock_analysis     股票分析（白名单外）
+  #   cogevolution_substrate 认知进化（白名单外）
+  exclude:
+    - veroscholar
+    - stock_analysis
+    - cogevolution_substrate
+roles:
+  # 客服版角色编排（agent_matrix/roles/）：athena(编排 Master) + ops(系统运维，桌面必需)
+  # + service(客服服务：chatbot/omni 通道与坐席)。
+  - athena
+  - ops
+  - service
+core_files:
+  - agent_matrix/models.py
+  - agent_matrix/routes.py
+  - auth-center/models/database.py
+  - auth-center/services/kb_permission.py

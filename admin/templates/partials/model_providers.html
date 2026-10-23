@@ -1,90 +1,241 @@
 var _mpTargetId=null;
+var MP_DATA=null;
+var MP_STATE={qRaw:'',q:'',caps:'',onlyActive:true,open:{}};
+var MPCAPS={text:'{{ _('Text') }}',image:'{{ _('Image') }}',video:'{{ _('Video') }}',
+  audio:'{{ _('Audio') }}',tts:'{{ _('Speech Synthesis') }}',stt:'{{ _('Speech Recognition') }}',
+  embedding:'{{ _('Embedding') }}',rerank:'{{ _('Rerank') }}',moderation:'{{ _('Moderation') }}',
+  realtime:'{{ _('Realtime') }}','3d':'{{ _('3D') }}'};
+var MPCAPS_ORDER=['text','image','video','audio','tts','stt','embedding','rerank','moderation','realtime','3d'];
+
+function mpCapsLabel(c){return MPCAPS[c]||c;}
+function mpIsOpen(pid,caps){
+  if(MP_STATE.caps) return true;
+  var k=pid+'|'+caps;
+  return MP_STATE.open[k]===undefined ? (caps==='text') : MP_STATE.open[k];
+}
+function mpSetQuery(v,caret){MP_STATE.qRaw=v||'';MP_STATE.q=MP_STATE.qRaw.toLowerCase();mpRender(caret);}
+function mpSetCaps(v){MP_STATE.caps=v||'';mpRender();}
+function mpSetOnlyActive(v){MP_STATE.onlyActive=!!v;mpRender();}
+function mpToggleGroup(pid,caps){var k=pid+'|'+caps;MP_STATE.open[k]=!mpIsOpen(pid,caps);mpRender();}
+
 window.l_model_providers=function(targetId){
   if(!targetId) document.getElementById("pt").textContent="{{ _('Model Management') }}";
   _mpTargetId=targetId||"mc";
+  MP_STATE={qRaw:'',q:'',caps:'',onlyActive:true,open:{}};
+  MP_DATA=null;
   mpRefresh();
 };
+
+function mpKindLabel(kind){
+  return kind==='aggregator' ? '{{ _('Aggregator') }}' : '{{ _('Vendor') }}';
+}
 
 function mpRefresh(){
   fetch("/admin/providers",{headers:{"Authorization":"Bearer "+T}})
   .then(function(r){return r.json()})
   .then(function(d){
     if(!d.success){document.getElementById(_mpTargetId).innerHTML='<div class="em">{{ _('Load failed') }}</div>';return}
-    var h='<div class="cd" style="margin-bottom:12px">';
-    h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><h3 style="margin:0;font-size:16px;color:var(--accent)">{{ _('Model Management') }}</h3><span style="flex:1"></span></div>';
-    h+='<div id="mpAddForm" style="display:none"></div>';
-    if(!d.data||!d.data.length){
-      h+='<div class="em">{{ _('No Models Settings') }}</div>';
-    }else{
-      var caps={'text':'{{ _('Text') }}','image':'{{ _('Image') }}','voice':'{{ _('Voice') }}','video':'{{ _('Video') }}','tts':'{{ _('TTS') }}'};
-      d.data.forEach(function(p){
-        h+='<div style="margin-bottom:16px;border:1px solid var(--border);border-radius:8px;overflow:hidden">';
-        h+='<div style="background:var(--bg2);padding:8px 12px;display:flex;justify-content:space-between;align-items:center">';
-        h+='<div><b>'+esc(p.name)+'</b> <span style="font-size:10px;color:var(--dim)">('+esc(p.slug)+')</span>'+(p.description?' — '+esc(p.description):'')+'</div>';
-        h+='<button class="btn bp bs" onclick="mpShowAddModel('+p.id+',\''+escJs(p.name)+'\')">+ {{ _('Add Model') }}</button>';
-        h+='</div>';
-        if(!p.models||!p.models.length){
-          h+='<div class="em" style="margin:8px">{{ _('No Models') }}</div>';
-        }else{
-          h+='<table style="margin:0"><tr><th>{{ _('Name') }}</th><th>{{ _('Model Name') }}</th><th>{{ _('Endpoint') }}</th><th>{{ _('Ability') }}</th><th>{{ _('Status') }}</th><th>{{ _('Actions') }}</th></tr>';
-          p.models.forEach(function(m){
-            h+='<tr>';
-            h+='<td>'+esc(m.name)+'</td>';
-            h+='<td><code style="font-size:10px;color:var(--accent)">'+esc(m.model_name)+'</code></td>';
-            h+='<td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;color:var(--dim)">'+esc(m.endpoint_url||'—')+'</td>';
-            h+='<td>'+esc(caps[m.capabilities]||m.capabilities)+'</td>';
-            h+='<td>'+(m.is_active?'<span class="bdg on">{{ _('Enabled') }}</span>':'<span class="bdg off">{{ _('Disable') }}</span>')+'</td>';
-            h+='<td><button class="btn bo bs" onclick="mpShowEditModel('+m.id+')">{{ _('Edit') }}</button> ';
-            h+='<button class="btn bo bs" style="color:#f85149" onclick="mpDeleteModel('+m.id+',\''+escJs(m.name)+'\')">{{ _('Delete') }}</button></td>';
-            h+='</tr>';
-          });
-          h+='</table>';
-        }
-        h+='</div>';
-      });
-    }
-    h+='</div>';
-    if(_mpTargetId!=='mc') h = '<div class="ai-hub-subtitle">{{ _('AI Hub') }} <span style="color:var(--dim)">&rsaquo;</span> {{ _('Model Management') }}</div>' + h;
-    document.getElementById(_mpTargetId).innerHTML=h;
+    MP_DATA=d.data||[];
+    mpRender();
   }).catch(function(e){
     document.getElementById(_mpTargetId).innerHTML='<div class="em">{{ _('Request Failed') }} — {{ _('Check Network or') }}<a href="javascript:go(\'model_providers\')">{{ _('Refresh & Retry') }}</a><br><span style="font-size:10px;color:var(--dim)">'+esc(String(e))+'</span></div>';
   });
 }
 
-function mpRenderKeySelect(selectedId, providerSlug) {
-    return fetch("/admin/provider-api-keys", {headers: {"Authorization": "Bearer "+T}})
-        .then(function(r) { return r.json() })
-        .then(function(d) {
-            var keys = (d.data || []).filter(function(k) {
-                return !providerSlug || k.provider === providerSlug;
-            });
-            var h = '<div style="font-size:11px;color:var(--dim)">{{ _('API Key') }} {{ _('Select') }}</div>';
-            h += '<select class="sl" id="mpApiKeyId" style="width:100%">';
-            h += '<option value="">{{ _('None') }}</option>';
-            keys.forEach(function(k) {
-                var sel = (selectedId && k.id == selectedId) ? ' selected' : '';
-                h += '<option value="'+k.id+'"'+sel+'>'+esc(k.name)+' ('+esc(k.provider)+')'+(k.has_value ? '' : ' - {{ _('No Key') }}')+'</option>';
-            });
-            h += '</select>';
-            return h;
+function mpRender(caret){
+  var d=MP_DATA||[];
+  var h='<div class="cd" style="margin-bottom:12px">';
+  h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><h3 style="margin:0;font-size:16px;color:var(--accent)">{{ _('Model Management') }}</h3><span style="flex:1"></span>';
+  h+='<button class="btn bp bs" onclick="mpShowProviderForm()">+ {{ _('New Provider') }}</button></div>';
+  h+='<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">';
+  h+='<input class="in" id="mpSearch" placeholder="{{ _('Search models') }}" value="'+escAttr(MP_STATE.qRaw)+'" style="flex:1;min-width:180px" oninput="mpSetQuery(this.value,this.selectionStart)">';
+  h+='<select class="sl" id="mpCapsFilter" style="min-width:150px" onchange="mpSetCaps(this.value)">';
+  h+='<option value="">{{ _('All Types') }}</option>';
+  MPCAPS_ORDER.forEach(function(c){h+='<option value="'+c+'"'+(MP_STATE.caps===c?' selected':'')+'>'+esc(mpCapsLabel(c))+'</option>';});
+  h+='</select>';
+  h+='<label style="font-size:11px;white-space:nowrap;display:flex;align-items:center;gap:4px"><input type="checkbox" id="mpOnlyActive"'+(MP_STATE.onlyActive?' checked':'')+' onchange="mpSetOnlyActive(this.checked)"> {{ _('Enabled only') }}</label>';
+  h+='</div>';
+  h+='<div id="mpAddForm" style="display:none"></div>';
+  if(!d.length){
+    h+='<div class="em">{{ _('No Models Settings') }}</div>';
+  }else{
+    d.forEach(function(p){
+      h+='<div style="margin-bottom:16px;border:1px solid var(--border);border-radius:8px;overflow:hidden">';
+      h+='<div style="background:var(--bg2);padding:8px 12px;display:flex;justify-content:space-between;align-items:center;gap:8px">';
+      h+='<div><b>'+esc(p.name)+'</b> <span style="font-size:10px;color:var(--dim)">('+esc(p.slug)+')</span> ';
+      h+='<span class="bdg '+(p.kind==='aggregator'?'on':'off')+'" style="font-size:9px">'+mpKindLabel(p.kind)+'</span>';
+      h+=' <span class="bdg '+(p.is_active?'on':'off')+'" style="font-size:9px">'+(p.is_active?"{{ _('Enabled') }}":"{{ _('Disable') }}")+'</span>';
+      if(p.description) h+=' — '+esc(p.description);
+      h+='<div style="font-size:10px;color:var(--dim);margin-top:2px">{{ _('API Endpoint') }}: '+esc(p.endpoint_url||'—')+'</div>';
+      h+='</div>';
+      h+='<div style="display:flex;gap:6px;flex-shrink:0">';
+      h+='<button class="btn bo bs" onclick="mpShowProviderForm('+p.id+')">{{ _('Edit') }}</button>';
+      h+='<button class="btn bo bs" style="color:#f85149" onclick="mpDeleteProvider('+p.id+',\''+escJs(p.name)+'\')">{{ _('Delete') }}</button>';
+      h+='<button class="btn bp bs" onclick="mpShowAddModel('+p.id+',\''+escJs(p.name)+'\')">+ {{ _('Add Model') }}</button>';
+      h+='</div>';
+      h+='</div>';
+      var all=(p.models||[]);
+      if(!all.length){
+        h+='<div class="em" style="margin:8px">{{ _('No Models') }}</div>';
+      }else{
+        var shown=all.filter(function(m){
+          if(MP_STATE.onlyActive && !m.is_active) return false;
+          if(MP_STATE.caps && (m.capabilities||'text')!==MP_STATE.caps) return false;
+          if(MP_STATE.q && String(m.model_name).toLowerCase().indexOf(MP_STATE.q)<0) return false;
+          return true;
         });
+        h+='<div style="font-size:10px;color:var(--dim);padding:6px 12px 0">'+shown.length+' / '+all.length+'</div>';
+        if(!shown.length){
+          h+='<div class="em" style="margin:8px">{{ _('No matching models') }}</div>';
+        }else{
+          var groups={};
+          shown.forEach(function(m){var c=m.capabilities||'text';(groups[c]=groups[c]||[]).push(m);});
+          var order=MPCAPS_ORDER.slice();
+          Object.keys(groups).forEach(function(c){if(order.indexOf(c)<0)order.push(c);});
+          h+='<table style="margin:0"><tr><th>{{ _('Model ID') }}</th><th>{{ _('Capability') }}</th><th>{{ _('Status') }}</th><th>{{ _('Actions') }}</th></tr>';
+          order.forEach(function(caps){
+            if(!groups[caps])return;
+            var arr=groups[caps];
+            var open=mpIsOpen(p.id,caps);
+            h+='<tr><td colspan="4" style="background:var(--bg2);cursor:pointer;padding:6px 12px" onclick="mpToggleGroup('+p.id+',\''+escJs(caps)+'\')">'
+              +'<span style="font-size:10px;color:var(--dim)">'+(open?'&#9660;':'&#9654;')+'</span> '
+              +'<span class="bdg '+(caps==='text'?'on':'off')+'" style="font-size:9px">'+esc(mpCapsLabel(caps))+'</span> '
+              +'<span style="font-size:10px;color:var(--dim)">'+arr.length+'</span></td></tr>';
+            if(!open)return;
+            arr.forEach(function(m){
+              h+='<tr>';
+              h+='<td><code style="font-size:11px;color:var(--accent)">'+esc(m.model_name)+'</code></td>';
+              h+='<td><span class="bdg '+(caps==='text'?'on':'off')+'" style="font-size:9px">'+esc(mpCapsLabel(caps))+'</span></td>';
+              h+='<td>'+(m.is_active?'<span class="bdg on">{{ _('Enabled') }}</span>':'<span class="bdg off">{{ _('Disable') }}</span>')+'</td>';
+              h+='<td><button class="btn bo bs" onclick="mpShowEditModel('+m.id+')">{{ _('Edit') }}</button> ';
+              h+='<button class="btn bo bs" style="color:#f85149" onclick="mpDeleteModel('+m.id+',\''+escJs(m.model_name)+'\')">{{ _('Delete') }}</button></td>';
+              h+='</tr>';
+            });
+          });
+          h+='</table>';
+        }
+      }
+      h+='</div>';
+    });
+  }
+  h+='</div>';
+  if(_mpTargetId!=='mc') h = '<div class="ai-hub-subtitle">{{ _('AI Hub') }} <span style="color:var(--dim)">&rsaquo;</span> {{ _('Model Management') }}</div>' + h;
+  var root=document.getElementById(_mpTargetId); if(!root)return;
+  root.innerHTML=h;
+  if(caret!==undefined){var el=document.getElementById('mpSearch'); if(el){el.focus(); try{el.setSelectionRange(caret,caret)}catch(e){}}}
 }
 
-function mpShowAddModel(providerId, providerName){
+// ── 供应商维护：基础信息 + 调用端点地址 + 类型（自研/聚合）──
+function mpProviderFormHtml(p){
+  var isEdit=!!p;
+  p=p||{};
+  var h='<div class="cd" style="margin-bottom:12px">';
+  h+='<div class="st">'+(isEdit?'{{ _('Edit Provider') }}':'{{ _('New Provider') }}')+'</div>';
+  h+='<input type="hidden" id="mpProvEditId" value="'+(isEdit?p.id:'')+'">';
+  h+='<div class="g2">';
+  h+='<div><div style="font-size:11px;color:var(--dim)">{{ _('Name') }} *</div><input class="in" id="mpProvName" value="'+escAttr(p.name||'')+'" style="width:100%"></div>';
+  h+='<div><div style="font-size:11px;color:var(--dim)">{{ _('Slug') }} *</div><input class="in" id="mpProvSlug" value="'+escAttr(p.slug||'')+'" '+(isEdit?'disabled':'')+' style="width:100%"></div>';
+  h+='<div><div style="font-size:11px;color:var(--dim)">{{ _('Provider Type') }}</div><select class="sl" id="mpProvKind" style="width:100%">';
+  h+='<option value="vendor"'+(p.kind!=='aggregator'?' selected':'')+'>{{ _('Vendor') }}</option>';
+  h+='<option value="aggregator"'+(p.kind==='aggregator'?' selected':'')+'>{{ _('Aggregator') }}</option>';
+  h+='</select></div>';
+  h+='</div>';
+  h+='<div style="margin-top:8px"><div style="font-size:11px;color:var(--dim)">{{ _('Description') }}</div><input class="in" id="mpProvDesc" value="'+escAttr(p.description||'')+'" style="width:100%"></div>';
+  h+='<div style="margin-top:8px"><label style="font-size:11px"><input type="checkbox" id="mpProvActive"'+(isEdit?(p.is_active?' checked':''):' checked')+'> {{ _('Enabled') }}</label></div>';
+  h+='<div style="margin-top:8px"><div style="font-size:11px;color:var(--dim)">{{ _('API Endpoint') }}</div><input class="in" id="mpProvEndpoint" value="'+escAttr(p.endpoint_url||'')+'" placeholder="https://api.example.com/v1" style="width:100%"></div>';
+  h+='<div style="margin-top:10px"><button class="btn bp" onclick="mpSaveProvider()">{{ _('Save') }}</button> <button class="btn bo" onclick="document.getElementById(\'mpAddForm\').style.display=\'none\'">{{ _('Cancel') }}</button></div>';
+  h+='</div>';
+  return h;
+}
+
+function mpShowProviderForm(id){
   var f=document.getElementById("mpAddForm");
   f.style.display="block";
-  f.innerHTML='<div class="cd" style="margin-bottom:12px">'+
-    '<div class="st">{{ _('Add Model') }} — '+esc(providerName)+'</div>'+
-    '<input type="hidden" id="mpEditId" value="">'+
-    '<input type="hidden" id="mpProvId" value="'+providerId+'">'+
-    '<div class="g2">'+
-    '<div><div style="font-size:11px;color:var(--dim)">{{ _('Display Name') }} *</div><input class="in" id="mpName" placeholder="{{ _('e.g.') }}: {{ _('Voice Cloning') }} v2" style="width:100%"></div>'+
-    '<div><div style="font-size:11px;color:var(--dim)">{{ _('Model Name') }}</div><input class="in" id="mpModelName" placeholder="{{ _('e.g.') }}: volc-voice-clone-v2" style="width:100%"></div>'+
-    '<div><div style="font-size:11px;color:var(--dim)">{{ _('Ability Type') }}</div><select class="sl" id="mpCaps" style="width:100%"><option value="text">{{ _('Text') }}</option><option value="image">{{ _('Image') }}</option><option value="voice">{{ _('Voice') }}</option><option value="tts">{{ _('TTS') }}</option><option value="video">{{ _('Video') }}</option></select></div>'+
-    '</div>'+
-    '<div style="margin-top:8px"><div style="font-size:11px;color:var(--dim)">{{ _('API Endpoint') }}</div><input class="in" id="mpUrl" placeholder="https://api.siliconflow.cn/v1" style="width:100%"></div>'+
-    '<div style="margin-top:10px"><button class="btn bp" onclick="mpCreateModel()">{{ _('Save') }}</button> <button class="btn bo" onclick="document.getElementById(\'mpAddForm\').style.display=\'none\'">{{ _('Cancel') }}</button></div>'+
+  if(!id){ f.innerHTML=mpProviderFormHtml(null); return; }
+  fetch("/admin/providers",{headers:{"Authorization":"Bearer "+T}})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    var p=null;
+    if(d.data) d.data.forEach(function(x){if(x.id==id)p=x});
+    if(!p){showToast("{{ _('Does not exist') }}","error");return}
+    f.innerHTML=mpProviderFormHtml(p);
+  }).catch(function(){showToast("{{ _('Request Failed') }}","error")});
+}
+
+function mpSaveProvider(){
+  var id=document.getElementById("mpProvEditId").value;
+  var name=document.getElementById("mpProvName").value.trim();
+  if(!name){showToast("{{ _('Name is required') }}","error");return}
+  var data={
+    name:name,
+    slug:document.getElementById("mpProvSlug").value.trim().toLowerCase(),
+    description:document.getElementById("mpProvDesc").value.trim(),
+    endpoint_url:document.getElementById("mpProvEndpoint").value.trim(),
+    kind:document.getElementById("mpProvKind").value,
+    is_active:document.getElementById("mpProvActive")&&document.getElementById("mpProvActive").checked?1:0
+  };
+  var url="/admin/providers"+(id?("/"+id):"");
+  var method=id?"PUT":"POST";
+  fetch(url,{method:method,headers:{"Authorization":"Bearer "+T,"Content-Type":"application/json"},body:JSON.stringify(data)})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    if(d.success){showToast(id?"{{ _('Updated') }}":"{{ _('Added') }}");mpRefresh()}
+    else showToast((id?"{{ _('Update Failed') }}":"{{ _('Add Failed') }}")+": "+(d.error||""),"error");
+  }).catch(function(){showToast("{{ _('Request Failed') }}","error")});
+}
+
+function mpDeleteProvider(id,name){
+  var old=document.getElementById('modal-root');
+  if(old)old.remove();
+  var overlay=document.createElement('div');
+  overlay.id='modal-root';
+  overlay.className='modal-overlay';
+  overlay.onclick=function(e){if(e.target===overlay)overlay.remove();};
+  var box=document.createElement('div');
+  box.className='modal-box';
+  box.style.cssText='max-width:400px;width:90%';
+  box.innerHTML=
+    '<h3 style="margin:0 0 12px;color:var(--rose)">{{ _('Confirm Deletion') }}</h3>'+
+    '<p style="margin:0 0 6px;font-size:14px;color:var(--ink)">{{ _('Are you sure you want to delete') }} <strong>'+esc(name)+'</strong>?</p>'+
+    '<p style="margin:0 0 20px;font-size:12px;color:var(--dim)">{{ _('Provider with models or API keys cannot be deleted.') }}</p>'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end">'+
+    '<button class="bo mp-cancel-btn" style="padding:6px 16px">{{ _('Cancel') }}</button>'+
+    '<button class="bp mp-del-btn" style="padding:6px 16px;background:var(--rose);border-color:var(--rose);color:#fff">{{ _('Delete') }}</button>'+
     '</div>';
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+  box.querySelector('.mp-cancel-btn').onclick=function(){overlay.remove();};
+  box.querySelector('.mp-del-btn').onclick=function(){
+    var btn=this;btn.disabled=true;btn.textContent='{{ _('Deleting...') }}';
+    fetch("/admin/providers/"+id,{method:"DELETE",headers:{"Authorization":"Bearer "+T}})
+    .then(function(r){return r.json()})
+    .then(function(d){
+      overlay.remove();
+      if(d.success){showToast("{{ _('Deleted') }}");mpRefresh()}
+      else{showToast("{{ _('Delete failed') }}: "+(d.error||""),"error")}
+    }).catch(function(e){overlay.remove();showToast("{{ _('Request Failed') }}","error")});
+  };
+}
+
+// ── 模型维护：选定供应商后，仅需对齐供应商侧 Model ID ──
+function mpModelFormHtml(m,providerId,providerName){
+  var isEdit=!!m;
+  m=m||{};
+  var h='<div class="cd" style="margin-bottom:12px">';
+  h+='<div class="st">'+(isEdit?'{{ _('Edit Model') }}':'{{ _('Add Model') }}')+' — '+esc(providerName||'')+'</div>';
+  h+='<input type="hidden" id="mpEditId" value="'+(isEdit?m.id:'')+'">';
+  h+='<input type="hidden" id="mpProvId" value="'+(isEdit?m.provider_id:providerId)+'">';
+  h+='<div><div style="font-size:11px;color:var(--dim)">{{ _('Model ID') }} *</div><input class="in" id="mpModelName" value="'+escAttr(m.model_name||'')+'" placeholder="{{ _('e.g.') }}: deepseek-chat" style="width:100%"></div>';
+  if(isEdit) h+='<div style="margin-top:8px"><label style="font-size:11px"><input type="checkbox" id="mpActive"'+(m.is_active?' checked':'')+'> {{ _('Enabled') }}</label></div>';
+  h+='<div style="margin-top:10px"><button class="btn bp" onclick="'+(isEdit?'mpUpdateModel()':'mpCreateModel()')+'">{{ _('Save') }}</button> <button class="btn bo" onclick="document.getElementById(\'mpAddForm\').style.display=\'none\'">{{ _('Cancel') }}</button></div>';
+  h+='</div>';
+  return h;
+}
+
+function mpShowAddModel(providerId,providerName){
+  var f=document.getElementById("mpAddForm");
+  f.style.display="block";
+  f.innerHTML=mpModelFormHtml(null,providerId,providerName);
 }
 
 function mpShowEditModel(id){
@@ -96,37 +247,16 @@ function mpShowEditModel(id){
     if(!m){showToast("{{ _('Model not found') }}","error");return}
     var f=document.getElementById("mpAddForm");
     f.style.display="block";
-    f.innerHTML='<div class="cd" style="margin-bottom:12px">'+
-      '<div class="st">{{ _('Edit Model') }}</div>'+
-      '<input type="hidden" id="mpEditId" value="'+m.id+'">'+
-      '<input type="hidden" id="mpProvId" value="'+m.provider_id+'">'+
-      '<div class="g2">'+
-      '<div><div style="font-size:11px;color:var(--dim)">{{ _('Display Name') }} *</div><input class="in" id="mpName" value="'+escAttr(m.name)+'" style="width:100%"></div>'+
-      '<div><div style="font-size:11px;color:var(--dim)">{{ _('Model Name') }}</div><input class="in" id="mpModelName" value="'+escAttr(m.model_name)+'" style="width:100%"></div>'+
-      '<div><div style="font-size:11px;color:var(--dim)">{{ _('Ability Type') }}</div><select class="sl" id="mpCaps" style="width:100%">'+
-      '<option value="text"'+(m.capabilities=='text'?' selected':'')+'>{{ _('Text') }}</option>'+
-      '<option value="image"'+(m.capabilities=='image'?' selected':'')+'>{{ _('Image') }}</option>'+
-      '<option value="voice"'+(m.capabilities=='voice'?' selected':'')+'>{{ _('Voice') }}</option>'+
-      '<option value="tts"'+(m.capabilities=='tts'?' selected':'')+'>{{ _('TTS') }}</option>'+
-      '<option value="video"'+(m.capabilities=='video'?' selected':'')+'>{{ _('Video') }}</option>'+
-    '</select></div>'+
-    '</div>'+
-    '<div style="margin-top:8px"><div style="font-size:11px;color:var(--dim)">{{ _('API Endpoint') }}</div><input class="in" id="mpUrl" value="'+escAttr(m.endpoint_url||'')+'" style="width:100%"></div>'+
-    '<div style="margin-top:8px"><label style="font-size:11px"><input type="checkbox" id="mpActive"'+(m.is_active?' checked':'')+'> {{ _('Enabled') }}</label></div>'+
-    '<div style="margin-top:10px"><button class="btn bp" onclick="mpUpdateModel()">{{ _('Save') }}</button> <button class="btn bo" onclick="document.getElementById(\'mpAddForm\').style.display=\'none\'">{{ _('Cancel') }}</button></div>'+
-    '</div>';
+    f.innerHTML=mpModelFormHtml(m,m.provider_id,m.provider_name||'');
   }).catch(function(){showToast("{{ _('Request Failed') }}","error")});
 }
 
 function mpCreateModel(){
-  var name=document.getElementById("mpName").value.trim();
-  if(!name){showToast("{{ _('Name is required') }}","error");return}
+  var modelName=document.getElementById("mpModelName").value.trim();
+  if(!modelName){showToast("{{ _('Model ID is required') }}","error");return}
   var data={
-    name:name,
     provider_id:parseInt(document.getElementById("mpProvId").value),
-    model_name:document.getElementById("mpModelName").value.trim(),
-    endpoint_url:document.getElementById("mpUrl").value.trim(),
-    capabilities:document.getElementById("mpCaps").value
+    model_name:modelName
   };
   fetch("/admin/provider-models",{method:"POST",headers:{"Authorization":"Bearer "+T,"Content-Type":"application/json"},body:JSON.stringify(data)})
   .then(function(r){return r.json()})
@@ -138,14 +268,11 @@ function mpCreateModel(){
 
 function mpUpdateModel(){
   var id=document.getElementById("mpEditId").value;
-  var name=document.getElementById("mpName").value.trim();
-  if(!name){showToast("{{ _('Name is required') }}","error");return}
+  var modelName=document.getElementById("mpModelName").value.trim();
+  if(!modelName){showToast("{{ _('Model ID is required') }}","error");return}
   var data={
-    name:name,
     provider_id:parseInt(document.getElementById("mpProvId").value),
-    model_name:document.getElementById("mpModelName").value.trim(),
-    endpoint_url:document.getElementById("mpUrl").value.trim(),
-    capabilities:document.getElementById("mpCaps").value,
+    model_name:modelName,
     is_active:document.getElementById("mpActive")?document.getElementById("mpActive").checked?1:0:1
   };
   fetch("/admin/provider-models/"+id,{method:"PUT",headers:{"Authorization":"Bearer "+T,"Content-Type":"application/json"},body:JSON.stringify(data)})

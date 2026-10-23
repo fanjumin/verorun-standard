@@ -19,6 +19,8 @@ Agent Matrix — 工具注册中心 (Tool Registry)
 from i18n import _
 import json, os, sys, logging
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+# WP-8：spawn_subagent 工具实现体（内部延迟导入 tools/models，无循环依赖）
+from agent_matrix.tools_subagent import _tool_spawn_subagent
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +33,7 @@ TOOL_SCHEMAS = {
         "type": "function",
         "function": {
             "name": "get_system_health",
-            "description": "获取系统最近一次健康巡检的结果汇总，包括健康分、通过/警告/错误数量，以及各检查项状态。用于回答系统运行状态、服务健康、告警相关问题。",
+            "description": "Get a summary of the latest system health inspection, including health score, passed/warning/error counts, and per-check status. Use for questions about system status, service health, and alerts.",
             "parameters": {"type": "object", "properties": {}, "required": []}
         }
     },
@@ -39,13 +41,13 @@ TOOL_SCHEMAS = {
         "type": "function",
         "function": {
             "name": "query_stats",
-            "description": "查询站点访问统计报告（PV/UV/会话/趋势/来源/热门页面），返回可读的文字洞察。用于回答流量、访问量、数据趋势相关问题。",
+            "description": "Query the site traffic statistics report (PV/UV/sessions/trends/sources/top pages) and return readable text insights. Use for questions about traffic, visits, and data trends.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "days": {
                         "type": "integer",
-                        "description": "统计周期天数，默认 7 天",
+                        "description": "Statistics period in days, default 7",
                         "default": 7
                     }
                 },
@@ -57,13 +59,13 @@ TOOL_SCHEMAS = {
         "type": "function",
         "function": {
             "name": "search_knowledge",
-            "description": "在平台知识库中检索与关键词相关的内容片段。用于回答产品功能、FAQ、使用帮助相关问题。",
+            "description": "Search the platform knowledge base for content fragments related to a keyword. Use for questions about product features, FAQ, and usage help.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "keyword": {
                         "type": "string",
-                        "description": "检索关键词"
+                        "description": "Search keyword"
                     }
                 },
                 "required": ["keyword"]
@@ -74,13 +76,13 @@ TOOL_SCHEMAS = {
         "type": "function",
         "function": {
             "name": "ads_list",
-            "description": "列出广告管理系统中的广告位，可按站点、位置、是否启用筛选。",
+            "description": "List ad zones in the ads management system; filter by site, position, and active state.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "site_key": {"type": "string", "description": "站点标识，默认 default"},
-                    "position": {"type": "string", "description": "广告位置，例如 sidebar"},
-                    "active_only": {"type": "boolean", "description": "是否只返回启用状态的广告", "default": False}
+                    "site_key": {"type": "string", "description": "Site key, default default"},
+                    "position": {"type": "string", "description": "Ad position, e.g. sidebar"},
+                    "active_only": {"type": "boolean", "description": "Only return active ad zones", "default": False}
                 },
                 "required": []
             }
@@ -90,30 +92,30 @@ TOOL_SCHEMAS = {
         "type": "function",
         "function": {
             "name": "ads_create",
-            "description": "创建一个新的广告位。支持图片广告或广告代码，可设置投放位置、时间、定向规则、权重等。",
+            "description": "Create a new ad zone. Supports image ads or ad code, with delivery position, schedule, targeting rules, weight, etc.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string", "description": "广告名称（必填）"},
-                    "site_key": {"type": "string", "description": "站点标识，默认 default"},
-                    "zone_id": {"type": "integer", "description": "广告区域 ID，默认 0"},
-                    "position": {"type": "string", "description": "广告位置标识，默认 sidebar"},
-                    "page": {"type": "string", "description": "展示页面，默认 * 表示全站"},
-                    "ad_type": {"type": "string", "enum": ["image", "code"], "description": "广告类型"},
-                    "image_url": {"type": "string", "description": "图片广告 URL"},
-                    "link_url": {"type": "string", "description": "图片广告跳转链接"},
-                    "ad_code": {"type": "string", "description": "广告代码（HTML/JS）"},
-                    "width": {"type": "integer", "description": "宽度（px）"},
-                    "height": {"type": "integer", "description": "高度（px）"},
-                    "targeting_rules": {"type": "object", "description": "定向规则 JSON 对象"},
-                    "schedule_start": {"type": "string", "description": "投放开始时间 ISO 格式"},
-                    "schedule_end": {"type": "string", "description": "投放结束时间 ISO 格式"},
-                    "weight": {"type": "integer", "description": "权重，默认 1"},
-                    "freq_cap": {"type": "integer", "description": "每用户每日频次上限，0 表示无限制"},
-                    "click_tag": {"type": "string", "description": "点击追踪标记"},
-                    "utm_source": {"type": "string", "description": "UTM 来源"},
-                    "is_active": {"type": "integer", "description": "是否启用，1=启用，0=禁用"},
-                    "sort_order": {"type": "integer", "description": "排序，默认 0"}
+                    "name": {"type": "string", "description": "Ad name (required)"},
+                    "site_key": {"type": "string", "description": "Site key, default default"},
+                    "zone_id": {"type": "integer", "description": "Ad zone ID, default 0"},
+                    "position": {"type": "string", "description": "Ad position key, default sidebar"},
+                    "page": {"type": "string", "description": "Display page, default * means the whole site"},
+                    "ad_type": {"type": "string", "enum": ["image", "code"], "description": "Ad type"},
+                    "image_url": {"type": "string", "description": "Image ad URL"},
+                    "link_url": {"type": "string", "description": "Image ad click-through link"},
+                    "ad_code": {"type": "string", "description": "Ad code (HTML/JS)"},
+                    "width": {"type": "integer", "description": "Width (px)"},
+                    "height": {"type": "integer", "description": "Height (px)"},
+                    "targeting_rules": {"type": "object", "description": "Targeting rules JSON object"},
+                    "schedule_start": {"type": "string", "description": "Delivery start time, ISO format"},
+                    "schedule_end": {"type": "string", "description": "Delivery end time, ISO format"},
+                    "weight": {"type": "integer", "description": "Weight, default 1"},
+                    "freq_cap": {"type": "integer", "description": "Per-user daily frequency cap, 0 = unlimited"},
+                    "click_tag": {"type": "string", "description": "Click tracking tag"},
+                    "utm_source": {"type": "string", "description": "UTM source"},
+                    "is_active": {"type": "integer", "description": "Active flag, 1=enabled, 0=disabled"},
+                    "sort_order": {"type": "integer", "description": "Sort order, default 0"}
                 },
                 "required": ["name"]
             }
@@ -123,12 +125,12 @@ TOOL_SCHEMAS = {
         "type": "function",
         "function": {
             "name": "ads_update",
-            "description": "更新指定广告位的字段，例如启用/禁用、修改代码、调整权重等。",
+            "description": "Update fields of an ad zone, e.g. enable/disable, change code, adjust weight.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "ad_id": {"type": "integer", "description": "广告 ID"},
-                    "updates": {"type": "object", "description": "要更新的字段键值对，字段含义同 ads_create"}
+                    "ad_id": {"type": "integer", "description": "Ad ID"},
+                    "updates": {"type": "object", "description": "Key-value pairs of fields to update; field meanings same as ads_create"}
                 },
                 "required": ["ad_id", "updates"]
             }
@@ -138,11 +140,11 @@ TOOL_SCHEMAS = {
         "type": "function",
         "function": {
             "name": "ads_delete",
-            "description": "删除指定广告位。",
+            "description": "Delete an ad zone.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "ad_id": {"type": "integer", "description": "广告 ID"}
+                    "ad_id": {"type": "integer", "description": "Ad ID"}
                 },
                 "required": ["ad_id"]
             }
@@ -152,12 +154,12 @@ TOOL_SCHEMAS = {
         "type": "function",
         "function": {
             "name": "ads_get_stats",
-            "description": "查询广告统计数据，包括展示量、点击量、CTR 及每日趋势。",
+            "description": "Query ad statistics, including impressions, clicks, CTR, and daily trends.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "ad_id": {"type": "integer", "description": "广告 ID，不传则统计全部广告"},
-                    "days": {"type": "integer", "description": "统计天数，默认 7", "default": 7}
+                    "ad_id": {"type": "integer", "description": "Ad ID; omit to aggregate all ads"},
+                    "days": {"type": "integer", "description": "Statistics period in days, default 7", "default": 7}
                 },
                 "required": []
             }
@@ -167,11 +169,11 @@ TOOL_SCHEMAS = {
         "type": "function",
         "function": {
             "name": "ads_analyze",
-            "description": "分析广告效果，返回高点击、低 CTR、趋势等文字洞察与优化建议。",
+            "description": "Analyze ad performance; return text insights (high clicks, low CTR, trends) and optimization suggestions.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "days": {"type": "integer", "description": "统计天数，默认 7", "default": 7}
+                    "days": {"type": "integer", "description": "Statistics period in days, default 7", "default": 7}
                 },
                 "required": []
             }
@@ -181,14 +183,14 @@ TOOL_SCHEMAS = {
         "type": "function",
         "function": {
             "name": "ads_render_snippet",
-            "description": "生成一段 Jinja2 模板代码，用于在页面指定位置渲染广告位。",
+            "description": "Generate a Jinja2 template snippet that renders an ad zone at a given page position.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "position": {"type": "string", "description": "广告位置标识，默认 sidebar"},
-                    "page": {"type": "string", "description": "展示页面，默认 *"},
-                    "site_key": {"type": "string", "description": "站点标识，默认 default"},
-                    "zone_id": {"type": "integer", "description": "广告区域 ID"}
+                    "position": {"type": "string", "description": "Ad position key, default sidebar"},
+                    "page": {"type": "string", "description": "Display page, default *"},
+                    "site_key": {"type": "string", "description": "Site key, default default"},
+                    "zone_id": {"type": "integer", "description": "Ad zone ID"}
                 },
                 "required": ["position"]
             }
@@ -198,13 +200,13 @@ TOOL_SCHEMAS = {
         "type": "function",
         "function": {
             "name": "generate_ppt",
-            "description": "使用 AI 生成 PowerPoint 演示文稿（PPTX）。用户提供主题、页数和风格即可生成一份可直接下载的 PPT 文件。",
+            "description": "Generate a PowerPoint presentation (.pptx) with AI. Provide topic, page count, and style to produce a downloadable PPT file.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "topic": {"type": "string", "description": "PPT 主题（必填）"},
-                    "pages": {"type": "integer", "description": "页数，默认 10，范围 3-20", "default": 10},
-                    "style": {"type": "string", "description": "风格描述，如'Dark 科技风'、'简约商务'、'教育风格'等", "default": _("Dark Tech Style, 16:9")}
+                    "topic": {"type": "string", "description": "PPT topic (required)"},
+                    "pages": {"type": "integer", "description": "Page count, default 10, range 3-20", "default": 10},
+                    "style": {"type": "string", "description": "Style description, e.g. 'dark tech style', 'minimal business', 'education style'", "default": "Dark Tech Style, 16:9"}
                 },
                 "required": ["topic"]
             }
@@ -214,14 +216,14 @@ TOOL_SCHEMAS = {
         "type": "function",
         "function": {
             "name": "generate_image",
-            "description": "使用 AI 生成图像。用户提供描述文字即可生成图片，支持指定风格和数量。",
+            "description": "Generate images with AI. Provide a text description; style and count are optional.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "prompt": {"type": "string", "description": "图像描述（必填）"},
-                    "style": {"type": "string", "description": "风格，可选 realistic/anime/3d/painting/line-art", "default": "realistic"},
-                    "count": {"type": "integer", "description": "生成数量（1-4），默认 1", "default": 1},
-                    "size": {"type": "string", "description": "尺寸，可选 1024x1024/1792x1024/1024x1792，默认 1024x1024", "default": "1024x1024"}
+                    "prompt": {"type": "string", "description": "Image description (required)"},
+                    "style": {"type": "string", "description": "Style, one of realistic/anime/3d/painting/line-art", "default": "realistic"},
+                    "count": {"type": "integer", "description": "Number of images (1-4), default 1", "default": 1},
+                    "size": {"type": "string", "description": "Size, one of 1024x1024/1792x1024/1024x1792, default 1024x1024", "default": "1024x1024"}
                 },
                 "required": ["prompt"]
             }
@@ -231,13 +233,13 @@ TOOL_SCHEMAS = {
         "type": "function",
         "function": {
             "name": "generate_markdown",
-            "description": "使用 AI 生成 Markdown 文档。根据用户提供主题和格式要求，生成可直接预览或下载的 .md 文件。支持文章、报告、技术文档、笔记等。",
+            "description": "Generate a Markdown document with AI. Produce a previewable/downloadable .md file from topic and format requirements. Supports articles, reports, technical docs, notes.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "topic": {"type": "string", "description": "文档主题（必填）"},
-                    "outline": {"type": "string", "description": "大纲要求，可选章节或要点"},
-                    "style": {"type": "string", "description": "风格，可选 technical/professional/creative/simple/list", "default": "technical"}
+                    "topic": {"type": "string", "description": "Document topic (required)"},
+                    "outline": {"type": "string", "description": "Outline requirements, optional sections or key points"},
+                    "style": {"type": "string", "description": "Style, one of technical/professional/creative/simple/list", "default": "technical"}
                 },
                 "required": ["topic"]
             }
@@ -247,13 +249,13 @@ TOOL_SCHEMAS = {
         "type": "function",
         "function": {
             "name": "generate_docx",
-            "description": "使用 AI 生成 Word 文档（.docx）。根据用户提供主题和格式要求，生成样式化的 Word 文档，包含标题、段落、列表、表格等。适合生成报告、合同、方案书、简历等正式文档。",
+            "description": "Generate a styled Word document (.docx) with AI from topic and format requirements, including headings, paragraphs, lists, and tables. Suits reports, contracts, proposals, resumes.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "topic": {"type": "string", "description": "文档主题（必填）"},
-                    "style": {"type": "string", "description": "风格，可选 professional/formal/creative/simple/report", "default": "professional"},
-                    "sections": {"type": "integer", "description": "章节数量（3-12），默认 5", "default": 5}
+                    "topic": {"type": "string", "description": "Document topic (required)"},
+                    "style": {"type": "string", "description": "Style, one of professional/formal/creative/simple/report", "default": "professional"},
+                    "sections": {"type": "integer", "description": "Number of sections (3-12), default 5", "default": 5}
                 },
                 "required": ["topic"]
             }
@@ -263,7 +265,7 @@ TOOL_SCHEMAS = {
         "type": "function",
         "function": {
             "name": "cms_list_channels",
-            "description": "列出 CMS 系统中所有可用的发布频道（分类/栏目），用于确定文章可以发布到哪些频道。",
+            "description": "List all available publishing channels (categories) in the CMS, to decide where articles can be published.",
             "parameters": {"type": "object", "properties": {}, "required": []}
         }
     },
@@ -271,16 +273,16 @@ TOOL_SCHEMAS = {
         "type": "function",
         "function": {
             "name": "cms_create_post",
-            "description": "在 CMS 系统中创建一篇新文章。创建后默认为草稿状态，需要调用 cms_publish_post 发布。",
+            "description": "Create a new article in the CMS. It starts as a draft; call cms_publish_post to publish it.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "title": {"type": "string", "description": "文章标题（必填）"},
-                    "content": {"type": "string", "description": "文章正文内容，支持 HTML 格式"},
-                    "excerpt": {"type": "string", "description": "文章摘要/导语"},
-                    "category": {"type": "string", "description": "发布频道/分类标识，如 insights、news"},
-                    "cover_image": {"type": "string", "description": "封面图片 URL"},
-                    "tags": {"type": "array", "items": {"type": "string"}, "description": "标签列表"}
+                    "title": {"type": "string", "description": "Article title (required)"},
+                    "content": {"type": "string", "description": "Article body content, HTML supported"},
+                    "excerpt": {"type": "string", "description": "Article excerpt/lead"},
+                    "category": {"type": "string", "description": "Channel/category key, e.g. insights, news"},
+                    "cover_image": {"type": "string", "description": "Cover image URL"},
+                    "tags": {"type": "array", "items": {"type": "string"}, "description": "Tag list"}
                 },
                 "required": ["title"]
             }
@@ -290,18 +292,34 @@ TOOL_SCHEMAS = {
         "type": "function",
         "function": {
             "name": "cms_publish_post",
-            "description": "将 CMS 文章发布到指定频道。可选择本地频道和社交媒体平台。",
+            "description": "Publish a CMS article to selected channels: local categories and/or social media platforms.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "post_id": {"type": "integer", "description": "文章 ID（必填）"},
+                    "post_id": {"type": "integer", "description": "Article ID (required)"},
                     "channels": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "发布目标频道列表，格式为 'local:频道名'，如 ['local:insights']"
+                        "description": "Target channel list, format 'local:channel_name', e.g. ['local:insights']"
                     }
                 },
                 "required": ["post_id", "channels"]
+            }
+        }
+    },
+    "spawn_subagent": {
+        "type": "function",
+        "function": {
+            "name": "spawn_subagent",
+            "description": "Dispatch a sub-task to a specialized sub-agent and return its final result as text. Use when the current task needs a different domain specialist (research, writing, data analysis, etc.). The sub-agent runs with its own isolated token budget and may use only tools shared between the parent's whitelist and its own role whitelist.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "agent": {"type": "string", "description": "Sub-agent identifier (slug or name)"},
+                    "task": {"type": "string", "description": "Task description for the sub-agent (required)"},
+                    "expected_output": {"type": "string", "description": "Optional expected output format"}
+                },
+                "required": ["agent", "task"]
             }
         }
     },
@@ -327,14 +345,14 @@ def _tool_get_system_health(args):
         health_db = get_attr('plugins.health_check.models', 'get_db',
                              feature='tool_system_health')
         if health_db is None:
-            return _("No health inspection records.")
+            return "No health inspection records."
         with health_db() as conn:
             run = conn.execute(
                 "SELECT * FROM check_runs WHERE status='completed' "
                 "ORDER BY created_at DESC LIMIT 1"
             ).fetchone()
             if not run:
-                return _("No health inspection records.")
+                return "No health inspection records."
             run = dict(run)
             total = run.get('total_checks', 0) or 0
             passed = run.get('passed', 0) or 0
@@ -355,11 +373,11 @@ def _tool_get_system_health(args):
         ]
         abnormal = [dict(i) for i in items if i['status'] != 'passed']
         if abnormal:
-            lines.append(_("Abnormal items:"))
+            lines.append("Abnormal items:")
             for i in abnormal[:15]:
                 lines.append(f"  - [{i['status']}] {i['check_name']}: {(i['message'] or '')[:80]}")
         else:
-            lines.append(_("All checks passed."))
+            lines.append("All checks passed.")
         return '\n'.join(lines)
     except Exception as e:
         logger.warning(f"[tool:get_system_health] 执行失败: {e}")
@@ -391,14 +409,14 @@ def _tool_search_knowledge(args):
     try:
         keyword = str(args.get('keyword', '')).strip()
         if not keyword:
-            return _("No search keyword provided.")
+            return "No search keyword provided."
         with _get_matrix_db() as conn:
             row = conn.execute(
                 "SELECT value FROM system_config WHERE key='chatbot_knowledge_base'"
             ).fetchone()
         content = (row['value'] if row and row['value'] else '') or ''
         if not content:
-            return _("The knowledge base is empty.")
+            return "The knowledge base is empty."
         # 简单按段落匹配，返回命中片段
         blocks = [b.strip() for b in content.split('\n\n') if b.strip()]
         hits = [b for b in blocks if keyword.lower() in b.lower()]
@@ -426,10 +444,10 @@ def _tool_ads_list(args):
             return f"Failed to Get Ad List: {res.get('error')}"
         ads = res.get('data', [])
         if not ads:
-            return _("No ad space.")
+            return "No ad space."
         lines = [f"Total {len(ads)} Ad Positions:"]
         for a in ads:
-            status = _('Enable') if a.get('is_active') else _('Deactivate')
+            status = 'Enabled' if a.get('is_active') else 'Disabled'
             lines.append(
                 f"ID {a['id']}: {a['name']} | Site {a.get('site_key','default')} |"
                 f"Location {a.get('position','-')} | Type {a.get('ad_type','image')} | {status}"
@@ -514,7 +532,7 @@ def _tool_ads_get_stats(args):
             f"CTR: {total.get('ctr', 0)}%",
         ]
         if daily:
-            lines.append(_("Daily Trend:"))
+            lines.append("Daily trend:")
             for r in daily[-10:]:
                 lines.append(f"  {r['stat_date']}: Impressions {r.get('impressions',0)} Clicks {r.get('clicks',0)}")
         return '\n'.join(lines)
@@ -553,7 +571,7 @@ def _tool_ads_render_snippet(args):
             zone_id=args.get('zone_id')
         )
         if res['success']:
-            return "在模板中加入以下代码即可渲染广告位：\n```jinja2\n" + res['data'] + "\n```"
+            return "Add the following snippet to the template to render the ad zone:\n```jinja2\n" + res['data'] + "\n```"
         return f"Failed to generate code: {res.get('error')}"
     except Exception as e:
         logger.warning(f"[tool:ads_render_snippet] 执行失败: {e}")
@@ -659,16 +677,16 @@ def _tool_cms_publish_post(args):
 def _tool_generate_ppt(args):
     """使用 AI 生成 PPT 文件"""
     try:
-        topic = str(args.get('topic', _('Untitled topic'))).strip()
+        topic = str(args.get('topic', 'Untitled topic')).strip()
         if not topic:
-            return '❌ 请提供 PPT 主题'
+            return '❌ Please provide the PPT topic'
         pages = max(3, min(int(args.get('pages', 10) or 10), 20))
-        style = str(args.get('style', _('Dark Tech Style, 16:9')))
+        style = str(args.get('style', 'Dark Tech Style, 16:9'))
         from agent_matrix.routes import _generate_ppt_file
         filename = _generate_ppt_file(topic, pages, style)
         if filename:
-            return f'✅ PPT 已生成："{topic}"（{pages}页）\n下载链接：/admin/agent-matrix/media/download/{filename}'
-        return '❌ PPT 生成失败，请检查后端日志'
+            return f'✅ PPT generated: "{topic}" ({pages} pages)\nDownload link: /admin/agent-matrix/media/download/{filename}'
+        return '❌ PPT generation failed, check the backend logs'
     except Exception as e:
         logger.warning(f"[tool:generate_ppt] 执行失败: {e}")
         return f'❌ PPT Generation Error: {e}'
@@ -679,7 +697,7 @@ def _tool_generate_image(args):
     try:
         prompt = str(args.get('prompt', '')).strip()
         if not prompt:
-            return '❌ 请提供图像描述'
+            return '❌ Please provide the image description'
         count = max(1, min(int(args.get('count', 1) or 1), 4))
         size = str(args.get('size', '1024x1024'))
         if '\\' in size:
@@ -691,7 +709,7 @@ def _tool_generate_image(args):
             row = conn.execute("SELECT value FROM system_config WHERE key='siliconflow_api_key'").fetchone()
         api_key = row['value'] if row else os.environ.get('SILICONFLOW_API_KEY', '')
         if not api_key:
-            return _('❌ Si Ji Liu Dong API Key Not Configured')
+            return '❌ SiliconFlow API key is not configured'
 
         # 风格 → 模型映射
         style_map = {
@@ -732,7 +750,7 @@ def _tool_generate_image(args):
             urls.append(download_url)
 
         if not urls:
-            return _('❌ Image Generation API Returned Empty')
+            return '❌ Image generation API returned empty'
 
         lines = [f'✅ Generated {len(urls)} images:']
         for u in urls:
@@ -749,29 +767,29 @@ def _tool_generate_markdown(args):
     try:
         topic = str(args.get('topic', '')).strip()
         if not topic:
-            return '❌ 请提供文档主题'
+            return '❌ Please provide the document topic'
         outline = str(args.get('outline', ''))
         style = str(args.get('style', 'technical'))
 
         style_prompt = {
-            'technical': _('Technical Document Style: Clear structure, well-defined hierarchy, professional terms in English'),
-            'professional': _('Business report style, formal language, complete paragraphs, clear conclusions'),
-            'creative': _('Creative Writing Style, Lively and Persuasive Language'),
-            'simple': _('Concise style, bullet points for quick reading'),
-            'list': _('List Style, Mainly Items and Sub-items'),
-        }.get(style, _('Technical Document Style'))
+            'technical': 'Technical document style: clear structure, well-defined hierarchy, professional terms in English',
+            'professional': 'Business report style: formal language, complete paragraphs, clear conclusions',
+            'creative': 'Creative writing style: lively and persuasive language',
+            'simple': 'Concise style with bullet points for quick reading',
+            'list': 'List style: mainly items and sub-items',
+        }.get(style, 'Technical document style: clear structure, well-defined hierarchy, professional terms in English')
 
-        prompt_text = f'请撰写一篇关于"{topic}"的Markdown文档。\n风格要求：{style_prompt}'
+        prompt_text = f'Write a Markdown document about "{topic}".\nStyle requirements: {style_prompt}'
         if outline:
-            prompt_text += f'\n大纲要求：{outline}'
-        prompt_text += '\n请直接输出Markdown格式内容，包含标题（#）、段落、列表、代码块等格式化元素。'
+            prompt_text += f'\nOutline requirements: {outline}'
+        prompt_text += '\nOutput Markdown content directly, including headings (#), paragraphs, lists, code blocks, and other formatting elements.'
 
         from agent_matrix.engine import get_gateway
         from agent_matrix.model_resolver import resolve_model_args
         gw = get_gateway()
         content = gw.chat(
             messages=[
-                {'role': 'system', 'content': _('You are a professional document writing assistant. Output only Markdown content, without any additional explanations.')},
+                {'role': 'system', 'content': 'You are a professional document writing assistant. Output only Markdown content, without any additional explanations.'},
                 {'role': 'user', 'content': prompt_text}
             ],
             temperature=0.5,
@@ -780,7 +798,7 @@ def _tool_generate_markdown(args):
             **resolve_model_args({}),
         )
         if not content.strip():
-            return '❌ AI 内容生成为空，请重试'
+            return '❌ AI content generation returned empty, please retry'
 
         # 保存为 .md 文件
         import uuid
@@ -794,7 +812,7 @@ def _tool_generate_markdown(args):
         download_url = f'/admin/agent-matrix/media/download/{fn}'
         preview_url = f'/admin/agent-matrix/md-preview/{fn}'
         preview = content[:200].strip().replace('\n', ' ')
-        return f'✅ 文档已生成："{topic}"\n预览：{preview}...\n文件：{fn}\n预览链接：{preview_url}\n下载链接：{download_url}'
+        return f'✅ Document generated: "{topic}"\nPreview: {preview}...\nFile: {fn}\nPreview link: {preview_url}\nDownload link: {download_url}'
 
     except Exception as e:
         logger.warning(f"[tool:generate_markdown] 执行失败: {e}")
@@ -806,26 +824,26 @@ def _tool_generate_docx(args):
     try:
         topic = str(args.get('topic', '')).strip()
         if not topic:
-            return '❌ 请提供文档主题'
+            return '❌ Please provide the document topic'
         sections = max(3, min(int(args.get('sections', 5) or 5), 12))
         style = str(args.get('style', 'professional'))
 
         style_desc = {
-            'professional': _('Professional business style, using formal titles and paragraph formats'),
-            'formal': _('Formal official document style, clear chapters and sections, rigorous language'),
-            'creative': _('Creative Design Style, Flexible Layouts and Modern Feel'),
-            'simple': _('Concise style, key points highlighted for quick reading'),
-            'report': _('Report Style: Includes summary, data analysis, conclusions, and recommendations'),
-        }.get(style, _('Professional business style'))
+            'professional': 'Professional business style: formal titles and paragraph formats',
+            'formal': 'Formal official-document style: clear chapters and sections, rigorous language',
+            'creative': 'Creative design style: flexible layouts and a modern feel',
+            'simple': 'Concise style with highlighted key points for quick reading',
+            'report': 'Report style: includes summary, data analysis, conclusions, and recommendations',
+        }.get(style, 'Professional business style: formal titles and paragraph formats')
 
-        prompt_text = f'请撰写一篇关于"{topic}"的Word文档，包含{sections}个章节。\n风格要求：{style_desc}\n请输出Markdown格式，包含标题（##）、段落、列表。'
+        prompt_text = f'Write a Word document about "{topic}" with {sections} sections.\nStyle requirements: {style_desc}\nOutput Markdown format with headings (##), paragraphs, and lists.'
 
         from agent_matrix.engine import get_gateway
         from agent_matrix.model_resolver import resolve_model_args
         gw = get_gateway()
         md_content = gw.chat(
             messages=[
-                {'role': 'system', 'content': _('You are a professional document writing assistant. Output structured Markdown content with multiple levels of headings and paragraphs, without any additional explanations.')},
+                {'role': 'system', 'content': 'You are a professional document writing assistant. Output structured Markdown content with multiple levels of headings and paragraphs, without any additional explanations.'},
                 {'role': 'user', 'content': prompt_text}
             ],
             temperature=0.5,
@@ -834,7 +852,7 @@ def _tool_generate_docx(args):
             **resolve_model_args({}),
         )
         if not md_content.strip():
-            return _('❌ AI Content Generation is Empty')
+            return '❌ AI content generation returned empty'
 
         # 用 python-docx 渲染
         from docx import Document
@@ -879,11 +897,139 @@ def _tool_generate_docx(args):
         doc.save(fp)
 
         download_url = f'/admin/agent-matrix/media/download/{fn}'
-        return f'✅ Word 文档已生成："{topic}"（{sections}章）\n文件：{fn}\n下载链接：{download_url}'
+        return f'✅ Word document generated: "{topic}" ({sections} sections)\nFile: {fn}\nDownload link: {download_url}'
 
     except Exception as e:
         logger.warning(f"[tool:generate_docx] 执行失败: {e}")
         return f'❌ Word Document Generation Error: {e}'
+
+
+# ============================================================
+# WP-2：工具并发元数据（独立注册表，不进发往 API 的 schema）
+# ============================================================
+# concurrency_safe=True 仅授予只读查询类工具；写工具/生成类工具默认
+# False（保守起步：并发安全必须显式声明，未声明即按不安全处理）。未注册的
+# 工具（含 MCP 合并工具）一律按 (False, True) 处理。
+TOOL_CONCURRENCY = {
+    'get_system_health': {'concurrency_safe': True, 'interruptible': True},
+    'query_stats': {'concurrency_safe': True, 'interruptible': True},
+    'search_knowledge': {'concurrency_safe': True, 'interruptible': True},
+    'ads_list': {'concurrency_safe': True, 'interruptible': True},
+    'ads_get_stats': {'concurrency_safe': True, 'interruptible': True},
+    'ads_analyze': {'concurrency_safe': True, 'interruptible': True},
+    'ads_render_snippet': {'concurrency_safe': True, 'interruptible': True},
+    'cms_list_channels': {'concurrency_safe': True, 'interruptible': True},
+    # WP-8：子代理为同步长任务，不套超时线程（避免超时后后台线程重复执行）
+    'spawn_subagent': {'concurrency_safe': False, 'interruptible': False},
+}
+
+
+def get_tool_concurrency(name):
+    """返回 (concurrency_safe, interruptible)。未注册工具保守返回 (False, True)。"""
+    meta = TOOL_CONCURRENCY.get(name)
+    if meta:
+        return bool(meta.get('concurrency_safe')), bool(meta.get('interruptible', True))
+    return False, True
+
+
+def _get_tool_timeout():
+    """WP-5：单工具执行超时上界（秒）。env AGENT_TOOL_TIMEOUT 可配，默认 60。
+
+    仅作用于 interruptible 工具；不可中断工具（写/生成类）保持无界——超时的
+    后台线程无法安全回收，盲目截断可能破坏文件写入等操作的完整性。
+    """
+    try:
+        return max(1, int(os.environ.get('AGENT_TOOL_TIMEOUT', '60')))
+    except (TypeError, ValueError):
+        return 60
+
+
+def resolve_agent_tools(agent_config, allowed_tools):
+    """WP-3：子代理工具裁剪 —— allowed_tools − agent.disallowed_tools。
+
+    agent_config 可为 dict 或类 dict 行；disallowed_tools 支持 list 或 JSON
+    字符串。返回去重后的白名单 list（保持原顺序）。任何解析异常时退化为
+    原 allowed_tools（fail-open，与内核铁律一致）。
+    """
+    try:
+        base = allowed_tools
+        if isinstance(base, str):
+            try:
+                base = json.loads(base)
+            except (json.JSONDecodeError, TypeError):
+                base = None
+        if not isinstance(base, list):
+            base = []
+        dis = None
+        if isinstance(agent_config, dict):
+            dis = agent_config.get('disallowed_tools')
+        elif agent_config is not None:
+            try:
+                dis = agent_config['disallowed_tools']
+            except (KeyError, IndexError, TypeError):
+                dis = None
+        if isinstance(dis, str):
+            try:
+                dis = json.loads(dis)
+            except (json.JSONDecodeError, TypeError):
+                dis = []
+        if not isinstance(dis, list):
+            dis = []
+        dis_set = {str(x) for x in dis}
+        seen, out = set(), []
+        for name in base:
+            n = str(name)
+            if n in dis_set or n in seen:
+                continue
+            seen.add(n)
+            out.append(name)
+        return out
+    except Exception as e:
+        logger.warning('[Tools] resolve_agent_tools failed, passthrough: %s', e)
+        base = allowed_tools
+        if isinstance(base, str):
+            try:
+                return json.loads(base) or []
+            except (json.JSONDecodeError, TypeError):
+                return []
+        return list(base) if isinstance(base, list) else []
+
+
+# WP-5：planning 阶段禁止的写类内置工具（只读/查询类不在列）。
+# MCP 工具的写判定由 plugin 声明演进，暂不在本门范围内（见 WP-4.5 备注）。
+WRITE_TOOLS = frozenset({
+    'ads_create', 'ads_update', 'ads_delete',
+    'cms_create_post', 'cms_publish_post',
+    'generate_ppt', 'generate_image', 'generate_markdown', 'generate_docx',
+})
+
+
+def get_parallel_enabled():
+    """读取并发执行开关（system_config: agent_tool_parallel_enabled）。
+
+    默认开启：并行前置条件已收敛为「开关开 + 批量>1 + 全部 concurrency_safe」
+    （agent_runner._execute_batch），而 TOOL_CONCURRENCY 白名单里的
+    concurrency_safe 工具全部是只读查询类（spawn_subagent 显式 False），
+    因此默认开启不会引入任何写操作并发。
+
+    DB 显式置 0/false 仍可关闭（回退位）。
+    读取失败按**关闭**处理 —— 这里刻意不 fail-open 到并行：读取失败通常
+    意味着 DB 本身有问题，此时叠加并发查询会加剧故障；串行路径与引入本
+    开关前的行为逐字节一致，是更安全的一端。
+    """
+    try:
+        from models import get_db
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT value FROM system_config WHERE key='agent_tool_parallel_enabled'"
+            ).fetchone()
+        if row and row['value'] is not None:
+            return str(row['value']).strip().lower() in ('1', 'true', 'yes', 'on')
+    except Exception as e:
+        # 刻意不落到下面的缺省 True：DB 读不到时叠加并发会加剧故障。
+        logger.warning('[Tools] parallel flag read failed, serial path: %s', e)
+        return False
+    return True
 
 
 TOOL_EXECUTORS = {
@@ -904,6 +1050,7 @@ TOOL_EXECUTORS = {
     "generate_image": _tool_generate_image,
     "generate_markdown": _tool_generate_markdown,
     "generate_docx": _tool_generate_docx,
+    "spawn_subagent": _tool_spawn_subagent,
 }
 
 
@@ -1004,6 +1151,14 @@ def execute_tool(name, args, allowed_tools=None, context=None):
         logger.warning(f'[tool:{name}] 被审批门拦截: {reason}')
         return reason
 
+    # WP-5：planning 只读门 —— 任务处于 planning 阶段时拒绝全部写类内置工具。
+    # phase 经 context 透传（agent_runner 执行链）；无 phase → 不拦截。
+    if isinstance(context, dict) and context.get('task_phase') == 'planning':
+        if name in WRITE_TOOLS:
+            logger.warning(f'[tool:{name}] blocked by planning read-only gate')
+            return ("Permission denied: tool " + name +
+                    " is blocked during the planning phase (read-only gate)")
+
     if allowed_tools is not None:
         permitted = set(allowed_tools)
         if name.startswith('mcp__') and not _mcp_authorized(name, permitted):
@@ -1020,6 +1175,26 @@ def execute_tool(name, args, allowed_tools=None, context=None):
     if not isinstance(args, dict):
         args = {}
     try:
+        # WP-5：单工具执行超时上界 —— 仅 interruptible 工具生效（防单个工具挂死
+        # 整个 ReAct 循环）；未知工具保守按 interruptible 处理。线程无法安全回收，
+        # 故 shutdown(wait=False) 放行后台线程，进程退出时由守护线程自动回收。
+        _, interruptible = get_tool_concurrency(name)
+        timeout = _get_tool_timeout() if interruptible else None
+        if timeout:
+            from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutTimeout
+            _pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='tool-timeout')
+            _fut = _pool.submit(executor, args)
+            try:
+                return _fut.result(timeout=timeout)
+            except _FutTimeout:
+                logger.warning(f'[tool:{name}] 执行超过 {timeout}s，按超时中断处理')
+                return f"Tool {name} timed out after {timeout}s"
+            finally:
+                _pool.shutdown(wait=False)
+        if name == 'spawn_subagent':
+            # WP-8：spawn_subagent 需要父执行上下文（白名单交集/预算/深度），
+            # 特判透传；其余工具维持 executor(args) 原契约。
+            return executor(args, context=context)
         return executor(args)
     except Exception as e:
         logger.warning(f"[tool:{name}] 未捕获异常: {e}")

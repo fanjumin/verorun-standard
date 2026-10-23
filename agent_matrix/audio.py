@@ -369,6 +369,35 @@ class AudioOutputProcessor:
         return 'eastasia'
 
 
+def asr_diagnostics() -> dict:
+    """ASR 可用性诊断：逐项检查 vosk 包 / 模型目录 / ffmpeg。
+
+    供 /admin/agent-matrix/asr/status 端点与桌面端引导 UI 消费——
+    返回结构化检查结果，而非笼统的"识别为空"。
+    """
+    import shutil as _shutil
+    model_path = os.environ.get('VOSK_MODEL_PATH', '')
+    model_ok = bool(model_path) and os.path.isdir(model_path)
+    vosk_ok = True
+    try:
+        import vosk  # noqa: F401
+    except ImportError:
+        vosk_ok = False
+    return {
+        'provider': 'vosk',
+        'vosk_installed': vosk_ok,
+        'model_path': model_path,
+        'model_found': model_ok,
+        'ffmpeg_found': bool(_shutil.which('ffmpeg')),
+        'ready': vosk_ok and model_ok,
+        'hint': (
+            'pip install vosk && python tools/fetch_vosk_model.py，'
+            '并在 .env 配置 VOSK_MODEL_PATH'
+            if not (vosk_ok and model_ok) else ''
+        ),
+    }
+
+
 def get_default_asr() -> AudioInputProcessor:
     """获取默认 ASR 处理器"""
     return AudioInputProcessor(provider='vosk')
@@ -377,3 +406,70 @@ def get_default_asr() -> AudioInputProcessor:
 def get_default_tts() -> AudioOutputProcessor:
     """Get default TTS processor (Edge TTS — free, no key)."""
     return AudioOutputProcessor(provider='edge_tts')
+
+
+# ── 音频语义理解（经 UnifiedLLM 网关调用音频理解大模型） ──────────────
+# 先例：auth-center/services/ai_content_generator.py::analyze_image 用
+# gw.chat() + image_url part 走多模态——音频同理，把 part 换成
+# {'type': 'input_audio', 'input_audio': {'data': <base64>, 'format': 'wav'}}。
+# 网关侧零改动（chat() 对 content 数组纯透传）；模型由 system_config 的
+# ai_audio_provider / ai_audio_model 指定（缺省 qwen2-audio-instruct）。
+
+
+def _audio_model_config() -> tuple:
+    """读取音频理解模型配置（system_config 优先，缺省 qwen2-audio-instruct）。
+
+    与 ai_content_generator._get_ai_text_config 同思路：模型选择是数据
+    （provider_models / system_config），业务代码不硬编码。
+    """
+    provider, model = 'dashscope', 'qwen2-audio-instruct'
+    try:
+        from models import get_db
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT key, value FROM system_config WHERE key IN %s",
+                (('ai_audio_provider', 'ai_audio_model'),)
+            ).fetchall()
+        cfg = {r['key']: r['value'] for r in rows}
+        provider = cfg.get('ai_audio_provider') or provider
+        model = cfg.get('ai_audio_model') or model
+    except Exception as e:
+        logging.getLogger(__name__).warning(
+            '[AudioUnderstand] 读取 ai_audio_* 配置失败，使用缺省: %s', e)
+    return provider, model
+
+
+def analyze_audio(audio_data: bytes, question: str = '请完整转写这段音频，并总结其核心内容与说话人意图') -> str:
+    """音频语义理解：base64 音频 + 问题 → 文本（转写/摘要/意图分析）。
+
+    走 UnifiedLLM 网关（预算闸门/四级配额/计量对普通调用不可绕过）。
+    模型需支持 OpenAI 兼容 input_audio part（如 qwen2-audio-instruct）。
+    未配置密钥或调用失败时抛 RuntimeError，由路由层转错误响应。
+    """
+    if not audio_data:
+        raise RuntimeError('audio_data is empty')
+    import base64 as _b64
+    provider, model = _audio_model_config()
+    from agent_matrix.engine import get_gateway
+    gw = get_gateway()
+    return gw.chat(
+        provider=provider,
+        model=model,
+        messages=[
+            {
+                'role': 'user',
+                'content': [
+                    {'type': 'text', 'text': question},
+                    {
+                        'type': 'input_audio',
+                        'input_audio': {
+                            'data': _b64.b64encode(audio_data).decode('ascii'),
+                            'format': 'wav',
+                        },
+                    },
+                ],
+            }
+        ],
+        max_tokens=2048,
+        module='audio_understanding',
+    )

@@ -113,10 +113,20 @@ def _loop_token_budget() -> int:
 
     复用 WP-A 的单次请求预算作为观察累计上限：单轮观察已压到
     OBSERVE_MAX_TOKENS，正常轮数下远达不到上限，该护栏仅用于兜底。
+
+    预算缺省值为哨兵 -1（窗口自适应）时，必须在此翻译成正数，否则
+    `token_budget > 0` 不成立，兜底护栏会静默失效 —— 预算放大的同时
+    拆掉护栏，方向不对。
     """
     try:
-        from agent_matrix.context_manager import get_context_budget
-        return int(get_context_budget() or 0)
+        from agent_matrix.context_manager import (
+            get_context_budget, get_effective_budget)
+        raw = int(get_context_budget() or 0)
+        if raw < 0:
+            # 复用已读到的 raw，不要传 None —— 那会让 get_effective_budget 内部
+            # 再读一次 system_config（多一次打库 + 多一条 warning 日志）。
+            return int(get_effective_budget(None, raw))
+        return raw
     except Exception:
         return 0
 
@@ -172,6 +182,31 @@ class PlannerLoop:
       - 分解返回空、或分解 / 下发抛异常（fail-open 收敛）
     """
 
+    def draft_plan(self, instruction):
+        """WP-5：planning 阶段入口 —— 只产出计划对象，不执行任何步骤。
+
+        复用 orchestrator.decompose_task（LLM 分解 + 模板兜底）。调用方负责：
+          1) 把返回的 plan_json 写入 agent_tasks.plan_json；
+          2) 将任务 phase 置为 'planning'；
+          3) 审批通过后置 phase='execute' 并按计划派发。
+        任何异常返回 None（fail-open，不阻断主流程）。
+        """
+        try:
+            plan = self.orch.decompose_task(instruction,
+                                            getattr(self, 'master_config', {}) or {})
+            if not plan:
+                return None
+            import json as _json
+            return {
+                'plan': plan,
+                'plan_json': _json.dumps(plan, ensure_ascii=False),
+                'instruction': instruction,
+                'steps': len(plan),
+            }
+        except Exception as exc:
+            logger.warning('[PlannerLoop] draft_plan failed: %s', exc)
+            return None
+
     def __init__(self, orchestrator, master_task_id, master_agent_id, master_config,
                  session_id=None, user_id=0, mode='', max_iterations=None):
         self.orch = orchestrator
@@ -195,9 +230,38 @@ class PlannerLoop:
     def run(self, instruction):
         """执行迭代规划。返回 (decomposed, sub_results, stats)。
 
+        WP-9 并轨后本方法为薄包装：消费 iter_transitions() 的事件流并聚合，
+        返回契约（等长配对 + stats）与并轨前逐字节一致，orchestrator 无需改动。
         decomposed / sub_results 为**各轮累计**且等长配对，调用方可直接沿用
         既有汇总逻辑渲染；stats 供调用方增强报告与审计。
         """
+        decomposed, results, stats = [], [], None
+        for ev in self.iter_transitions(instruction):
+            if ev.get('type') == 'planner_result':
+                decomposed, results, stats = (ev.get('decomposed', []),
+                                              ev.get('results', []), ev.get('stats'))
+        return decomposed, results, stats
+
+    def iter_transitions(self, instruction):
+        """WP-9：迭代规划的事件生成器（三循环并轨）。
+
+        与 run() 共享同一套 plan -> execute -> observe -> replan 逻辑，只是把
+        「阶段推进」显式产出为 transition 事件（枚举来自 agent_runner 内核），
+        调用方可按统一协议消费/审计：
+
+          {'type':'transition','to':TRANSITION_PLAN,  'iteration': n}
+          {'type':'transition','to':TRANSITION_EXECUTE,'iteration': n, 'detail': {'subtasks': k}}
+          {'type':'transition','to':TRANSITION_OBSERVE,'iteration': n, 'detail': {'failed': f, 'completed': c, 'blocked': b}}
+          {'type':'transition','to':TRANSITION_REPLAN,'iteration': n}
+          {'type':'transition','to':TRANSITION_CONVERGED, 'detail': {'stop_reason': r}}
+          {'type':'planner_result','decomposed': [...], 'results': [...], 'stats': {...}}
+
+        收敛条件与护栏与 run() 完全一致（任何异常 fail-open 收敛）。
+        """
+        from agent_matrix.agent_runner import (
+            TRANSITION_PLAN, TRANSITION_EXECUTE, TRANSITION_OBSERVE,
+            TRANSITION_REPLAN, TRANSITION_CONVERGED)
+
         started = time.time()
         all_decomposed = []
         all_results = []
@@ -213,6 +277,8 @@ class PlannerLoop:
 
         for iteration in range(1, self.max_iterations + 1):
             round_started = time.time()
+            yield {'type': 'transition', 'to': TRANSITION_PLAN,
+                   'iteration': iteration}
 
             # 轮级护栏：只在进入新一轮前判定，不打断正在执行的子任务
             #（子任务超时由 dispatch_sub_tasks 既有的 300s/任务兜底）。
@@ -230,6 +296,9 @@ class PlannerLoop:
             if not decomposed:
                 stop_reason = STOP_EMPTY_PLAN
                 break
+
+            yield {'type': 'transition', 'to': TRANSITION_EXECUTE,
+                   'iteration': iteration, 'detail': {'subtasks': len(decomposed)}}
 
             try:
                 results = self.orch.dispatch_sub_tasks(
@@ -289,7 +358,14 @@ class PlannerLoop:
                 stop_reason = STOP_TOKEN_BUDGET
                 break
 
+            yield {'type': 'transition', 'to': TRANSITION_OBSERVE,
+                   'iteration': iteration,
+                   'detail': {'failed': len(failed), 'completed': len(completed),
+                              'blocked': len(blocked), 'tokens': observe_tokens}}
+
             replan_instruction = self._build_replan_instruction(instruction, observation)
+            yield {'type': 'transition', 'to': TRANSITION_REPLAN,
+                   'iteration': iteration}
 
         if stop_reason is None:
             stop_reason = STOP_CONVERGED
@@ -304,7 +380,11 @@ class PlannerLoop:
         }
         self._log('info', 'planner loop stopped: reason=%s iterations=%d duration=%ss'
                   % (stop_reason, len(rounds), stats['duration_s']))
-        return all_decomposed, all_results, stats
+
+        yield {'type': 'transition', 'to': TRANSITION_CONVERGED,
+               'iteration': len(rounds), 'detail': {'stop_reason': stop_reason}}
+        yield {'type': 'planner_result', 'decomposed': all_decomposed,
+               'results': all_results, 'stats': stats}
 
     # -- 内部方法 -------------------------------------------------
     def _build_observation(self, failed, results):

@@ -206,11 +206,16 @@ def edition_runtime_whitelist() -> bool:
       ① 发包裁剪：哪些插件目录进安装包（必须有白名单，否则包无限膨胀）
       ② 运行时可见性：界面显示 / 挂载哪些插件
 
-    金融桌面版声明 ``plugins.runtime_whitelist: false``，是让 ② 退出：
-      - 进包的插件**默认可见可用**，不必逐个补写 include
-      - 不适用插件改用**显式排除**（plugins.exclude 或动态分流规则）表达 ——
-        默认值是"放行"而非"拒绝"
-      - 从根上消除「新发布的适用插件因漏写 include 而被静默隐藏」这一类问题
+    两种取值对应的设计（按发行版各自声明）：
+      - ``true``（含未声明 → 默认）：include **兼任** ① 与 ②，插件集固定 ——
+        即"界面所见 == 本版白名单"。金融桌面版（2026-10-06 起）走这条：
+        它要的是**固定 9 个插件**，不接受包外插件出现在插件中心。
+        代价：商店新上架的适用插件若不在 include 中即不可见，须随发行版更新清单。
+      - ``false``：② 退出，进包插件**默认可见可用**；不适用插件改用**显式排除**
+        （plugins.exclude 或 plugin_distribution_rules 动态分流）表达。
+        代价：隐藏集只剩 exclude，而 exclude 已废弃（恒返 []）→ 实际**几乎不隐藏**，
+        插件中心会列出磁盘上全部插件。2026-09-21~10-05 金融桌面版曾走这条，
+        实测列出 ~39 个插件（"未裁剪为 9 个固定插件"），故已改回 true。
 
     取舍：dev 环境（源码整树，未经 stage-verorun-core.mjs 裁剪）会加载 plugins/
     下的全部插件，启动耗时上升；打包产物不受影响（其树已按 include 裁过）。
@@ -225,6 +230,22 @@ from database import get_db, get_table_columns
 
 
 # ── 轻量 YAML 解析器（仅支持角色定义所需子集） ──
+def _strip_inline_comment(val: str) -> str:
+    """剥离行内注释：YAML 语义中 '#' 位于行首或其前是空白时即为注释起点。
+
+    背景（2026-10-07）：rs_planner.yaml 的列表项带行内说明注释
+    （- content_factory  # 资讯采集归投研规划功能区…），本解析器把注释连进
+    值里入库 → agent_matrix.managed_modules 变成 'content_factory    # …'，
+    resolve_agent_roles ② 角色侧认领失配 → content_factory 卡 ERROR、
+    /admin/content-factory/* 全部 404（资讯采集页报"接口不存在"）。
+    注意 '#' 前无空白的不剥（URL 锚点、十六进制色值等不受影响）。
+    """
+    for i, ch in enumerate(val):
+        if ch == '#' and (i == 0 or val[i - 1] in ' \t'):
+            return val[:i].rstrip()
+    return val
+
+
 def _parse_role_yaml(text):
     """解析简单的 flat key:value / key:\\n  - item 格式 YAML，返回 dict。"""
     data = {}
@@ -243,9 +264,9 @@ def _parse_role_yaml(text):
                 current_list_key = key
                 data[key] = []
             else:
-                data[key] = val
+                data[key] = _strip_inline_comment(val)
         elif stripped.startswith('- ') and current_list_key:
-            data[current_list_key].append(stripped[2:].strip())
+            data[current_list_key].append(_strip_inline_comment(stripped[2:]))
         else:
             current_list_key = None
     return data
@@ -687,6 +708,40 @@ def init_agent_matrix_tables():
     # ── Migration: add index on agent_token_logs.user_id (for token_stats JOINs) ──
     with get_db() as conn:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_tkl_user_id ON agent_token_logs(user_id)")
+
+    # ── Migration (WP-3): subagent factory columns on agent_matrix ──
+    with get_db() as conn:
+        cols = get_table_columns(conn, 'agent_matrix')
+        _wp3_agent_cols = {
+            'disallowed_tools': "ALTER TABLE agent_matrix ADD COLUMN disallowed_tools TEXT DEFAULT '[]'",
+            'permission_mode': "ALTER TABLE agent_matrix ADD COLUMN permission_mode TEXT DEFAULT NULL",
+            'max_turns': "ALTER TABLE agent_matrix ADD COLUMN max_turns BIGINT DEFAULT NULL",
+            'initial_prompt': "ALTER TABLE agent_matrix ADD COLUMN initial_prompt TEXT DEFAULT NULL",
+            'memory_scope': "ALTER TABLE agent_matrix ADD COLUMN memory_scope TEXT DEFAULT NULL",
+        }
+        for _c, _ddl in _wp3_agent_cols.items():
+            if _c not in cols:
+                conn.execute(_ddl)
+                logger.info(f'[Migration] Added agent_matrix.{_c}')
+        conn.commit()
+
+    # ── Migration (WP-3): chain attribution on agent_tasks ──
+    with get_db() as conn:
+        cols = get_table_columns(conn, 'agent_tasks')
+        if 'chain_id' not in cols:
+            conn.execute("ALTER TABLE agent_tasks ADD COLUMN chain_id TEXT DEFAULT NULL")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_at_chain ON agent_tasks(chain_id)")
+            logger.info('[Migration] Added agent_tasks.chain_id')
+        if 'depth' not in cols:
+            conn.execute("ALTER TABLE agent_tasks ADD COLUMN depth BIGINT DEFAULT 0")
+            logger.info('[Migration] Added agent_tasks.depth')
+        if 'phase' not in cols:
+            conn.execute("ALTER TABLE agent_tasks ADD COLUMN phase TEXT DEFAULT 'execute'")
+            logger.info('[Migration] Added agent_tasks.phase')
+        if 'plan_json' not in cols:
+            conn.execute("ALTER TABLE agent_tasks ADD COLUMN plan_json TEXT DEFAULT NULL")
+            logger.info('[Migration] Added agent_tasks.plan_json')
+        conn.commit()
         conn.commit()
         logger.info('[Migration] Added agent_token_logs.user_id index')
 
@@ -735,6 +790,12 @@ def seed_default_agents():
 
     yaml_slugs = set()
     with get_db() as conn:
+        # 有效 provider slug 集合（F-02 受控自愈的判定基准）
+        valid_slugs = {
+            r['slug'] for r in conn.execute(
+                "SELECT slug FROM providers WHERE is_active=1"
+            ).fetchall()
+        }
         # ── Phase 1: UPSERT YAML-defined system roles ──
         for a in roles:
             slug = a.get('slug', '')
@@ -795,7 +856,7 @@ def seed_default_agents():
                 # NEVER overwrite provider/model_name/api_key_ref on existing agents
                 # 合并保留插件聚合的能力/模块（统一网关注册 §4），避免重启覆盖
                 cur = conn.execute(
-                    "SELECT capabilities, managed_modules FROM agent_matrix WHERE slug=%s",
+                    "SELECT provider, model_name, capabilities, managed_modules FROM agent_matrix WHERE slug=%s",
                     (slug,)
                 ).fetchone()
                 yaml_caps = _json_list(a.get('capabilities', '[]'))
@@ -819,6 +880,34 @@ def seed_default_agents():
                     json.dumps(merged_caps, ensure_ascii=False),
                     slug
                 ))
+
+                # ── F-02 受控自愈（2026-10-14）：脏 provider 永不自愈的陷阱修复 ──
+                # 背景：上方 "NEVER overwrite provider/model_name" 策略让历史脏值
+                #   （如 104 实测的 provider='hunyuan'，providers 表无此 slug）永久存活，
+                #   engine.is_ready()=False → decompose_task 退化模板 → /chat 确定性空返（S1）。
+                # 策略：仅当 DB provider 无效 且 YAML 声明值有效 时才覆盖（有效值永不覆盖）；
+                #   YAML 兜底也无效则保持现状并告警（fail-safe，不猜）。
+                _db_provider = (cur['provider'] if cur else None) or ''
+                if _db_provider and _db_provider not in valid_slugs:
+                    _yaml_provider = (a.get('provider') or '').strip()
+                    _yaml_model = (a.get('model_name') or '').strip()
+                    if _yaml_provider and _yaml_provider in valid_slugs:
+                        conn.execute(
+                            "UPDATE agent_matrix SET provider=%s, model_name=%s, updated_at=NOW() "
+                            "WHERE slug=%s",
+                            (_yaml_provider, _yaml_model, slug)
+                        )
+                        logger.warning(
+                            f'[Seed] Provider self-heal: agent {slug!r} referenced invalid '
+                            f'provider {_db_provider!r}; restored to '
+                            f'{_yaml_provider!r}/{_yaml_model!r} from role YAML'
+                        )
+                    else:
+                        logger.warning(
+                            f'[Seed] Agent {slug!r} references unknown provider '
+                            f'{_db_provider!r} and YAML fallback is missing/invalid '
+                            f'({_yaml_provider!r}) — left unchanged, manual fix required'
+                        )
 
         # ── Phase 2: DELETE old system roles no longer in YAML ──
         # 护栏（架构评审 §3.2）：绝不静默删核心角色。
@@ -1094,7 +1183,7 @@ def _merge_unique(base: list, extra: list) -> list:
     return result
 
 
-def resolve_agent_roles(plugin_id: str, metadata: dict) -> list:
+def resolve_agent_roles(plugin_id: str, metadata: dict, strict: bool = False) -> list:
     """解析插件在**当前版本**该聚合到哪些核心角色（可多个）；空列表 = 本版不接纳该插件。
 
     解析顺序（2026-09-21 定稿，取代旧的"单一 agent_role 硬校验"）：
@@ -1127,6 +1216,10 @@ def resolve_agent_roles(plugin_id: str, metadata: dict) -> list:
                 owned.append(row['slug'])
     except Exception as exc:                                    # noqa: BLE001
         logger.warning(f'[PluginRoles] WARNING: {plugin_id} 角色侧认领查询失败: {exc}')
+        # strict=True：把"查询失败"与"本版明确无归属（[]）"区分开。调用方（enable 门禁）
+        # 据此避免把瞬时故障持久化成 ERROR 永久锁死（P5-1 成因之一）。
+        if strict:
+            raise
     return owned
 
 
@@ -1384,6 +1477,121 @@ def toggle_agent(agent_id):
 
 
 # ============================================================
+# Agent 密钥绑定（AI Hub 角色矩阵）
+#   一行 = 角色卡片上添加的一条「供应商模型 + Key」；
+#   一个 Agent 可挂多模型/多 Key/多厂家；密钥加密落 provider_api_keys。
+# ============================================================
+
+def list_agent_key_bindings(agent_id):
+    """列出某 Agent 的密钥绑定条目（供应商/模型/角色/冷却状态/Key 掩码，不返回明文 Key）。"""
+    from services.crypto import decrypt as _decrypt
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT b.id, b.provider_model_id, b.api_key_id, "
+            "       p.slug AS provider_slug, p.name AS provider_name, "
+            "       pm.model_name, pm.name AS model_label, "
+            "       COALESCE(pak.pool_role,'primary') AS pool_role, "
+            "       pak.key_value_enc, "
+            "       CASE WHEN pak.cooldown_until IS NOT NULL AND pak.cooldown_until > NOW() "
+            "            THEN 1 ELSE 0 END AS cooling, "
+            "       pak.is_active AS key_active "
+            "FROM agent_key_bindings b "
+            "JOIN provider_models pm ON pm.id = b.provider_model_id "
+            "JOIN providers p ON p.id = pm.provider_id "
+            "JOIN provider_api_keys pak ON pak.id = b.api_key_id "
+            "WHERE b.agent_id = %s "
+            "ORDER BY p.slug, pm.model_name, b.id",
+            (agent_id,)
+        ).fetchall()
+        data = []
+        for r in rows:
+            item = dict(r)
+            # 掩码预览（与 admin /provider-api-keys 同一口径），不泄露明文
+            preview = ''
+            enc_val = item.pop('key_value_enc', '') or ''
+            if enc_val:
+                try:
+                    raw = _decrypt(enc_val)
+                    if len(raw) > 10:
+                        preview = raw[:6] + '***' + raw[-3:]
+                    elif raw:
+                        preview = raw[:3] + '***'
+                except Exception:
+                    preview = '***'
+            item['key_preview'] = preview
+            data.append(item)
+    return data
+
+
+def add_agent_key_binding(agent_id, provider_model_id, pool_role, api_key):
+    """为 Agent 添加一条「供应商模型 + Key」绑定。
+    单事务：加密写入 provider_api_keys → 写 agent_key_bindings；返回 binding_id。"""
+    from services.crypto import encrypt as _encrypt
+    role = (pool_role or 'primary').strip().lower()
+    if role not in ('primary', 'backup', 'dedicated'):
+        role = 'primary'
+    api_key = (api_key or '').strip()
+    if not api_key:
+        raise ValueError('API Key cannot be empty')
+    with get_db() as conn:
+        pm = conn.execute(
+            "SELECT pm.id, pm.model_name, p.slug AS provider_slug "
+            "FROM provider_models pm JOIN providers p ON p.id = pm.provider_id "
+            "WHERE pm.id = %s AND pm.is_active = 1 AND p.is_active = 1",
+            (provider_model_id,)
+        ).fetchone()
+        if not pm:
+            raise ValueError('Model not found or inactive')
+        slug = pm['provider_slug']
+        # 密钥名唯一：agent:{agent_id}:{序号}（同供应商内递增，规避 UNIQUE(name, provider)）
+        existing = conn.execute(
+            "SELECT name FROM provider_api_keys WHERE provider=%s AND name LIKE %s",
+            (slug, f'agent:{agent_id}:%')
+        ).fetchall()
+        used = {r['name'] for r in existing}
+        n = 1
+        name = f'agent:{agent_id}:{n}'
+        while name in used:
+            n += 1
+            name = f'agent:{agent_id}:{n}'
+        key_id = conn.execute(
+            "INSERT INTO provider_api_keys (name, key_value_enc, provider, description, pool_role) "
+            "VALUES (%s,%s,%s,%s,%s) RETURNING id",
+            (name, _encrypt(api_key), slug, f'Agent #{agent_id} · {pm["model_name"]}', role)
+        ).fetchone()['id']
+        binding_id = conn.execute(
+            "INSERT INTO agent_key_bindings (agent_id, provider_model_id, api_key_id) "
+            "VALUES (%s,%s,%s) RETURNING id",
+            (agent_id, provider_model_id, key_id)
+        ).fetchone()['id']
+        conn.commit()
+        return binding_id
+
+
+def delete_agent_key_binding(agent_id, binding_id):
+    """删除某 Agent 的一条绑定；对应 Key 已无任何引用时一并清理，避免残留。"""
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT api_key_id FROM agent_key_bindings WHERE id=%s AND agent_id=%s",
+            (binding_id, agent_id)
+        ).fetchone()
+        if not row:
+            return False
+        key_id = row['api_key_id']
+        conn.execute("DELETE FROM agent_key_bindings WHERE id=%s", (binding_id,))
+        still_bound = conn.execute(
+            "SELECT COUNT(*) AS c FROM agent_key_bindings WHERE api_key_id=%s", (key_id,)
+        ).fetchone()['c']
+        model_ref = conn.execute(
+            "SELECT COUNT(*) AS c FROM provider_models WHERE api_key_id=%s", (key_id,)
+        ).fetchone()['c']
+        if not still_bound and not model_ref:
+            conn.execute("DELETE FROM provider_api_keys WHERE id=%s", (key_id,))
+        conn.commit()
+        return True
+
+
+# ============================================================
 # Prompt CRUD (Dynamic Prompt System)
 # ============================================================
 
@@ -1594,8 +1802,9 @@ def create_task(data):
              task_type, title, description,
              input_data, expected_output,
              target_module, target_api,
-             priority, max_retries, timeout_seconds, status)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+             priority, max_retries, timeout_seconds, status,
+             chain_id, depth)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """, (
             task_id,
             data.get('parent_task_id'),
@@ -1612,7 +1821,9 @@ def create_task(data):
             data.get('priority', 5),
             data.get('max_retries', 3),
             data.get('timeout_seconds', 600),
-            'pending'
+            'pending',
+            data.get('chain_id'),
+            data.get('depth', 0)
         ))
         conn.commit()
         return task_id

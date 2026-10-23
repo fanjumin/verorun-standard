@@ -5,9 +5,9 @@ import hashlib
 
 import pytest
 
-from plugins._base.evolution import text as evo_text
-from plugins._base.evolution import vector as evo_vector
-from plugins._base.evolution import curator as evo_curator
+from shared.plugin_base.evolution import text as evo_text
+from shared.plugin_base.evolution import vector as evo_vector
+from shared.plugin_base.evolution import curator as evo_curator
 
 
 # ── keywords ────────────────────────────────────────────────────────
@@ -66,7 +66,10 @@ class _FakeEmbed:
 
 @pytest.fixture()
 def fake_embedding(monkeypatch):
-    import plugins._base.embeddings as base_emb
+    # 实体已迁 shared/plugin_base（_base 收归步骤二）：vector.py 函数内
+    # `from ..embeddings import EmbeddingService` 解析到 shared.plugin_base.embeddings，
+    # patch 目标须指向实体路径（patch shim 路径不再生效）。
+    import shared.plugin_base.embeddings as base_emb
     _FakeEmbed._ready, _FakeEmbed._vec = True, [0.1, 0.2]
     monkeypatch.setattr(base_emb, 'EmbeddingService', _FakeEmbed)
     return _FakeEmbed

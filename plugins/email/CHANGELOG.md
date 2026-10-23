@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.8.1 — 2026-10-08
+
+### Fixed
+
+- 对照审计 v2.0-final 落地 P0-a / P0-e / P1-f（与 vault / im_gateway 同批）
+
 ## v1.8.0 — 2026-10-01
 
 ### Added

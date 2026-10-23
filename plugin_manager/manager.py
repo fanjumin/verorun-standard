@@ -15,6 +15,7 @@ import sys
 import json
 import time
 import shutil
+import logging
 import importlib
 import importlib.util
 import threading
@@ -22,6 +23,8 @@ import inspect
 from contextlib import contextmanager
 from typing import Dict, List, Optional, Any, Callable
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 from .models import (
     PluginInfo, PluginStatus,
@@ -541,12 +544,69 @@ class PluginManager:
         auto_install = os.environ.get('PLUGIN_AUTO_INSTALL', '1').strip().lower() not in ('0', 'false', 'no')
         try:
             discovered = self._discovery.discover()
+
+            # ★ 2026-10-06 修复（顺序倒置 → 注册表长期冻结）：
+            #   原实现把「清单刷新 / i18n seeding / error 自愈」排在自动安装块**之后**，
+            #   而自动安装循环没有逐插件容错 —— 任一插件 install() 抛错（实测 ai_relay
+            #   的 compatible_editions 不含 finance）即跳到本 try 的 except，把其后的
+            #   三步一起静默跳过。实测后果：注册表自 2026-09-27 起再未与磁盘对齐
+            #   （neural_flow 行 status=error + metadata.agent_role=''，磁盘却已声明 ops），
+            #   /health 恒 degraded，且本版插件 i18n 翻译从未 seed（全日志无 seeded 行）。
+            #   修复原则：把「不依赖安装成败」的三步提到可能抛错的动作之前。
+
+            # 用磁盘 plugin.json 刷新已缓存插件的静态元信息与契约字段（行为与判据见方法 docstring）。
+            self._refresh_static_meta(discovered)
+
+            # ★ 2026-10-06：版侧门控只算一次，本块与下方自动安装循环共用同一份口径。
+            #   此前本块遍历磁盘上全部插件 seeding，实测每次启动为 33 个包外插件
+            #   （site_builder 1286 / shop 866 / ali_api 688 …）写入 7986 条永不展示的
+            #   翻译，占该步 86%，与「本版固定插件集」口径也不一致。
+            _hidden_ids, _ = self._edition_hidden_map(
+                [i.identifier for i in discovered])
+
+            # ── 加载本版可见插件的 locale 翻译 ─────────────────
+            try:
+                from i18n import seed_plugin_translations
+                for disk_info in discovered:
+                    if disk_info.identifier in _hidden_ids:
+                        continue
+                    locale_dir = os.path.join(disk_info.path, 'i18n')
+                    if os.path.isdir(locale_dir):
+                        seed_plugin_translations(disk_info.identifier, locale_dir)
+            except Exception as e:
+                print(f'[PluginManager] ⚠️ 加载插件翻译失败: {e}')
+
             if auto_install:
+                # ── error 状态插件自愈重试（科研版 veroscholar「无数据」根因）──
+                # 自动启用只处理 INSTALLED；error 存量行永不恢复会让插件在一次瞬态
+                # 失败后永久不可用。此处仅重试可恢复的瞬态错误（如 missing/invalid
+                # agent_role —— 角色集随发行版动态推导，版本键纠正后应自动恢复）。
+                # ⚠️ 必须早于下面的自动安装循环：后者抛错会跳过本块（见上方修复说明）。
+                _recovered = self._recover_error_plugins(discovered)
+                if _recovered > 0:
+                    print(f'[PluginManager] ✅ error 自愈恢复 {_recovered} 个插件')
+                    self._load_cache()
+
                 auto_installed = 0
+                # ★ 2026-10-06 修复（multi_asset 从未被自动安装的根因）：
+                #   原循环无逐插件容错，且不预过滤版侧门控 —— 它在 ai_relay 处抛
+                #   PluginError（finance 版不兼容，且按目录字母序排在 multi_asset 之前）
+                #   直接跳出整个 try，其后的插件（含 multi_asset）永远装不上；
+                #   实测每次启动日志都是同一条
+                #   「自动安装失败: 插件 "ai_relay" 不兼容当前发行版」。
+                #   同时 install() 只按 compatible_editions 判定，而磁盘上大量包外插件
+                #   （ads / shop / site_builder …）都声明了 finance，不预过滤会把它们
+                #   写进注册表，"本版固定插件集"随之失真。
+                # _hidden_ids 已在上方（i18n seeding 之前）统一算好，两处共用同一口径
                 for info in discovered:
-                    if info.identifier not in self._cache:
+                    if info.identifier in self._cache or info.identifier in _hidden_ids:
+                        continue
+                    try:
                         self.install(info.identifier)
                         auto_installed += 1
+                    except Exception as e:
+                        # 逐插件容错：单个插件失败（发行版不兼容 / 依赖缺失）不得中断其余插件
+                        print(f'[PluginManager] ⚠️ 自动安装跳过 {info.identifier}: {e}')
                 if auto_installed > 0:
                     print(f'[PluginManager] ✅ 自动安装 {auto_installed} 个新插件')
                     self._load_cache()  # 重新加载缓存
@@ -565,28 +625,7 @@ class PluginManager:
                     print(f'[PluginManager] ✅ 自动启用 {auto_enabled} 个插件')
                     self._load_cache()
 
-                # ── error 状态插件自愈重试（科研版 veroscholar「无数据」根因）──
-                # 自动启用只处理 INSTALLED；error 存量行永不恢复会让插件在一次瞬态
-                # 失败后永久不可用。此处仅重试可恢复的瞬态错误（如 missing/invalid
-                # agent_role —— 角色集随发行版动态推导，版本键纠正后应自动恢复）。
-                _recovered = self._recover_error_plugins(discovered)
-                if _recovered > 0:
-                    print(f'[PluginManager] ✅ error 自愈恢复 {_recovered} 个插件')
-                    self._load_cache()
-
-            # 用磁盘 plugin.json 刷新已缓存插件的静态元信息与契约字段（行为与判据见方法 docstring）。
-            self._refresh_static_meta(discovered)
             self._profile_mark('发现+装启+清单刷新')
-
-            # ── 加载所有插件的 locale 翻译 ─────────────────────
-            try:
-                from i18n import seed_plugin_translations
-                for disk_info in discovered:
-                    locale_dir = os.path.join(disk_info.path, 'i18n')
-                    if os.path.isdir(locale_dir):
-                        seed_plugin_translations(disk_info.identifier, locale_dir)
-            except Exception as e:
-                print(f'[PluginManager] ⚠️ 加载插件翻译失败: {e}')
         except Exception as e:
             print(f'[PluginManager] ⚠️ 自动安装失败: {e}')
 
@@ -834,22 +873,60 @@ class PluginManager:
         if self._hook_registry:
             try:
                 self._hook_registry.remove_all(identifier)
-            except Exception:
-                pass
+            except Exception as e:
+                # E3：摘不干净 = disable 之后旧 handler 仍在被调用，必须留痕
+                logger.error('[plugin-handlers] remove_all failed for %s: %s', identifier, e)
         subs = self._bus_subs.pop(identifier, {})
         if self._event_bus is not None:
             for event, handler in subs.items():
                 try:
                     self._event_bus.off(event, handler)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error('[plugin-handlers] event_bus.off failed for %s/%s: %s',
+                                 identifier, event, e)
+
+    # PEP 508 声明里 **pip 分发名 → import 名** 的差异项。
+    # 全仓 plugin.json 实测 31 条声明，只有这 5 项两者不同名（其余 26 项同名），
+    # 故只列实测项，不做与仓库无关的通用映射猜测。
+    _PIP_TO_IMPORT = {
+        'pyyaml': 'yaml',
+        'python-docx': 'docx',
+        'pymupdf': 'fitz',
+        'python-pptx': 'pptx',
+        'user-agents': 'user_agents',
+    }
+
+    @staticmethod
+    def _normalize_requirement(item: str) -> str:
+        """PEP 508 声明串 → import 模块名（去版本约束 / extras / 环境标记，再归一别名）。
+
+        ★ 2026-10-06 修复（multi_asset 装不上、安装端点恒 500 的根因）：
+          此前把声明**原样**交给 find_spec —— 实测 `find_spec('akshare>=1.14.0')`
+          抛 `ModuleNotFoundError: No module named 'akshare>=1'`（该异常发生在
+          install() 内且无人捕获 → POST /admin/plugins/multi_asset/install 返回 500，
+          插件永远装不上）；而 `pyyaml` / `python-docx` / `python-pptx` 这类
+          **pip 分发名** 又恒被 find_spec 判为缺失（它们 import 名是 yaml/docx/pptx）。
+          即：依赖其实全都装了，是校验器把声明当成了模块名。
+        """
+        s = (item or '').strip()
+        if not s:
+            return ''
+        for sep in (';', '[', '('):                      # 环境标记 / extras / 旧式括号约束
+            if sep in s:
+                s = s.split(sep, 1)[0].strip()
+        for op in ('>=', '<=', '==', '!=', '~=', '>', '<', '='):   # 版本约束
+            if op in s:
+                s = s.split(op, 1)[0].strip()
+                break
+        return PluginManager._PIP_TO_IMPORT.get(s.lower(), s)
 
     @staticmethod
     def _missing_python_deps(metadata: dict) -> list:
         """PF-08：返回 python_dependencies.required 中当前解释器不可导入的模块名。
 
-        声明项按 **import 模块名** 填写（如 redis、yaml），不是 pip 分发包名
-        （PyYAML 的 import 名是 yaml）。仅做 find_spec 探测，绝不自动 pip。
+        声明项按 **pip 声明串** 书写（可带版本约束，如 ``akshare>=1.14.0``），
+        由 _normalize_requirement 归一为 import 名后再探测。
+        仅做 find_spec 探测，绝不自动 pip。
         """
         import importlib.util
         decl = (metadata or {}).get('python_dependencies') or {}
@@ -858,8 +935,16 @@ class PluginManager:
         for item in required:
             if not isinstance(item, str):
                 continue
-            mod = item.strip()
-            if mod and importlib.util.find_spec(mod) is None:
+            mod = PluginManager._normalize_requirement(item)
+            if not mod:
+                continue
+            try:
+                found = importlib.util.find_spec(mod) is not None
+            except Exception:
+                # 非法模块名（含 '-' / '/' 等）会让 find_spec 抛错而非返回 None；
+                # 与"探测不到"同义处理，绝不冒泡成 500。
+                found = False
+            if not found:
                 missing.append(mod)
         return missing
 
@@ -950,9 +1035,13 @@ class PluginManager:
 
         hidden = {pid: f'excluded_in_edition: {edition}（deploy/editions 显式排除）'
                   for pid in excluded}
-        # ★ 2026-09-21：include 的"默认拒绝"分支受 plugins.runtime_whitelist 控制。
-        #   金融桌面版声明 runtime_whitelist: false → 跳过本分支，include 仅用于发包裁剪，
-        #   运行时默认放行（不适用插件改用 exclude / 动态分流规则显式表达）。
+        # ★ include 的"默认拒绝"分支受 plugins.runtime_whitelist 控制。
+        #   金融桌面版 2026-09-21 曾声明 runtime_whitelist: false（include 只做发包裁剪、
+        #   运行期默认放行，不适用插件改用 exclude / 动态分流显式表达）；2026-10-06 决策
+        #   变更回 true → include 现兼任发包裁剪与运行期白名单两职（见
+        #   deploy/editions/finance-desktop.yaml:37,52；台账
+        #   plugin_manager/tests/test_registry_manifest_sync.py::EditionGatingLedgerTest
+        #   同步钉住该清单，2026-10-14 已补到 16 项）。
         #   动机：运行时白名单会让"新发布的适用插件只要漏写 include 就静默不显示"，
         #   而漏写的后果本应由打包环节暴露（不写进 include 本就不会进包 = 显式发版决策），
         #   不该由运行时再静默隐藏一层。
@@ -1197,6 +1286,33 @@ class PluginManager:
                         f'插件 "{identifier}" 不兼容当前发行版: '
                         f'compatible_editions={_eds}, 当前发行版={_deploy_edition}')
 
+            # 2026-10-20：发行版 plugins.include 白名单同样闸住**安装**，不只闸启用。
+            # 此前该口径只在 discover()（列表可见性）与 enable()（启用）生效：
+            # 于是磁盘落地安装与被商店下载的插件都能写进 plugin_registry
+            # （status=INSTALLED），直到 enable() 才被拒 —— 留下「已安装但启用报错」
+            # 的脏状态，且重启时自动启用循环会再试一次、再失败一次。
+            # 口径与 enable() / _edition_hidden_map() 逐字一致：
+            #   exclude 命中 → 拒绝；include 非空且 runtime_whitelist 为真、未列入 → 拒绝。
+            try:
+                from agent_matrix.models import (edition_plugin_excludes,
+                                                 edition_plugin_includes,
+                                                 edition_runtime_whitelist)
+                _ed_excl = set(edition_plugin_excludes())
+                _ed_incl = set(edition_plugin_includes())
+                if identifier in _ed_excl:
+                    raise PluginError(
+                        f'插件 "{identifier}" 已被当前发行版显式排除，不允许安装')
+                if (_ed_incl and edition_runtime_whitelist()
+                        and identifier not in _ed_incl):
+                    raise PluginError(
+                        f'插件 "{identifier}" 未列入当前发行版 plugins.include 白名单，'
+                        f'不允许安装（本版不提供该插件）')
+            except PluginError:
+                raise
+            except Exception as _e:
+                # 与既有风格一致：门控自身取数异常时 fail-open，不阻断安装主链路
+                print(f'[PluginManager] {identifier} edition include gate skipped: {_e}')
+
             info.status = PluginStatus.INSTALLED
             info.installed_at = datetime.now().isoformat()
             info.updated_at = datetime.now().isoformat()
@@ -1333,8 +1449,13 @@ class PluginManager:
                     )
             except PluginStateError:
                 raise
-            except Exception:
-                pass
+            except Exception as e:
+                # E3：这里吞掉的是"门禁代码自己出错"。行为不变（仍按 fail-open
+                # 继续，与"不能把系统锁死"的取向一致；降级方向是否统一由 E1 决策），
+                # 但此前连一行日志都没有 —— 版侧数据取不到时，一个本该被挡住的
+                # 插件会被静默放行，事后无从查证。补 ERROR 留痕。
+                logger.error('[edition-gate] enable() edition check failed for %s: %s; '
+                             'failing open (plugin will be enabled)', identifier, e)
 
             # ── 统一网关注册归属校验（插件标准 §2.2/§4，2026-09-21 定稿）──
             # 放行条件（二选一，由 agent_matrix.models.resolve_agent_roles 统一裁决）：
@@ -1344,9 +1465,15 @@ class PluginManager:
             # 核心角色集由 agent_matrix/roles/ 或 roles/<edition>/ 动态推导（单一事实源）。
             try:
                 from agent_matrix.models import resolve_agent_roles
-                _roles = resolve_agent_roles(identifier, info.metadata or {})
-            except ImportError:
-                _roles = []
+                # strict=True：'查询失败' 不得与 '本版明确不接纳' 混为一谈。旧写法把
+                # 两者都归为 [] 并随即置 ERROR 落库 —— 瞬时故障（DB 抖动/模块缺失）
+                # 会被持久化成永久锁死，正是 P5-1 的成因之一。
+                _roles = resolve_agent_roles(identifier, info.metadata or {}, strict=True)
+            except Exception as exc:  # 含 ImportError：归属不可判定 = 可重试，不落状态
+                raise PluginStateError(
+                    identifier, info.status.value,
+                    f'enabled(blocked: ownership lookup unavailable, retry later: {exc})'
+                )
             if not _roles:
                 info.last_error = ('missing/invalid agent_role: '
                                    f'{(info.metadata or {}).get("agent_role")!r} '
@@ -1544,8 +1671,12 @@ class PluginManager:
 
     # ── 禁用 ────────────────────────────────────────────────────────────
 
-    def disable(self, identifier: str) -> PluginInfo:
-        """禁用插件: 反注册路由/钩子, 状态 → DISABLED"""
+    def disable(self, identifier: str, _skip_reenable_check: bool = False) -> PluginInfo:
+        """禁用插件: 反注册路由/钩子, 状态 → DISABLED
+
+        _skip_reenable_check: 仅 uninstall / 弃用插件迁移等系统路径使用，跳过
+        "禁用后还能否再启用"预检。用户侧 API 不得传 True（否则绕过 P5-1 防护）。
+        """
         with self._lock_timeout():
             # VR-PLG-002：以 DB 状态为权威，避免多 worker 下内存缓存滞后
             self.refresh_status_from_db()
@@ -1553,6 +1684,26 @@ class PluginManager:
 
             if not info.status.can_transition_to(PluginStatus.DISABLED):
                 raise PluginStateError(identifier, info.status.value, 'disabled')
+
+            # ── P5-1：禁用前预检"还回不回得来" ──────────────────────────
+            # 用 enable() 同一口径（resolve_agent_roles）判一次：明确无归属 → 拒绝
+            # disable，避免制造不可逆单向门；查不到（DB/模块异常）→ 视为未知，
+            # 放行并告警（不能因瞬时故障误拦运维操作）。
+            if not _skip_reenable_check:
+                try:
+                    from agent_matrix.models import resolve_agent_roles
+                    _roles = resolve_agent_roles(identifier, info.metadata or {}, strict=True)
+                    _known = True
+                except Exception as exc:  # noqa: BLE001
+                    _roles, _known = [], False
+                    print(f'[PluginManager] ⚠️ {identifier}: 归属预检不可用，'
+                          f'按未知放行 disable: {exc}')
+                if _known and not _roles:
+                    raise PluginStateError(
+                        identifier, info.status.value,
+                        'disabled(blocked: no edition ownership — re-enable would be '
+                        'impossible; use uninstall to remove)'
+                    )
 
             # 通知依赖本插件的插件
             self._notify_dependents(identifier, 'disable')
@@ -1619,7 +1770,8 @@ class PluginManager:
 
                 # 如果处于 ACTIVE 或 ENABLED，先禁用
                 if info.status in (PluginStatus.ACTIVE, PluginStatus.ENABLED):
-                    self.disable(identifier)
+                    # 卸载路径必须能走完：卸载的目的就是移除，不存在"还要再启用"。
+                    self.disable(identifier, _skip_reenable_check=True)
 
                 # DROP 前先摘除该插件的 APScheduler 定时作业：存活 cron 及其
                 # 持有的池化连接会占用插件 schema，是 DROP SCHEMA CASCADE 失败、
@@ -1689,6 +1841,18 @@ class PluginManager:
 
                 # 从数据库中移除记录
                 self._delete_from_db(identifier)
+
+                # E18 (BE-6)：卸载时清空 plugin_mcp_servers 残留行（disable 仅置
+                # enabled=0，不删除会残留 enabled=0 行，导致后续安装/统计异常）。
+                try:
+                    with get_registry_db() as conn:
+                        conn.execute(
+                            'DELETE FROM plugin_mcp_servers WHERE plugin_id = ?',
+                            (identifier,)
+                        )
+                        conn.commit()
+                except Exception as e:
+                    print('[PluginManager] mcp row cleanup skipped on uninstall: %s' % e)
 
                 # 从缓存中移除
                 self._cache.pop(identifier, None)
@@ -2124,7 +2288,8 @@ class PluginManager:
                     old.status in (PluginStatus.INSTALLED, PluginStatus.ENABLED, PluginStatus.ACTIVE):
                 print(f'[PluginManager] ⚠️ 自动禁用已弃用插件 {old_id}（由 {new_id} 替代）')
                 try:
-                    self.disable(old_id)
+                    # 弃用迁移属系统路径：旧插件本就不该再启用，跳过回得去预检。
+                    self.disable(old_id, _skip_reenable_check=True)
                 except Exception as e:
                     print(f'[PluginManager] ⚠️ 禁用弃用插件 {old_id} 失败: {e}')
 

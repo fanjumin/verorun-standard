@@ -540,8 +540,22 @@ def list_workflow_runs(def_id):
 
 @workflow_admin_bp.route('/node-types', methods=['GET'])
 def list_node_types():
-    """返回 12 种节点类型清单（常量）"""
+    """返回可用节点类型：内核常量 + 插件自注册节点。
+
+    改造前这里只回常量 12 类，插件 register_dag_nodes() 注册的节点
+    （如 email 的 send_email）永远不会出现在编辑器面板，形成
+    “能执行但选不到”的断点（WP-E1）。
+    """
     admin, err = _require_admin_or_403()
     if err:
         return err
-    return _success({'node_types': WORKFLOW_NODE_TYPES})
+    types = list(WORKFLOW_NODE_TYPES)
+    try:
+        engine = _get_engine()
+        if engine is not None:
+            for node_type in engine.registered_node_types():
+                if node_type not in types:
+                    types.append(node_type)
+    except Exception as e:  # noqa: BLE001
+        current_app.logger.warning('node-types: engine unavailable: %s', e)
+    return _success({'node_types': types})

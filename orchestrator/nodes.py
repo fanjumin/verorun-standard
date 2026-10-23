@@ -14,7 +14,7 @@ Node Handlers — 工作流节点类型实现
   - notify:        通知（邮件/Webhook/站内）
   - wait:          等待/延时
   - sub_workflow:  子工作流
-  - market_check:  市场数据检查
+  - market_check:  市场数据检查（插件提供：stock_analysis/dag_nodes_market.py）
   - http_request:  HTTP API 调用
   - script:        执行自定义脚本
 
@@ -621,88 +621,15 @@ def _send_email(email_to: str, title: str, message: str) -> dict:
 
 
 # ============================================================
-# 市场检查节点
+# 市场检查节点 —— 已迁出核心（2026-10-13）
 # ============================================================
-
-def handle_market_check(node_def: dict, input_data: dict) -> dict:
-    """
-    市场数据检查节点。
-    配置:
-      - symbol: '000001.SH' 等
-      - metric: 'change_pct' | 'volume' | 'price'
-      - operator: '>' | '<' | '>=' | '<='
-      - threshold: float
-
-    取数统一委托 stock_analysis 插件（见 _get_market_data）。
-    """
-    config = node_def.get('config', {})
-    symbol = config.get('symbol', '000001.SH')
-    metric = config.get('metric', 'change_pct')
-    operator = config.get('operator', '>')
-    threshold = config.get('threshold', 0)
-
-    try:
-        market_data = _get_market_data(symbol)
-        value = market_data.get(metric, 0)
-
-        operators = {
-            '>': lambda a, b: a > b,
-            '<': lambda a, b: a < b,
-            '>=': lambda a, b: a >= b,
-            '<=': lambda a, b: a <= b,
-            '==': lambda a, b: a == b,
-        }
-        triggered = operators.get(operator, lambda a, b: False)(value, threshold)
-
-        return {
-            'success': True,
-            'symbol': symbol,
-            'metric': metric,
-            'value': value,
-            'threshold': threshold,
-            'triggered': triggered,
-            'data': market_data
-        }
-    except Exception as e:
-        return {'success': False, 'error': str(e), 'triggered': False}
-
-
-def _get_market_data(symbol: str) -> dict:
-    """获取市场数据 —— 委托 stock_analysis 插件数据网关（股票业务唯一入口）。
-
-    2026-09-21 整改：此前本函数直连腾讯行情（qt.gtimg.cn）并自行正则解析，
-    绕过插件重复实现了取数职责 —— 既不受插件级限流/冷却/failover 治理，
-    也不产生 data_sources 合规留痕，插件更换主源（Tushare/Wind/Choice）时
-    本节点不会跟随。现一律经插件 gateway；插件未启用时明确抛错，由工作流
-    引擎按 on_error 策略处理（而非静默返回 0 值做出错误判定）。
-    """
-    try:
-        from plugins.stock_analysis.gateway import gateway
-        from plugins.stock_analysis.providers.base import DataCategory
-        from plugins.stock_analysis.providers.commons import (INDEX_CANDIDATES,
-                                                              index_symbol,
-                                                              market_symbol)
-    except ImportError as err:
-        raise RuntimeError(
-            "market_check 节点依赖 stock_analysis 插件，当前发行版未启用该插件"
-        ) from err
-
-    clean = (symbol or "").strip()
-    if not clean:
-        raise RuntimeError("market_check 缺少 symbol 配置")
-
-    # 指数与个股走不同链路：指数须先过 index_symbol（腾讯对 sh000001 类
-    # 指数符号规范敏感），个股走 market_symbol 补交易所前缀。
-    if index_symbol(clean) in {index_symbol(c["symbol"]) for c in INDEX_CANDIDATES}:
-        code, category = index_symbol(clean), DataCategory.INDEX
-    else:
-        code, category = market_symbol(clean), DataCategory.QUOTE
-
-    quote = gateway.get_quote(code, category=category)
-    return {"name": quote.get("name"),
-            "price": quote.get("price"),
-            "change_pct": quote.get("change_pct"),
-            "volume": quote.get("volume")}
+# handle_market_check / _get_market_data 原在本文件，因核心静态 import 业务插件
+# （plugins.stock_analysis.*）违反架构红线而整体迁至插件侧：
+#     plugins/stock_analysis/dag_nodes_market.py
+# 经 BasePlugin.register_dag_nodes()（plugin_manager/base.py:270）由平台注册进引擎
+# （manager.py:2063-2100 ← admin/app.py:374-378），取数链路与错误语义未变。
+# 请勿在本文件重新引入对 plugins.* 的静态 import —— 需要插件能力时走
+# shared.plugin_access.call_plugin 门面（本文件 _send_email 即先例）。
 
 
 # ============================================================
@@ -859,7 +786,9 @@ def _run_builtin_script(func, ctx: dict, cfg: dict, timeout: int = 120) -> dict:
     说明：内置脚本在进程内执行，无法强制 kill 挂起的线程，
     因此内置脚本必须保证在 timeout 内自行返回（纯计算/快速 IO）。
     """
+    import logging
     import threading
+    logger = logging.getLogger('orchestrator.nodes')
     box = {}
     def target():
         try:
@@ -870,6 +799,11 @@ def _run_builtin_script(func, ctx: dict, cfg: dict, timeout: int = 120) -> dict:
     t.start()
     t.join(timeout)
     if t.is_alive():
+        # 线程无法从外部停止：脚本会继续跑完，其写库/副作用不受本次超时影响。
+        # 留痕以便定位"谁在超时后还活着"（与 agent_matrix 的 C3 同源）。
+        logger.warning('builtin script timed out after %ss; the thread keeps running '
+                       'and its result is discarded (func=%s)',
+                       timeout, getattr(func, '__name__', func))
         raise RuntimeError(f'内置脚本执行超时（{timeout}s）')
     if 'error' in box:
         raise RuntimeError(box['error'])
@@ -964,7 +898,7 @@ NODE_HANDLERS = {
     'condition': handle_condition,
     'publish': handle_publish,
     'notify': handle_notify,
-    'market_check': handle_market_check,
+    # market_check 已迁至 plugins/stock_analysis/dag_nodes_market.py（插件自注册）
     # wait / http_request 由 WorkflowEngine 内置处理
     'approval': handle_approval,
     'sub_workflow': None,  # 需 engine 引用，在 register_all 中工厂注册

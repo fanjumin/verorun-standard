@@ -309,6 +309,24 @@ else:
     except Exception as e:
         print(f'[Subscription] ⚠️ 订阅调度启动失败: {e}')
 
+# ===== 模型目录自动对齐（Phase C：周调度；消费方 = 本块 APScheduler 实例，
+# 已在启动日志确认，避免"声明式空壳"教训复发）=====
+try:
+    from services.model_sync import run_sync as _ms_run_sync
+    from services.model_sync import probe_provider_models as _ms_probe
+    from apscheduler.schedulers.background import BackgroundScheduler as _MS_Sched
+    _ms_sched = _MS_Sched(timezone='Asia/Shanghai')
+    _ms_sched.add_job(_ms_run_sync, 'cron', day_of_week='mon', hour=3, minute=40,
+                      kwargs={'dry_run': False}, id='model_catalog_weekly_sync',
+                      replace_existing=True)
+    _ms_sched.add_job(_ms_probe, 'cron', day_of_week='wed', hour=3, minute=40,
+                      kwargs={'sample_limit': 3}, id='model_catalog_weekly_probe',
+                      replace_existing=True)
+    _ms_sched.start()
+    print('[ModelSync] ✅ 模型目录调度已注册并启动（周一 03:40 体检落库 / 周三 03:40 1-token 探测）')
+except Exception as e:
+    print(f'[ModelSync] ⚠️ 模型目录周调度启动失败: {e}')
+
 init_cms_tables()
 
 # ===== PluginManager（新插件系统）=====
@@ -750,14 +768,14 @@ def admin_login_action():
         attempts = _admin_login_attempts.get(attempt_key, {'count': 0, 'first': now, 'banned_until': 0})
         if attempts.get('banned_until', 0) > now:
             remaining = attempts['banned_until'] - now
-            return jsonify({'success': False, 'error': f'登录被临时锁定，{remaining // 60 + 1} 分钟后重试'}), 429
+            return jsonify({'ok': False, 'error': f'登录被临时锁定，{remaining // 60 + 1} 分钟后重试'}), 429
         if now - attempts['first'] > 900:
             attempts = {'count': 0, 'first': now, 'banned_until': 0}
 
     # ── 验证码登录分支 (桌面/移动端) ──
     if code:
         if not username:
-            return jsonify({'success': False, 'error': '请输入账号'}), 400
+            return jsonify({'ok': False, 'error': '请输入账号'}), 400
 
         market = os.environ.get('DEPLOY_MARKET', 'cn')
         now_iso = __import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -772,10 +790,10 @@ def admin_login_action():
                 ).fetchone()
                 if not row:
                     _hit_attempt(attempts, now)
-                    return jsonify({'success': False, 'error': '验证码错误或已过期'}), 400
+                    return jsonify({'ok': False, 'error': '验证码错误或已过期'}), 400
                 row = dict(row)
                 if row['attempts'] >= 5:
-                    return jsonify({'success': False, 'error': '尝试次数过多，请重新获取验证码'}), 400
+                    return jsonify({'ok': False, 'error': '尝试次数过多，请重新获取验证码'}), 400
                 conn.execute('UPDATE email_codes SET used=1 WHERE id=%s', (row['id'],))
                 # Find user by email
                 user = conn.execute('SELECT * FROM users WHERE email=%s AND is_admin=1', (username,)).fetchone()
@@ -787,10 +805,10 @@ def admin_login_action():
                 ).fetchone()
                 if not row:
                     _hit_attempt(attempts, now)
-                    return jsonify({'success': False, 'error': '验证码错误或已过期'}), 400
+                    return jsonify({'ok': False, 'error': '验证码错误或已过期'}), 400
                 row = dict(row)
                 if row['attempts'] >= 5:
-                    return jsonify({'success': False, 'error': '尝试次数过多，请重新获取验证码'}), 400
+                    return jsonify({'ok': False, 'error': '尝试次数过多，请重新获取验证码'}), 400
                 conn.execute('UPDATE sms_codes SET used=1 WHERE id=%s', (row['id'],))
                 # Find user by phone
                 user = conn.execute('SELECT * FROM users WHERE phone=%s AND is_admin=1', (username,)).fetchone()
@@ -801,7 +819,7 @@ def admin_login_action():
             with _admin_login_lock:
                 attempts['count'] += 1
                 _admin_login_attempts[attempt_key] = attempts
-            return jsonify({'success': False, 'error': '验证码错误或账号无效'}), 400
+            return jsonify({'ok': False, 'error': '验证码错误或账号无效'}), 400
 
         user = dict(user)
         # Query admin role
@@ -824,7 +842,7 @@ def admin_login_action():
 
     # ── 密码登录分支 (浏览器/所有端) ──
     if not username or not password:
-        return jsonify({'success': False, 'error': '请输入账号和密码'}), 400
+        return jsonify({'ok': False, 'error': '请输入账号和密码'}), 400
 
     from models import get_db
     with get_db() as conn:
@@ -840,14 +858,14 @@ def admin_login_action():
                 attempts['banned_until'] = now + 1800
             _admin_login_attempts[attempt_key] = attempts
         _log_admin_action(None, 'login_failed', ip, f'user={username} not_found')
-        return jsonify({'success': False, 'error': '账号或密码错误'}), 400
+        return jsonify({'ok': False, 'error': '账号或密码错误'}), 400
 
     stored = user['password_hash']
     if not stored:
         with _admin_login_lock:
             attempts['count'] += 1
             _admin_login_attempts[attempt_key] = attempts
-        return jsonify({'success': False, 'error': '账号或密码错误'}), 400
+        return jsonify({'ok': False, 'error': '账号或密码错误'}), 400
 
     pw_ok = False
     parts = stored.split(':')
@@ -871,7 +889,7 @@ def admin_login_action():
                 attempts['banned_until'] = now + 1800
             _admin_login_attempts[attempt_key] = attempts
         _log_admin_action(user['id'], 'login_failed', ip, f'user={username} bad_password')
-        return jsonify({'success': False, 'error': '账号或密码错误'}), 400
+        return jsonify({'ok': False, 'error': '账号或密码错误'}), 400
 
     with _admin_login_lock:
         _admin_login_attempts.pop(attempt_key, None)
@@ -898,7 +916,7 @@ def admin_api_refresh_token():
 
     与 /auth/refresh 等价：旧 token 换新（scenario='refresh'，2FA 插件不拦截续期）。
     Token 提取：Authorization: Bearer 优先，body {'token': ...} 兜底。
-    响应结构沿用 {success, data:{token}}，兼容桌面端 401 自动续签拦截器。
+    响应结构沿用 {ok, data:{token}}，兼容桌面端 401 自动续签拦截器。
     """
     from services.jwt_service import validate_token
     data = request.get_json(force=True, silent=True) or {}
@@ -909,7 +927,7 @@ def admin_api_refresh_token():
 
     payload = validate_token(old_token)
     if not payload:
-        return jsonify({'success': False, 'error': 'Invalid or expired token'}), 401
+        return jsonify({'ok': False, 'error': 'Invalid or expired token'}), 401
 
     _res = issue_auth_session(
         payload['user_id'], payload.get('phone'),
@@ -922,13 +940,13 @@ def admin_api_refresh_token():
     if os.environ.get('JWT_REFRESH_ROTATE') == '1':
         from services.jwt_service import revoke_token
         revoke_token(old_token)
-    return jsonify({'success': True, 'data': {'token': _res['token']}})
+    return jsonify({'ok': True, 'data': {'token': _res['token']}})
 
 
 def _make_login_response(token, client_type):
     """根据客户端类型返回不同的响应格式"""
     from flask import make_response
-    resp = make_response(jsonify({'success': True, 'data': {'token': token}}))
+    resp = make_response(jsonify({'ok': True, 'data': {'token': token}}))
     if client_type in ('desktop', 'mobile'):
         # 桌面/移动端：只返回 JSON，不设 cookie
         return resp
@@ -987,14 +1005,9 @@ def admin_send_code():
         return jsonify({'success': False, 'error': '发送失败，请检查账号后重试'}), 400
 
     if market == 'intl':
-        # 邮箱验证码：存表 + 发邮件
-        from models import get_db
-        with get_db() as conn:
-            conn.execute(
-                'INSERT INTO email_codes (email, code, purpose, expires_at) VALUES (%s,%s,%s,%s)',
-                (target, code, 'login', expires_at))
-            conn.commit()
-
+        # 邮箱验证码：先发送，成功后才落库。旧实现先写 email_codes 再发信，
+        # 发不出去也返回 success:True —— 库里有一个可用验证码，但用户收不到，
+        # 属于 fail-open（NEW-03）。与短信分支保持同一契约。
         from shared.plugin_access import call_plugin
         ok, _res = call_plugin(
             'plugins.email.services', 'send_email',
@@ -1003,32 +1016,42 @@ def admin_send_code():
             body_text=f'Your verification code is: {code}\n\nValid for 5 minutes.\n\nIf you did not request this, please ignore.',
             feature='admin_login_code',
         )
-        if ok:
-            print(f'[Admin] Email code sent to {target}')
-        else:
-            print(f'[Admin] Email unavailable/failed, code stubbed in log: {code}')
+        if not ok:
+            print(f'[Admin] Email code send failed for {target}')
+            return jsonify({'success': False, 'error': '验证码发送失败，请检查邮件服务配置'}), 503
+
+        from models import get_db
+        with get_db() as conn:
+            conn.execute(
+                'INSERT INTO email_codes (email, code, purpose, expires_at) VALUES (%s,%s,%s,%s)',
+                (target, code, 'login', expires_at))
+            conn.commit()
+        print(f'[Admin] Email code sent to {target}')
         return jsonify({'success': True, 'message': '验证码已发送到邮箱'})
     else:
-        # 短信验证码：委托给 /auth/sms/send
+        # 短信验证码：先发送，成功后才落库。旧实现无条件写 sms_codes 并返回
+        # success:True —— 无服务商凭据时用户永远收不到，却显示"已发送"。
+        try:
+            import flask as _flask
+            _pm = _flask.current_app.extensions.get('plugin_manager')
+            _sms = _pm.get_instance('sms') if (_pm and _pm.is_enabled('sms')) else None
+            send_result = _sms.send_sms(target, code, 'login') if _sms else {
+                'success': False, 'error': 'sms_plugin_unavailable'}
+        except Exception as e:  # noqa: BLE001 -- 发送失败必须如实上报
+            send_result = {'success': False, 'error': str(e)}
+
+        if not (send_result or {}).get('success'):
+            return jsonify({
+                'success': False,
+                'error': (send_result or {}).get('error') or '验证码发送失败，请先配置短信服务商',
+            }), 503
+
         from models import get_db
         with get_db() as conn:
             conn.execute(
                 'INSERT INTO sms_codes (phone, code, purpose, expires_at) VALUES (%s,%s,%s,%s)',
                 (target, code, 'login', expires_at))
             conn.commit()
-
-        try:
-            # Try SmsPlugin first
-            import flask as _flask
-            _pm = _flask.current_app.extensions.get('plugin_manager')
-            _sms = _pm.get_instance('sms') if (_pm and _pm.is_enabled('sms')) else None
-            if _sms:
-                _sms.send_sms(target, code, 'login')
-            else:
-                from services.sms_service import send_sms
-                send_sms(target, code, 'login')
-        except Exception:
-            pass  # stub mode already prints
         return jsonify({'success': True, 'message': '验证码已发送'})
 
 

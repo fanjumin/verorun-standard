@@ -37,7 +37,7 @@ class DingTalkAdapter(BaseIMAdapter):
         cached = _token_cache.get(cache_key)
         if cached:
             return cached
-        _, rd = http_client.request_json(
+        _rc, rd = http_client.request_json(
             'GET', _TOKEN_URL,
             params={'appkey': app_key, 'appsecret': app_secret}
         )
@@ -54,7 +54,7 @@ class DingTalkAdapter(BaseIMAdapter):
         if not app_key or not app_secret:
             return False, _('AppKey and AppSecret cannot be empty')
         try:
-            _, rd = http_client.request_json(
+            _rc, rd = http_client.request_json(
                 'GET', _TOKEN_URL,
                 params={'appkey': app_key, 'appsecret': app_secret}
             )
@@ -101,7 +101,7 @@ class DingTalkAdapter(BaseIMAdapter):
                 'userid_list': userid,
                 'msg': _json.dumps({'msgtype': 'text', 'text': {'content': str(content)[:2000]}}),
             }
-            _, rd = http_client.request_json(
+            _rc, rd = http_client.request_json(
                 'POST', _ASYNC_SEND_URL,
                 params={'access_token': token},
                 json=body

@@ -59,3 +59,9 @@ httpx>=0.27.0,<1.0
 # 自动回退 CJK 感知的启发式估算，功能与门禁均不受影响。
 # 内网/离线部署默认不装（避免 pip 取包失败中断部署）；需要精确计数时取消注释：
 # tiktoken>=0.7
+
+# ── Optional: 本地语音识别（agent_matrix/audio.py AudioInputProcessor，懒导入）──
+# Vosk 为可选导入：未安装或未配置 VOSK_MODEL_PATH 时 ASR 优雅降级返回空文案，
+# Web Speech（桌面端首选通道）不受影响。启用本地语音识别时安装：
+#   pip install vosk && python tools/fetch_vosk_model.py
+# vosk>=1.1.3

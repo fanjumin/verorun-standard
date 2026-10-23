@@ -86,6 +86,12 @@ def _run_login_precheck(scenario, user_id, phone, app_name, is_admin, role,
     except Exception:
         current_app.logger.exception(
             'auth.before_issue_session filter failed; fallback issue session')
+        # F5：这是可用性优先的取舍（插件故障不应该把登录挡死），保留 fail-open
+        # 行为；但原来只有一行 exception 日志，"第二因子被静默绕过"这件事在日志
+        # 里检索不到。补一条可 grep 的显式告警，便于事后审计与告警接入。
+        current_app.logger.warning(
+            'SECURITY: login pre-check failed open — a session is being issued '
+            'without the second factor (two_factor_auth unavailable)')
 
 
 def _write_user_session(user_id, token, device_name, device_type):
@@ -96,6 +102,13 @@ def _write_user_session(user_id, token, device_name, device_type):
     ua = (flask.request.headers.get('User-Agent', '') or '')[:200]
     ip = flask.request.remote_addr or ''
     with get_db() as conn:
+        # F1：每用户只允许一个"当前会话"。此前三处写入点都只 INSERT is_current=1，
+        # 从不复位旧行，于是每次登录都多一条"当前设备"（104 实测 415 行全是 1），
+        # 并且 session_terminate 对 is_current=1 的行直接返回 400，导致"强制下线
+        # 其它设备"对该用户 100% 失效。必须先复位再插入，顺序不能反。
+        conn.execute(
+            "UPDATE user_sessions SET is_current = 0 WHERE user_id = %s AND is_current = 1",
+            (user_id,))
         conn.execute(
             "INSERT INTO user_sessions "
             "(user_id, token_hash, device_name, device_type, ip_address, user_agent, is_current, last_active, created_at) "

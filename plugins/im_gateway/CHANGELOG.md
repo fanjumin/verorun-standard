@@ -1,6 +1,27 @@
 # Changelog
 
-## Unreleased
+## v3.1.2 — 2026-10-20
+
+### Fixed
+
+- **QQ 入站验签必然失败（P0）**：`_qq_seed()` 曾按 `sha256(bot_secret)` 派生 Ed25519 私钥种子，
+  与官方「回调地址验证」文档给出的样例对不上。正确派生是**把 secret 反复拼接至 32 字节后截断**。
+  后果：op=13 回调地址验证签名错误（后台回调地址根本存不下来），真实事件回调也一律 401。
+  现已用官方样例逐字复算锚定（secret `DG5g3B4j9X2KOErG`、event_ts `1725442341`、
+  plain_token `Arq0D5A61EgUu4OxUvOp` → `87befc99…652c706`）。
+
+### Added
+
+- `tests/test_webhook_signing.py`（17 例）：官方向量逐字比对、sha256 派生必须被拒、body 篡改、
+  时间戳替换、缺密钥 / 缺签名头 fail-closed、`channel_configs` 的 `bot_secret` 与
+  `client_secret` 兜底、以及 line 分支未被波及。
+  本插件此前**没有任何验签测试**，这是该缺陷能潜伏到 v3.1.1 的直接原因。
+
+### Known limitations
+
+- QQ 仍未做真实租户联调：回调地址须公网 HTTPS，且平台只接受 80/443/8080/8443 端口。
+
+## v3.1.1 — 2026-10-08
 
 ### Changed
 
@@ -47,6 +68,7 @@ IM 底座增强（minor）：8 通道真实出站 + 入站验签闭环。
 
 - **真机连通未验证**：本批仅完成静态与离线向量自测（验签 16/16），实际发送与 webhook 注册需配置真实凭据后自测。
 - QQ Ed25519 派生机理按官方约定（`私钥 = sha256(bot_secret)`）实现，上线前建议以真实回调复验。
+  **该结论已于 v3.1.2 证伪并修正**：正确派生为 secret 循环填充至 32 字节。
 - 凭据仍为明文存储；`events.subscribe` 暂无内置业务消费者。
 
 ## v3.0.0 — 2026-10-02

@@ -14,10 +14,16 @@ plugins:
   # 【2026-09-08 用户拍板】content_factory / site_domains 对科研版毫无价值，移入 exclude。
   include:
     - _base
+    # 2026-10-20 用户裁决：新增 bayes_engine（贝叶斯推理插件 v1.0.1）。
+    #   依据：① 方法论同构——skills/research-belief-revision 为"竞争假设→实验证据→
+    #   贝叶斯因子→信念修正"专门编写，补 method_architect（exp.hypothesis/methodology/
+    #   validation）缺的"证据进来后如何定量更新信念"一环；② 归属零成本——agent_role=athena
+    #   已在本版核心角色集内，resolve_agent_roles ① 直接命中，无需角色侧 managed_modules
+    #   认领；③ compatible_editions=[] 全版本可见；④ 零运行时依赖（pure python，无 numpy），
+    #   3 表 5 测试文件，min_app_version 0.63.0 与本版 kernel baseline 一致。
+    - bayes_engine
     - captcha_embedded
     - email
-    - sms
-    - two_factor_auth
     - memory_engine
     - vault
     - veroscholar
@@ -39,8 +45,17 @@ plugins:
     - ads
     - social_push
     - enterprise_verify
+    # 2026-10-20 用户裁决：科研单机版无短信验证 / 二次因子场景（user_login: false，
+    #   session_service 对 two_factor_auth unavailable 有显式降级路径）；且二者在原
+    #   include 内即无归属角色（agent_role=service 不在本版角色集，无 managed_modules
+    #   认领，enable 必拒）——移入 exclude。email / vault 改由新增 ops 角色认领。
+    - sms
+    - two_factor_auth
 roles:
+  # 2026-10-20 用户裁决新增 ops（系统运维 lane：email 通知通道 + vault 备份/还原/
+  #   审计），与金融版「平台通用 athena + ops」同构；其余为科研流水线角色。
   - athena
+  - ops
   - veroscholar
   - lit_scout
   - method_architect

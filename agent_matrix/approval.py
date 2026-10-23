@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """
-Agent Tool Approval System (系统级内核定域，v1.1)
+Agent Tool Approval System (系统级内核定域，v1.2)
 ==================================================
 职责：
   - TOOL_RISK 风险档定义（auto / approve_session / always）
+  - 审批五模式：off / session / strict / accept_edits / dont_ask
+    （后两档为 S3 新增的自动放行档，经 agent_approval_modes_v2_enabled
+    灰度，关闭即回落 session）
   - ApprovalService 审批单读写（读/写独立 schema agent_tools）
   - resolve_tool_risk()   工具名 → 风险档匹配（含 MCP 前缀剥壳）
   - approval_pre_execute() `agent_tool.pre_execute` 钩子回调（fail-open 铁律）
@@ -14,6 +17,7 @@ Agent Tool Approval System (系统级内核定域，v1.1)
 import hashlib
 import json
 import logging
+import re
 
 logger = logging.getLogger('agent_matrix.approval')
 
@@ -36,8 +40,76 @@ TOOL_RISK = {
 # ── 钩子点 & 审批模式 ──────────────────────────────────
 FILTER_PRE_EXECUTE = 'agent_tool.pre_execute'
 APPROVAL_MODE_KEY = 'agent_tool_approval_mode'
-DEFAULT_APPROVAL_MODE = 'approve_session'
-VALID_MODES = ('off', 'session', 'strict')
+DEFAULT_APPROVAL_MODE = 'session'
+# session/strict/off 为既有模式；accept_edits/dont_ask 为 S3 新增的两档，
+# 受 V2_FEATURE_KEY 灰度（关闭时回落 session，绝不静默提权 —— fail-closed）。
+VALID_MODES = ('off', 'session', 'strict', 'accept_edits', 'dont_ask')
+V2_MODES = ('accept_edits', 'dont_ask')
+V2_FEATURE_KEY = 'agent_approval_modes_v2_enabled'
+
+# accept_edits 档：这些 approve_session 风险工具在同任务内免批（文件编辑语义）；
+# 经 resolve_tool_risk MCP 剥壳后的裸名匹配，其余 approve_session 风险仍落单。
+SESSION_AUTO_EDIT_TOOLS = frozenset({'file_write', 'file_edit'})
+
+# ── 注入模式最小集（内容层第二道防线）─────────────────────
+# 只收「高置信破坏 / 外泄 / 持久化」模式，宁缺勿滥：误杀正常命令的代价
+# （一张多余审批单）虽低，但会训练用户无脑批准，反而消解门禁。
+# 命中效果：本次调用风险档视同 'always'（每次落审批单），不改 TOOL_RISK
+# 静态表、不阻断执行（审批单本身仍是 fail-open 的软阻塞语义）。
+INJECTION_PATTERNS = (
+    ('ifs_override',   re.compile(r'\bIFS\s*=')),
+    # rm -rf / 、rm -rf /* 、rm 后紧跟根路径
+    ('rm_root',        re.compile(r'\brm\s+(-[a-zA-Z]+\s+)*/(\s|$|\*)')),
+    ('pipe_to_shell',  re.compile(
+        r'\b(curl|wget)\b[^|;&]*\|\s*(sudo\s+)?(ba|z|da)?sh\b')),
+    ('base64_exec',    re.compile(
+        r'\bbase64\b[^|;&]*(-d|--decode)\b[^|;&]*\|\s*(ba|z|da)?sh\b')),
+    ('devtcp_shell',   re.compile(r'/dev/(tcp|udp)/')),
+    ('cred_read',      re.compile(
+        r'\b(cat|head|tail|less|more)\b[^;&|]*'
+        r'(\.env\b|id_rsa\b|\.pem\b|\bcredentials?\b)')),
+    # 路径即凭据文件（file_read/file_write 的 path 形态）：提示注入最经典的
+    # 「读 .env 再外泄」落点。要求以该文件名结尾，避免误命中
+    # .env.example / id_rsa.pub / my.pem.bak 这类同族但无害的名字。
+    ('cred_path',      re.compile(r'(\.env|\.pem|id_rsa)$')),
+    ('history_tamper', re.compile(
+        r'\b(history\s+(-c|--clear)\b|unset\s+HISTFILE\b)')),
+    ('env_exfil',      re.compile(
+        r'\benv\b[^;&|]*\|\s*(curl|wget|nc|ncat|python)\b')),
+    ('fork_bomb',      re.compile(r':\(\)\s*\{.*\}\s*;\s*:')),
+    # 写入 authorized_keys = 提示注入最典型的持久化落点
+    ('ssh_key_write',  re.compile(r'>\s*[^\s;|]*authorized_keys')),
+)
+
+# 参与检测的参数键（工具入参常见命名；未列键不检测）
+_INJECTION_ARG_KEYS = ('command', 'cmd', 'script', 'code',
+                       'path', 'filepath', 'content', 'url')
+
+
+def detect_command_injection(tool, args):
+    """对工具入参做注入模式扫描；命中返回模式名，未命中返回 None。
+
+    fail-open 铁律：任何异常返回 None（绝不因检测器自身故障阻断工具）。
+    只做字符串包含级匹配（正则区分度有限），定位是「升档审批」而非拦截，
+    误报的代价只是一张多余审批单。
+
+    已知盲区（本层不覆盖，需别的机制兜）：http_request 把数据发往外部域名。
+    外泄目的地应由域名白名单管控，正则无法区分合法回调与 attacker 域名。
+    """
+    try:
+        if not isinstance(args, dict):
+            return None
+        for key in _INJECTION_ARG_KEYS:
+            val = args.get(key)
+            if not isinstance(val, str) or not val:
+                continue
+            for name, pat in INJECTION_PATTERNS:
+                if pat.search(val):
+                    return name
+        return None
+    except Exception as e:
+        logger.warning('injection detect failed, treat as clean: %s', e)
+        return None
 
 # ── 单例管理 ───────────────────────────────────────────
 # agent_matrix 启动时调用 init_approval() 构造；插件 activate() 也会调一次（幂等）
@@ -68,14 +140,37 @@ class ApprovalService:
         self._config = config or {}
 
     # ── 配置 ──────────────────────────────────────────────
+    def _v2_modes_enabled(self) -> bool:
+        """accept_edits/dont_ask 灰度开关（system_config）。
+
+        与 planner_loop.is_replan_enabled 同范式：键不存在、值非法、DB
+        不可达一律按关闭处理——新模式永不被隐式激活（fail-closed 提权门）。
+        """
+        try:
+            from models import get_db
+            with get_db() as conn:
+                row = conn.execute(
+                    "SELECT value FROM system_config"
+                    " WHERE key = %s", (V2_FEATURE_KEY,)).fetchone()
+            if not row:
+                return False
+            raw = row.get('value') if isinstance(row, dict) else row[0]
+            return str(raw or '').strip().lower() in ('1', 'true', 'yes', 'on')
+        except Exception as e:
+            logger.warning('approval v2 feature read failed, treated as off: %s', e)
+            return False
+
     def approval_mode(self) -> str:
         """审批模式判定。
 
         读取顺序：system_config(agent_tool_approval_mode) -> plugin.json config.approval_mode -> 默认。
         任何异常一律回退默认值（默认是「审批开启」而非「关闭」：
         降级到关闭会让高风险工具失去门禁，方向不安全）。
+        accept_edits/dont_ask 为灰度模式：灰度开关关闭时，即使 DB 里配了
+        该值也回落 session —— 新权限档不得因配置脏值而静默生效。
         """
         mode = ''
+        v2_on = self._v2_modes_enabled()
         try:
             from models import get_db
             with get_db() as conn:
@@ -90,8 +185,14 @@ class ApprovalService:
                 mode = str(raw or '').strip().lower()
         except Exception as e:
             logger.warning('approval mode read failed, use default: %s', e)
+        if mode in V2_MODES and not v2_on:
+            logger.warning('approval mode %r configured while v2 feature off, '
+                           'falling back to session', mode)
+            mode = ''
         if mode not in VALID_MODES:
             mode = str(self._config.get('approval_mode') or '').strip().lower()
+        if mode in V2_MODES and not v2_on:
+            mode = ''
         if mode not in VALID_MODES:
             mode = DEFAULT_APPROVAL_MODE
         return mode
@@ -207,6 +308,16 @@ def approval_pre_execute(gate):
             return gate
         tool = gate.get('tool') or ''
         risk = resolve_tool_risk(tool)
+        # 内容层第二道防线：入参命中注入模式 → 本次视同 always 档。
+        # 必须位于下方早退之前 —— 未知工具（risk=None，含全部 MCP 路由
+        # 工具）原本完全不进门，此处是它们唯一的收口点。
+        # 注：'off' 模式下整段门禁不干预（下方 return），注入检测同样不生效，
+        # 这是既有设计（off = 关闭全部审批），未在此处改变。
+        injection_hit = detect_command_injection(tool, gate.get('args'))
+        if injection_hit and risk != 'always':
+            logger.warning('injection pattern %r escalated tool %s to always',
+                           injection_hit, tool)
+            risk = 'always'
         if risk is None or risk == 'auto':
             return gate                       # 非本系统工具 / 低风险档 -> 不干预
         svc = get_approval()
@@ -221,6 +332,28 @@ def approval_pre_execute(gate):
         # 放行，故此处统一归一为字符串并截断到列宽。
         task_id = str(gate.get('task_id') or '')[:64]
         agent_id = str(gate.get('agent_id') or '')[:64]
+        # dont_ask：不弹任何审批——同任务已有批准单则放行；否则直接拒绝
+        # （不挂 pending、不软阻塞）。
+        if mode == 'dont_ask':
+            if svc.find_grant(task_id, agent_id, tool):
+                return gate
+            blocked = dict(gate)
+            blocked['allowed'] = False
+            blocked['deny_reason'] = (
+                f'Tool {tool} is auto-denied under "dont_ask" approval mode '
+                f'(no interactive prompts). Approve it explicitly for this '
+                f'task or switch the approval mode, then retry.')
+            return blocked
+        # accept_edits：文件写/改类（file_write/file_edit）同任务内免批。
+        # MCP 路由工具名形如 mcp__agent_tools__<server>__<tool>，须用剥壳后
+        # 裸名匹配免批集合（审批单记录仍用原始工具名，不同 server 的同名工具
+        # 各自独立落单批准）；其余 approve_session 风险仍按 session 落单。
+        if (mode == 'accept_edits' and risk == 'approve_session'
+                and (tool in SESSION_AUTO_EDIT_TOOLS
+                     or (tool.startswith('mcp__agent_tools__')
+                         and tool.rsplit('__', 1)[-1]
+                         in SESSION_AUTO_EDIT_TOOLS))):
+            return gate
         if mode != 'strict' and risk == 'approve_session':
             if svc.find_grant(task_id, agent_id, tool):
                 return gate                   # 同任务内已批准 -> 放行

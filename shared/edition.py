@@ -28,6 +28,10 @@ _EDITION_ALIASES = {
     'pro-web': 'pro',
     'finance-desktop': 'finance',
     'research-desktop': 'research',
+    # 全网智能客服：旧名（omni / omni-desktop）→ 现行 ID omni-service（2026-10-21 用户裁决：
+    # 桌面版废弃，改服务器 + 轻壳的 omni-service 版）
+    'omni': 'omni-service',
+    'omni-desktop': 'omni-service',
     'edu': 'research',
     'edu-desktop': 'research',
     'mini': 'minipro',
@@ -60,6 +64,10 @@ _EDITION_ARTIFACT_STEMS = {
     'standard': 'standard',
     'finance': 'finance-desktop',
     'research': 'research-desktop',
+    # 全网智能客服（omni-service）版（2026-10-21 用户裁决）：服务器部署 + 桌面轻壳远程接入。
+    # 磁盘产物沿用连字符名 omni-service.yaml，与 finance/research 同惯例。
+    'omni': 'omni-service',
+    'omni-service': 'omni-service',
     # pro（专业版）是金融桌面版的**旧商用名**，与 finance 共用同一套磁盘产物。
     # 真实代码依据（3 处，均早于本次修复）：
     #   deploy/entrypoint.sh:83 case 分支把 finance|research|pro|finance-desktop|research-desktop 归一处理

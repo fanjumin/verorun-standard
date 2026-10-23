@@ -8,6 +8,13 @@ domain: methodology
 managed_modules:
   - veroscholar
   - memory_engine
+  # 2026-10-20 用户裁决（bayes_engine 跨版认领惯例定稿）：plugin.json 保持
+  # agent_role=athena 不改（① 兜底归属，全版本不变）；桌面封装版按「定量/方法学」
+  # 功能区由角色侧 managed_modules 认领（② 通道）——金融版 rs_quant（FIN-14），
+  # 科研版即本角色。依据 RES-09/10：research-belief-revision 的「竞争假设→证据→
+  # 贝叶斯因子→信念修正」属方法学与可复现域。不认领则本角色调用 bayes.* 构成
+  # NT-03 越权。认领注释格式惯例见 roles/finance-desktop/ops.yaml 内联注释。
+  - bayes_engine
 capabilities:
   - exp.hypothesis
   - exp.methodology

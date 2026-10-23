@@ -22,6 +22,21 @@ logger = logging.getLogger('agent_matrix.rag_retriever')
 _RRF_K = 60
 
 
+def _owner_filter(viewer_id):
+    """C-1-strict owner 隔离谓词。
+
+    - viewer_id 提供（已认证会话）：共享块(owner_id IS NULL) + 自己的私有块
+    - viewer_id 为空（匿名/主站/无身份调用）：只可见共享块，永不外泄私有块
+
+    返回 (sql_fragment, params)。owner_id 为 NULL 的共享块在两种情形下均可见；
+    owner_id=<user> 的私有块只在 viewer 命中时可见——无 viewer 的匿名/主站路径
+    不再返回任何私有块（有意的隐私收口，非零行为变化）。
+    """
+    if viewer_id in (None, ''):
+        return " AND owner_id IS NULL", []
+    return " AND (owner_id IS NULL OR owner_id = %s)", [viewer_id]
+
+
 class RagRetriever:
     """全局 knowledge_blocks 混合检索器。"""
 
@@ -47,7 +62,8 @@ class RagRetriever:
     # -- 主检索入口 ----------------------------------------------------------
 
     def retrieve(self, query: str, top_k: int = 5,
-                 category: str = None, scope: str = None) -> list:
+                 category: str = None, scope: str = None,
+                 viewer_id: str = None) -> list:
         """混合检索 knowledge_blocks，返回按融合分降序的片段列表。
 
         Args:
@@ -55,6 +71,7 @@ class RagRetriever:
             top_k: 返回条数（上限 20，与原 _rag_search 一致）
             category: 可选，仅检索指定分类
             scope: 可选 'system' | 'user'，None 检索全部
+            viewer_id: 可选，当前查看者 user_id；None/'' = 只见共享块（owner_id IS NULL）
         """
         query = (query or '').strip()
         if not query:
@@ -65,12 +82,13 @@ class RagRetriever:
 
         try:
             with ThreadPoolExecutor(max_workers=2) as pool:
-                f_kw = pool.submit(self._keyword_search, query, top_k, category, scope)
+                f_kw = pool.submit(self._keyword_search, query, top_k, category,
+                                   scope, viewer_id)
                 f_vec = None
                 try:
                     if self._embed.is_ready():
                         f_vec = pool.submit(self._vector_search, query, top_k,
-                                            category, scope)
+                                            category, scope, viewer_id)
                 except Exception as e:
                     logger.warning('vector path disabled: %s', e)
                 kw_rows = f_kw.result()
@@ -98,7 +116,7 @@ class RagRetriever:
     # -- 向量路 ---------------------------------------------------------------
 
     def _vector_search(self, query: str, top_k: int,
-                       category: str, scope: str) -> list:
+                       category: str, scope: str, viewer_id: str = None) -> list:
         """向量路：pgvector 余弦距离。embedding 不可用/失败时返回 []。"""
         try:
             vec = self._embed.embed(query)
@@ -116,6 +134,9 @@ class RagRetriever:
             if category:
                 sql += " AND category=%s"
                 params.append(category)
+            ocol, oparams = _owner_filter(viewer_id)
+            sql += ocol
+            params.extend(oparams)
             sql += " ORDER BY embedding <=> %s::vector LIMIT %s"
             params += [vec_literal, top_k * 2]
             with self._get_db() as conn:
@@ -128,7 +149,8 @@ class RagRetriever:
     # -- 关键词路 -------------------------------------------------------------
 
     def _keyword_search(self, query: str, top_k: int,
-                        category: str, scope: str) -> list:
+                        category: str, scope: str,
+                        viewer_id: str = None) -> list:
         """关键词路：pg_trgm 相似度 + 中文双字组合/字符重叠评分。
 
         pg_trgm 扩展缺失时自动回退为不含 trgm 的查询，保证与
@@ -146,6 +168,9 @@ class RagRetriever:
             if category:
                 sql += " AND category=%s"
                 params.append(category)
+            ocol, oparams = _owner_filter(viewer_id)
+            sql += ocol
+            params.extend(oparams)
             sql += " ORDER BY priority DESC, quality_score DESC"
             with self._get_db() as conn:
                 blocks = [dict(r) for r in conn.execute(sql, params).fetchall()]
@@ -162,6 +187,9 @@ class RagRetriever:
                 if category:
                     sql += " AND category=%s"
                     params.append(category)
+                ocol, oparams = _owner_filter(viewer_id)
+                sql += ocol
+                params.extend(oparams)
                 sql += " ORDER BY priority DESC, quality_score DESC"
                 with self._get_db() as conn:
                     blocks = [dict(r) for r in conn.execute(sql, params).fetchall()]
@@ -251,12 +279,18 @@ _retriever = None
 
 
 def rag_search(query: str, top_k: int = 5,
-               category: str = None, scope: str = None) -> list:
-    """全局混合检索便捷入口（模块级单例，兼容原 _rag_search 调用方）。"""
+               category: str = None, scope: str = None,
+               viewer_id: str = None) -> list:
+    """全局混合检索便捷入口（模块级单例，兼容原 _rag_search 调用方）。
+
+    viewer_id: 可选，当前查看者 user_id；None/'' = 只见共享块（owner_id IS NULL），
+    私有块（owner_id=<user>）不会被匿名/主站路径检索到。
+    """
     global _retriever
     if _retriever is None:
         _retriever = RagRetriever()
-    return _retriever.retrieve(query, top_k=top_k, category=category, scope=scope)
+    return _retriever.retrieve(query, top_k=top_k, category=category, scope=scope,
+                               viewer_id=viewer_id)
 
 
 # ── 入库埋点：生成并写入 embedding（幂等，失败静默降级） ------------------

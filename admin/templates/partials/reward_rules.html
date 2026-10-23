@@ -80,16 +80,23 @@ function rrLoadList(){
 
 function rrLoadCoupons(selectedId){
   fetch("/plugin/coupons/bridge/list",{headers:{"Authorization":"Bearer "+T}})
-  .then(function(r){return r.json()})
+  .then(function(r){
+    // 未安装/未启用优惠券插件时后端返回 404（或管理端 404 兜底页），
+    // 这里降级为空列表并给出可读提示，不再抛未捕获的 JSON 解析错误。
+    if(!r.ok) return {success:false};
+    return r.json().catch(function(){return {success:false}});
+  })
   .then(function(d){
     var sel=document.getElementById("rrCoupon");
     if(!sel)return;
-    sel.innerHTML='<option value="">{{ _('Select Coupons') }}</option>';
-    if(d.success&&d.coupons){
-      d.coupons.forEach(function(c){
-        sel.innerHTML+='<option value="'+c.id+'"'+(selectedId&&c.id==selectedId?' selected':'')+'>'+esc(c.code)+(c.type?(' ('+c.type+')'):'')+'</option>';
-      });
-    }
+    // 契约修正（2026-10-13）：后端 bridge_list 返回 {'success':True,'data':rows}
+    // （plugins/coupons/routes.py:337），前端此前读 d.coupons —— 字段名对不上，
+    // 即使插件已安装下拉框也永远为空。
+    var cs=(d&&d.success&&(d.data||d.coupons))||[];
+    sel.innerHTML='<option value="">'+(cs.length?{{ _('Select Coupons') | tojson }}:{{ _('Coupon plugin not installed') | tojson }})+'</option>';
+    cs.forEach(function(c){
+      sel.innerHTML+='<option value="'+c.id+'"'+(selectedId&&c.id==selectedId?' selected':'')+'>'+esc(c.code)+(c.type?(' ('+c.type+')'):'')+'</option>';
+    });
   }).catch(function(){});
 }
 

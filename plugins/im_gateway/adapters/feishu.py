@@ -39,7 +39,7 @@ class FeishuAdapter(BaseIMAdapter):
         cached = _token_cache.get(cache_key)
         if cached:
             return cached
-        _, rd = http_client.request_json(
+        _rc, rd = http_client.request_json(
             'POST', _TOKEN_URL,
             json={'app_id': app_id, 'app_secret': app_secret}
         )
@@ -56,7 +56,7 @@ class FeishuAdapter(BaseIMAdapter):
         if not app_id or not app_secret:
             return False, _('App ID and App Secret cannot be empty')
         try:
-            _, rd = http_client.request_json(
+            _rc, rd = http_client.request_json(
                 'POST', _TOKEN_URL,
                 json={'app_id': app_id, 'app_secret': app_secret}
             )
@@ -110,7 +110,7 @@ class FeishuAdapter(BaseIMAdapter):
         body = {'receive_id': receive_id, 'msg_type': 'text',
                 'content': _json.dumps({'text': str(content)[:2000]})}
         try:
-            _, resp = http_client.request_json(
+            _rc, resp = http_client.request_json(
                 'POST', _BASE + '/im/v1/messages?receive_id_type=' + receive_id_type,
                 json=body,
                 headers={'Authorization': 'Bearer ' + token}
@@ -169,7 +169,7 @@ class FeishuAdapter(BaseIMAdapter):
             }
             body = {"receive_id": chat_id, "msg_type": "interactive", "content": _json.dumps(card)}
 
-        _, resp = http_client.request_json(
+        _rc, resp = http_client.request_json(
             'POST', _BASE + '/im/v1/messages?receive_id_type=chat_id',
             json=body,
             headers={'Authorization': 'Bearer ' + token}

@@ -22,6 +22,16 @@ managed_modules:
   - email
   - im_gateway
   - vault
+  # 2026-10-13（用户裁决：104 测试机需可测全部插件；本版插件/角色清单随业务增减）：
+  # 以下三项的 plugin.json 保持官方版语义的 agent_role（office / business）不改，
+  # 在本版由本角色认领 —— 与上方 email/im_gateway 完全同一通道
+  # （agent_matrix/models.py resolve_agent_roles ②），不改插件侧契约、不扩本版角色集。
+  - hr_recruit        # 招聘管理（agent_role=office）
+  - visitor_profile   # 访客画像（agent_role=business）
+  - coupons           # 智能优惠券（agent_role=business；奖励规则页 bridge 依赖）
+  # 2026-10-18（今日唯一保留项）：search_hub 的 plugin.json 保持 agent_role=content
+  # 不改，在本版由本角色 managed_modules 认领（与 email/im_gateway 同一通道）。
+  - search_hub        # 通用检索接入层（agent_role=content）
 provider_model_id: 401638
 provider: deepseek
 model_name: deepseek-v4-flash

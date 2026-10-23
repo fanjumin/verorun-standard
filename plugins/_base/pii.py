@@ -1,23 +1,17 @@
-#!/usr/bin/env python3
-r"""插件公共 PII 守卫 —— memory_engine / cogevolution_substrate 共用。
+"""shim — _base 收归步骤二（2026-10-17）：实体已迁至 shared/plugin_base/pii.py。
 
-CN 手机号/身份证以数字负向断言 (?<!\d)…(?!\d) 界定，而非 \b —— \b 是
-Unicode 词边界，CJK 同属 \w，中文紧邻数字时不成立，会漏检
-"联系手机13800138000尾号""身份证…X结束"这类最常见的写法（F-DEP 复测遗留项）。
-此写法与 visitor_profile/services/pii_filter.py、chatbot/guard.py 口径一致，
-属对齐既有标准而非扩大覆盖；对 20 位订单号、13 位时间戳、19 位卡号等回归无误杀。
-扩大覆盖范围仍须单独评估误杀。
+保留本垫片保 `from plugins._base.pii import ...` 路径可用：
+- 40+ 消费方零改动（含 agent_matrix 内核、deploy 脚本与全部业务插件）
+- plugin_manager.SHARED_PLUGIN_MODULES 安装期校验按 plugins/_base 目录存在性放行
+- deploy/editions/*.yaml include 与三个 sync workflow 的 cp -r 均按目录拷贝
+
+步骤三（清 shim）随商店包 import 路径迁移后执行，可无限期推迟。
 """
 
-import re
-
-PII_PATTERNS = (
-    re.compile(r'(?i)(password|api[_-]?key|secret|token)\s*[:=]\s*\S+'),
-    re.compile(r'(?<!\d)1[3-9]\d{9}(?!\d)'),          # CN mobile
-    re.compile(r'(?<!\d)\d{17}[\dXx](?!\d)'),         # CN ID card
-)
+from shared.plugin_base import pii as _impl
+from shared.plugin_base.pii import *  # noqa: F401,F403 — 公开符号转发
 
 
-def contains_pii(text: str) -> bool:
-    """True 当文本命中任一 PII 模式。"""
-    return any(p.search(text or '') for p in PII_PATTERNS)
+def __getattr__(name):
+    """转发实体模块全部属性（含下划线符号与后续新增）。"""
+    return getattr(_impl, name)

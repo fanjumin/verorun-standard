@@ -70,7 +70,7 @@ def register_auth(app, exclude_blueprints=None):
     @app.errorhandler(TwoFactorRequired)
     def _handle_two_factor_required(e):
         from flask import jsonify
-        return jsonify({'success': True, 'data': {
+        return jsonify({'ok': True, 'data': {
             'needs_2fa': True,
             'challenge_token': e.challenge_token,
             'redirect': e.redirect or '/',

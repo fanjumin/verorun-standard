@@ -42,7 +42,7 @@ class QQAdapter(BaseIMAdapter):
         cached = _token_cache.get(cache_key)
         if cached:
             return cached
-        _, rd = http_client.request_json(
+        _rc, rd = http_client.request_json(
             'POST', _TOKEN_URL,
             json={'appId': app_id, 'clientSecret': client_secret}
         )
@@ -63,7 +63,7 @@ class QQAdapter(BaseIMAdapter):
         if not app_id or not client_secret:
             return False, _('QQ app_id and client_secret cannot be empty')
         try:
-            _, rd = http_client.request_json(
+            _rc, rd = http_client.request_json(
                 'POST', _TOKEN_URL,
                 json={'appId': app_id, 'clientSecret': client_secret}
             )

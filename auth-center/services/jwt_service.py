@@ -19,6 +19,45 @@ _token_blacklist = {}
 _blacklist_lock = threading.Lock()
 _BLACKLIST_CLEANUP_INTERVAL = 3600  # 1h cleanup
 
+# D1：jti"未吊销"结果的负缓存。吊销只发生在主动登出/强制下线，秒级延迟可接受；
+# 而没有负缓存时，每个已鉴权请求（SSE 建立、轮询、流式）都要为"未吊销"这个
+# 答案穿透一次 DB。TTL 30s，容量兜底清理，且 _revoke_jti() 会立即作废对应条目。
+_JTI_NEG_TTL = 30
+_JTI_NEG_MAX = 10000
+_jti_neg_cache = {}  # jti -> 该结论的失效时刻
+_neg_lock = threading.Lock()
+
+
+def _neg_cache_hit(jti):
+    """True = 近期刚确认过这个 jti 未被吊销，可以跳过 DB 查询。"""
+    now = time.time()
+    with _neg_lock:
+        exp = _jti_neg_cache.get(jti)
+        if exp is None:
+            return False
+        if exp < now:
+            _jti_neg_cache.pop(jti, None)
+            return False
+        return True
+
+
+def _neg_cache_put(jti):
+    with _neg_lock:
+        _jti_neg_cache[jti] = time.time() + _JTI_NEG_TTL
+        if len(_jti_neg_cache) > _JTI_NEG_MAX:
+            now = time.time()
+            for k in [k for k, v in _jti_neg_cache.items() if v < now]:
+                _jti_neg_cache.pop(k, None)
+            if len(_jti_neg_cache) > _JTI_NEG_MAX:
+                # 全是未过期的：直接砍掉一半，宁可多查一次库也不无界增长
+                for k in list(_jti_neg_cache)[:_JTI_NEG_MAX // 2]:
+                    _jti_neg_cache.pop(k, None)
+
+
+def _neg_cache_drop(jti):
+    with _neg_lock:
+        _jti_neg_cache.pop(jti, None)
+
 
 def _cleanup_blacklist():
     """Remove expired entries from blacklist."""
@@ -37,6 +76,8 @@ def _revoke_jti(jti, expires_at):
     """
     with _blacklist_lock:
         _token_blacklist[jti] = expires_at
+    # 吊销必须立即覆盖"未吊销"的负缓存结论（同进程内不允许有 30s 窗口）
+    _neg_cache_drop(jti)
     # 持久化到数据库
     try:
         from models import get_db
@@ -58,6 +99,9 @@ def _is_jti_revoked(jti):
     with _blacklist_lock:
         if jti in _token_blacklist:
             return True
+    # D1：近期已经确认过这个 jti 未被吊销 → 不再为"未吊销"这个答案打一次 DB
+    if _neg_cache_hit(jti):
+        return False
     # 查数据库（多 worker 场景下其它进程吊销的 token）
     try:
         from models import get_db
@@ -88,6 +132,7 @@ def _is_jti_revoked(jti):
         # VR-SEC-004: DB 异常时 fail-closed，与 user revocation 检查（L169）保持一致
         logger.error(f"DB check for revoked jti failed: {e}")
         return True
+    _neg_cache_put(jti)
     return False
 
 
@@ -169,37 +214,35 @@ def validate_token(token):
     if jti and _is_jti_revoked(jti):
         return None
 
-    # Check per-user revocation
+    # D1：账号冻结 + 用户级吊销合并为一次往返（原来两次独立查询，且每个已鉴权
+    # 请求都要付）。SQL 仍是 fail-closed：查询异常、用户不存在、 revoked_at 无法
+    # 解析，一律拒绝 token。
     user_id = payload.get('user_id')
     if user_id:
         from models import get_db
         try:
             with get_db() as conn:
                 row = conn.execute(
-                    "SELECT value FROM system_config WHERE key=%s",
-                    (f'user_token_revoked_at_{user_id}',)
+                    "SELECT u.active AS active, ur.value AS revoked_at "
+                    "FROM users u "
+                    "LEFT JOIN system_config ur ON ur.key = %s "
+                    "WHERE u.id = %s",
+                    (f'user_token_revoked_at_{user_id}', user_id)
                 ).fetchone()
-            if row:
-                revoked_at = int(row['value'])
-                if payload.get('iat', 0) < revoked_at:
-                    return None  # Token issued before user was force-logged-out
         except Exception as e:
-            logger.error(f"User revocation DB check failed for user={user_id}: {e}")
+            logger.error(f"User auth-state DB check failed for user={user_id}: {e}")
             return None  # P1-F03: fail-closed — DB 异常时拒绝 token
 
-    # VR-AUTH-007：冻结账号（active=0）的存量 token 立即失效（fail-closed）。
-    # 管理员封禁后无需等待 token 自然过期，鉴权链路直接拒绝。
-    if user_id:
-        try:
-            with get_db() as conn:
-                row = conn.execute(
-                    "SELECT active FROM users WHERE id=%s", (user_id,)
-                ).fetchone()
-            if row is None or row['active'] != 1:
-                return None  # 账号不存在或已冻结
-        except Exception as e:
-            logger.error(f"User active-status DB check failed for user={user_id}: {e}")
-            return None  # fail-closed: DB 异常时拒绝 token
+        if row is None or row['active'] != 1:
+            return None  # 账号不存在或已冻结
+        if row['revoked_at']:
+            try:
+                if payload.get('iat', 0) < int(row['revoked_at']):
+                    return None  # Token issued before user was force-logged-out
+            except (TypeError, ValueError):
+                logger.error(f"Malformed user_token_revoked_at for user={user_id}: "
+                             f"{row['revoked_at']!r}; rejecting token (fail-closed)")
+                return None
 
     return payload
 

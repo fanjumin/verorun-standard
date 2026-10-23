@@ -1,9 +1,9 @@
 # VeroRun — 企业多核 AI 操作系统
 
-[![Version](https://img.shields.io/badge/version-0.62.3-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.63.0-blue.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-EULA%20v1.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)]()
-[![Plugins](https://img.shields.io/badge/plugins-42-orange.svg)]()
+[![Plugins](https://img.shields.io/badge/plugins-43-orange.svg)]()
 
 **VeroRun 是让智能执行可信、可验证、可追溯的多核 AI 操作系统——智能体协作、知识检索、内容生成与流程编排等核心能力并行驱动，部署在客户自有服务器上独立运转。**
 
@@ -18,10 +18,10 @@
 - **动态提示词系统**：数据库驱动的 `PromptResolver`，四层组装 + 场景差异化 + 多版本管理。
 - **认知进化引擎（CogEvolution）**：RAG 向量检索、分层记忆、Reflexion 反思学习、Prompt Evolution 版本进化，形成"记忆 → 反思 → 优化 → 行为进化"闭环。
 - **可视化工作流引擎**：DAG 节点编排、Cron 调度、分级 Worker 池，任意流程的通用执行载体。
-- **多供应商 LLM 网关（UnifiedLLM）**：provider-agnostic 统一 API，7 家原生 + 2 家动态解析 + **25 条本地模型种子**（Ollama：Qwen3/Gemma3-Gemma4/Mistral/Llama3.1/Mixtral/Phi-4/DeepSeek-R1/nomic-embed-text/bge-m3），透明模型替换、自动故障转移、密钥管理、预算闸门、4 级配额——**内核零硬编码 provider/model**（engine.py PROVIDER_CONFIGS 已移除，provider/model 统一由 `system_config` + 数据库种子解析，markdown/docx 工具收编进网关）。
+- **多供应商 LLM 网关（UnifiedLLM）**：provider-agnostic 统一 API，14 家已落地供应商——9 家自研厂商（DeepSeek / OpenAI / Ollama / Gemini / Grok / KIMI / 智谱 GLM / Anthropic / Edge-TTS）+ 5 家聚合平台（阿里百炼 DashScope / 腾讯 TokenHub / 百度千帆 / OpenRouter / SiliconFlow）+ 120 条模型种子记录（主种子 96 条 + OpenRouter 免费档 24 条），透明模型替换、自动故障转移、密钥管理、预算闸门、4 级配额——**内核零硬编码 provider/model**（engine.py PROVIDER_CONFIGS 已移除，provider/model 统一由 `system_config` + 数据库种子解析，markdown/docx 工具收编进网关）。
 - **插件配置零字面量**：插件级 provider/model 不再硬编码——`enterprise_verify` 的 OCR + 审核配置、`mini_app_builder` 与 `analytics` 的兜底字面量，统一改为读取 `system_config` 键（`ai_text_provider` / `ai_text_model` / `enterprise_verify_ocr_*` / `enterprise_verify_audit_*`）。
 - **VeroGuard 守护层**：健康监控 + 完整性校验 + 加密心跳，双进程互护，客户侧资产守护；Ed25519 签名发布、完整性清单与来源水印守护供应链。
-- **插件生态**：42 个内置插件承载任意业务形态，全生命周期管理、插件商店、许可引擎。
+- **插件生态**：43 个内置插件承载任意业务形态，全生命周期管理、插件商店、许可引擎。
 
 内核设计准则：**业务语义全部由插件声明**，新增业务能力等价于装配一个插件，内核保持稳定。
 
@@ -36,7 +36,7 @@
 ```text
 ┌──────────────────────────────────────────────────────────────┐
 │ 应用生态层  插件应用：知识管理 · 内容 · 商业经营 · 通信 · 运维…  │
-│            42 个内置插件覆盖多领域，任意业务形态经插件装配落地  │
+│            43 个内置插件覆盖多领域，任意业务形态经插件装配落地  │
 ├──────────────────────────────────────────────────────────────┤
 │ 引擎底座    多角色 AI Agent 矩阵 + 四阶段讨论协议              │
 │            知识库记忆（向量检索）· 可视化工作流引擎 · PromptResolver │
@@ -242,7 +242,7 @@ v2 另外补齐一整套研究栈（源自专项实施方案）：`secmaster` �
 
 | 能力 | 说明 |
 |---|---|
-| Provider 接入 | 原生 7 家：DashScope / OpenAI / DeepSeek / OpenRouter / SiliconFlow / Gemini / Grok；GLM、Moonshot 经 `provider_models` 表动态寻址 |
+| Provider 接入 | 14 家已落地供应商——9 家自研厂商（DeepSeek / OpenAI / Ollama / Gemini / Grok / KIMI / 智谱 GLM / Anthropic / Edge-TTS）+ 5 家聚合平台（阿里百炼 DashScope / 腾讯 TokenHub / 百度千帆 / OpenRouter / SiliconFlow）；端点以供应商级为准、可按模型覆盖；供应商带 `kind`（vendor / aggregator）；原 Hunyuan 直连已下线，腾讯统一走 TokenHub |
 | 双解析方式 | 按 `provider_model_id`（推荐）或旧式 `provider + model` |
 | 客户端缓存 | 5 分钟 TTL，线程安全 |
 | 密钥解析优先级 | `provider_api_keys` 表（加密）→ 环境变量 → `system_config` 表 |
@@ -293,7 +293,8 @@ v2 另外补齐一整套研究栈（源自专项实施方案）：`secmaster` �
 
 | 领域 | 插件 |
 |---|---|
-| 知识管理 | `chatbot`、`memory_engine`、`cogevolution_substrate`、`project_workspace`、`veroscholar`（含假设发现引擎） |
+| 知识管理 | `chatbot`、`memory_engine`、`project_workspace`、`veroscholar`（含假设发现引擎） |
+| 边缘 / IIoT 进化 | `cogevolution_substrate`（CES 边缘/IIoT 进化底座，能力 memory.curate/extract/iiot；与 `memory_engine` v0.62.1 起 conflicts 互斥，默认不启用） |
 | 内容传播 | `content_factory`、`site_builder`、`mini_app_builder`、`ads`、`social_push` 等 |
 | 商业经营 | `shop`、`payment`、`logistics`、`subscription`、`coupons`、`ai_relay` 等 |
 | 通信协作 | `im_gateway`、`email`、`sms`、`oauth_config` |
@@ -399,7 +400,7 @@ VeroRun/
 │   ├── orchestrator.py     # 任务分解、并行分发
 │   └── agent_runner.py     # 自评执行
 ├── orchestrator/           # 可视化工作流引擎（DAG）
-├── plugins/                # 42 个内置插件（业务形态装配）
+├── plugins/                # 43 个内置插件（业务形态装配）
 ├── plugin_manager/         # 插件生命周期/商店/许可/区域路由
 ├── veroguard/              # VeroGuard 守护层（7 模块）
 ├── health_guardian/        # 守护支撑包（含 health_guardian.py 入口）
@@ -449,7 +450,7 @@ VeroRun/
 
 | 模块 | 代码行 | 占比 | 职责 |
 |---|---:|---:|---|
-| `plugins/` | 186,784 | 62.1% | 应用层——42 个插件 |
+| `plugins/` | 186,784 | 62.1% | 应用层——43 个插件 |
 | `admin/` | 21,257 | 7.1% | 管理后台（8084） |
 | `main_site/` | 15,794 | 5.3% | 平台控制台（8083） |
 | `plugin_manager/` | 14,815 | 4.9% | 生命周期 / 商店 / 许可 |
@@ -477,12 +478,15 @@ VeroRun/
 
 ## 文档
 
-- `GUIDE.md` — 安装与使用指南
+- `GUIDE.md` — 安装与部署指南
 - `CHANGELOG.md` — 版本变更日志
 - `agent_matrix/ARCHITECTURE.md` — Agent 矩阵设计
 - `sdks/README.md` — SDK 使用说明
 - `deploy/README.md` — 部署说明
 - `plugins/memory_engine/README.md` — 认知进化引擎说明
+- `docs/VeroRun-技术白皮书-v0.63.0-审计修订版.md` — 技术架构白皮书（系统级架构与插件体系）
+- `help/core/` — 用户指南（终端用户手册，00-overview → 99-faq）
+- `docs/plugin-standard-v1.8.md` — 插件开发标准（v1.8，现行规范）
 - `docs/official-api-security-spec.md` — 官方 API 安全规范（token 撤销 + 命令签名）
 - `docs/security-remediation-tracker.md` — 版权保护审计整改跟踪
 

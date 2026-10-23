@@ -1,5 +1,5 @@
 plugin.name: 邮件服务
-email_management: "邮件管理"
+email_management: "邮件服务"
 write_email: "写邮件"
 inbox: "收件箱"
 sent: "已发送"

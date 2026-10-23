@@ -116,11 +116,37 @@ class PromptResolver:
                 if mode_prompt:
                     parts.append(mode_prompt)
 
-        return self._assemble(parts)
+        return self._assemble(parts, task_context)
 
-    def _assemble(self, parts):
-        """拼接非空部分"""
-        return PART_SEPARATOR.join(p for p in parts if p)
+    def _assemble(self, parts, task_context=None):
+        """拼接非空部分 + 动态注入用户语言偏好。
+
+        将 locale 指令放在最后（Layer 2 全局规则之后），形成双重覆盖：
+          - Layer 2 的 global-language-rule 要求"跟随用户语言"
+          - 末尾的动态指令显式指定目标语言（对小模型/本地模型更可靠）
+        """
+        # 动态语言指令：优先用 task_context 传入的 locale，否则回退 DEPLOY_LANG / 'en'
+        locale = 'en'
+        try:
+            if task_context and task_context.get('locale'):
+                locale = task_context['locale']
+            else:
+                locale = os.getenv('DEPLOY_LANG', 'en')
+        except Exception:
+            pass
+
+        # locale 规范化：zh-CN / en / ja 等；未知值回退 en
+        known_codes = ('en', 'zh-CN', 'zh-TW', 'ja', 'ko', 'fr', 'de', 'es')
+        if locale not in known_codes:
+            locale = 'en'
+
+        parts = [p for p in parts if p]
+        if parts:
+            parts.append(
+                f"\n---\n**User's current language setting: `{locale}`.** "
+                f"Respond entirely in this language for all output."
+            )
+        return PART_SEPARATOR.join(parts)
 
     # ============================================================
     # 数据库查询
@@ -242,10 +268,21 @@ class PromptResolver:
                 return r['content']
         return ''
 
-    def get_by_tag(self, tag, prompt_types=None):
-        """公开入口：按标签查询 prompt 内容（供 Discussion 模式等调用）。"""
+    def get_by_tag(self, tag, prompt_types=None, task_context=None,
+                  agent_config=None):
+        """公开入口：按标签查询 prompt 内容（供 Discussion 模式等调用）。
+
+        task_context / agent_config 同时给定时，对命中的标签 prompt 应用
+        before_prompt_resolve 过滤器链（与 resolve() 同一套记忆/画像注入）；
+        默认 None 表示保持纯标签读取、不过滤——Discussion 的 verifier 角色
+        刻意不传，以维护对抗验证的独立性。
+        """
         try:
-            return self._match_by_tag(tag, prompt_types=prompt_types)
+            content = self._match_by_tag(tag, prompt_types=prompt_types)
+            if content and task_context is not None:
+                content = self._apply_prompt_filters(
+                    content, agent_config or {}, task_context)
+            return content
         except Exception as e:
             logger.error(f'PromptResolver.get_by_tag failed: {e}')
             return ''

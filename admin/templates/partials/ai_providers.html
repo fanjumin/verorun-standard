@@ -1,0 +1,138 @@
+// ============================================================
+// AI Hub · 供应商维护（Demo 模块①）
+// 录入内容仅限：名称、标识(slug)、描述、调用端点地址、启用状态。
+// 端点是供应商级唯一配置，模型不再各自填写端点；本页不含任何密钥字段。
+// ============================================================
+
+window.l_ai_providers=function(targetId){
+  if(!targetId) document.getElementById("pt").textContent="{{ _('Providers') }}";
+  var _target=document.getElementById(targetId||"mc");
+  var _data=null;
+
+  render();
+
+  function render(){
+    _target.innerHTML='<div class="lo"><div class="s"></div>{{ _('Loading...') }}</div>';
+    fetch("/admin/providers",{headers:{"Authorization":"Bearer "+T}})
+      .then(function(r){return r.json()})
+      .then(function(d){
+        if(!d.success){_target.innerHTML='<div class="em">{{ _('Load failed') }} — <a href="javascript:l_ai_providers(\''+(targetId||'')+'\')">{{ _('Retry') }}</a></div>';return}
+        _data=d.data||[];
+        renderList();
+      }).catch(function(){_target.innerHTML='<div class="em">{{ _('Load failed') }} — <a href="javascript:l_ai_providers(\''+(targetId||'')+'\')">{{ _('Retry') }}</a></div>'});
+  }
+
+  function renderList(){
+    var h='<div class="cd">';
+    h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">';
+    h+='<h3 style="margin:0;font-size:16px;color:var(--accent)">{{ _('Providers') }}</h3>';
+    h+='<span style="flex:1"></span>';
+    h+='<button class="bp" onclick="aipShowForm()" style="padding:6px 16px;font-size:13px;cursor:pointer">+ {{ _('New Provider') }}</button>';
+    h+='</div>';
+    if(!_data.length){
+      h+='<div class="em">{{ _('No provider API keys configured. Click "Add" to create one.') }}</div>';
+    }else{
+      h+='<table class="dt"><thead><tr>';
+      h+='<th>{{ _('Name') }}</th><th>{{ _('Slug') }}</th><th>{{ _('Description') }}</th><th>{{ _('API Endpoint') }}</th><th>{{ _('Models') }}</th><th>{{ _('Status') }}</th><th>{{ _('Actions') }}</th>';
+      h+='</tr></thead><tbody>';
+      _data.forEach(function(p){
+        var cnt=(p.models||[]).length;
+        h+='<tr>';
+        h+='<td style="font-weight:600">'+esc(p.name)+'</td>';
+        h+='<td><code style="font-size:11px;color:var(--accent2)">'+esc(p.slug)+'</code></td>';
+        h+='<td style="color:var(--dim)">'+esc(p.description||'')+'</td>';
+        h+='<td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+escAttr(p.endpoint_url||'')+'">'+esc(p.endpoint_url||'—')+'</td>';
+        h+='<td>'+cnt+'</td>';
+        h+='<td>'+(p.is_active?'<span class="bdg on">{{ _('Enabled') }}</span>':'<span class="bdg off">{{ _('Disable') }}</span>')+'</td>';
+        h+='<td><button class="bo" style="padding:2px 10px;font-size:11px;cursor:pointer" onclick="aipShowForm('+p.id+')">{{ _('Edit') }}</button> ';
+        h+='<button class="bo" style="padding:2px 10px;font-size:11px;color:var(--rose);cursor:pointer" onclick="aipDelete('+p.id+')">{{ _('Delete') }}</button></td>';
+        h+='</tr>';
+      });
+      h+='</tbody></table>';
+    }
+    h+='</div>';
+    if(targetId) h='<div class="ai-hub-subtitle">{{ _('AI Hub') }} <span style="color:var(--dim)">&rsaquo;</span> {{ _('Providers') }}</div>'+h;
+    _target.innerHTML=h;
+  }
+
+  window.aipShowForm=function(id){
+    var p=id?_data.filter(function(x){return x.id===id})[0]:null;
+    var h='<div class="modal-overlay" onclick="aipCloseModal()"><div class="modal-box" onclick="event.stopPropagation()" style="max-width:500px;width:90%">';
+    h+='<h3 style="margin:0 0 16px;color:var(--accent)">'+(id?'{{ _('Edit Provider') }}':'{{ _('New Provider') }}')+'</h3>';
+    h+='<div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--dim);margin-bottom:4px">{{ _('Name') }} *</label>';
+    h+='<input id="aip-name" class="in" style="width:100%" value="'+escAttr(p?p.name:'')+'" placeholder="{{ _('e.g.') }}: DeepSeek"></div>';
+    h+='<div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--dim);margin-bottom:4px">{{ _('Slug') }} * ({{ _('Unique') }})</label>';
+    h+='<input id="aip-slug" class="in" style="width:100%" value="'+escAttr(p?p.slug:'')+'" placeholder="{{ _('e.g.') }}: deepseek"'+(id?' disabled':'')+'></div>';
+    h+='<div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--dim);margin-bottom:4px">{{ _('Description') }}</label>';
+    h+='<input id="aip-desc" class="in" style="width:100%" value="'+escAttr(p?(p.description||''):'')+'"></div>';
+    h+='<div style="margin-bottom:12px"><label style="display:block;font-size:12px;color:var(--dim);margin-bottom:4px">{{ _('API Endpoint') }} *</label>';
+    h+='<input id="aip-ep" class="in" style="width:100%" value="'+escAttr(p?(p.endpoint_url||''):'')+'" placeholder="https://api.example.com/v1"></div>';
+    h+='<div style="margin-bottom:16px"><label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">';
+    h+='<input type="checkbox" id="aip-active"'+(!p||p.is_active?' checked':'')+'> {{ _('Enabled') }}</label></div>';
+    h+='<div style="display:flex;gap:8px;justify-content:flex-end">';
+    h+='<button class="bo" onclick="aipCloseModal()" style="padding:6px 16px">{{ _('Cancel') }}</button>';
+    h+='<button class="bp aip-save-btn" onclick="aipSave('+(id||0)+')" style="padding:6px 16px">{{ _('Save') }}</button>';
+    h+='</div></div></div>';
+    var old=document.getElementById('modal-root');if(old)old.remove();
+    var overlay=document.createElement('div');
+    overlay.id='modal-root';
+    overlay.innerHTML=h;
+    document.body.appendChild(overlay);
+  };
+
+  window.aipCloseModal=function(){
+    var m=document.getElementById('modal-root');
+    if(m)m.remove();
+  };
+
+  window.aipSave=function(id){
+    var name=document.getElementById('aip-name').value.trim();
+    var slug=document.getElementById('aip-slug').value.trim().toLowerCase();
+    var desc=document.getElementById('aip-desc').value.trim();
+    var ep=document.getElementById('aip-ep').value.trim();
+    if(!name||!slug||!ep){showToast('{{ _('Slug and Name cannot be empty') }}','error');return}
+    if(!/^[a-z0-9_\-]+$/.test(slug)){showToast('{{ _('Slug may only contain a-z, 0-9, _ and -') }}','error');return}
+    if(!id&&_data.some(function(p){return p.slug===slug})){showToast('{{ _('Slug already exists') }}','error');return}
+    var data={name:name,slug:slug,description:desc,endpoint_url:ep,
+              is_active:document.getElementById('aip-active').checked?1:0};
+    var saveBtn=document.querySelector('#modal-root .aip-save-btn');
+    if(saveBtn){saveBtn.disabled=true;saveBtn.textContent='{{ _('Saving...') }}';}
+    fetch("/admin/providers"+(id?("/"+id):""),{
+      method:id?"PUT":"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+T},
+      body:JSON.stringify(data)
+    }).then(function(r){return r.json()}).then(function(d){
+      if(d.success){aipCloseModal();render();showToast('{{ _('Saved') }}','success')}
+      else{showToast(d.error||'{{ _('Operation failed') }}','error');if(saveBtn){saveBtn.disabled=false;saveBtn.textContent='{{ _('Save') }}';}}
+    }).catch(function(){showToast('{{ _('Request Failed') }}','error');if(saveBtn){saveBtn.disabled=false;saveBtn.textContent='{{ _('Save') }}';}});
+  };
+
+  window.aipDelete=function(id){
+    var p=_data.filter(function(x){return x.id===id})[0];
+    if(!p)return;
+    if((p.models||[]).length){showToast('{{ _('Provider still has models; delete them first') }}','error');return}
+    var h='<div class="modal-overlay" onclick="aipCloseModal()"><div class="modal-box" onclick="event.stopPropagation()" style="max-width:400px;width:90%">';
+    h+='<h3 style="margin:0 0 12px;color:var(--rose)">{{ _('Confirm Deletion') }}</h3>';
+    h+='<p style="margin:0 0 6px;font-size:14px;color:var(--ink)">{{ _('Are you sure you want to delete') }} <strong>'+esc(p.name)+'</strong>?</p>';
+    h+='<p style="margin:0 0 20px;font-size:12px;color:var(--dim)">{{ _('This action cannot be undone.') }}</p>';
+    h+='<div style="display:flex;gap:8px;justify-content:flex-end">';
+    h+='<button class="bo" onclick="aipCloseModal()" style="padding:6px 16px">{{ _('Cancel') }}</button>';
+    h+='<button class="bp aip-del-btn" style="padding:6px 16px;background:var(--rose);border-color:var(--rose);color:#fff" onclick="aipConfirmDel('+id+')">{{ _('Delete') }}</button>';
+    h+='</div></div></div>';
+    var old=document.getElementById('modal-root');if(old)old.remove();
+    var overlay=document.createElement('div');
+    overlay.id='modal-root';
+    overlay.innerHTML=h;
+    document.body.appendChild(overlay);
+  };
+
+  window.aipConfirmDel=function(id){
+    var btn=document.querySelector('#modal-root .aip-del-btn');
+    if(btn){btn.disabled=true;btn.textContent='{{ _('Deleting...') }}';}
+    fetch("/admin/providers/"+id,{method:"DELETE",headers:{"Authorization":"Bearer "+T}})
+      .then(function(r){return r.json()}).then(function(d){
+        if(d.success){aipCloseModal();render();showToast('{{ _('Deleted') }}','success')}
+        else{aipCloseModal();showToast(d.error||'{{ _('Delete failed') }}','error')}
+      }).catch(function(){aipCloseModal();showToast('{{ _('Network error') }}','error')});
+  };
+};

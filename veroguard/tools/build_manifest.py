@@ -12,9 +12,10 @@ build_manifest.py — 生成 Ed25519 签名版完整性基准清单（Task 5）
     python3 veroguard/tools/build_manifest.py --verify --project-dir /opt/verorun
 
 扫描核心文件（含 plugins/ 下自动发现的插件核心文件 *.py / plugin.json /
-migrations/*.sql，以及内核提示词资产 agent_matrix/prompts/*.md），计算 SHA256，
-生成签名清单。私钥 RELEASE_SIGN_KEY 仅存 CI/发版机，服务器端无私钥，
-本地无法重生成有效清单。
+migrations/*.sql、插件运行时基座 plugins/_base、系统级共享基座
+shared/plugin_base（2026-10-17 _base 收归步骤二迁入），以及内核提示词资产
+agent_matrix/prompts/*.md），计算 SHA256，生成签名清单。私钥 RELEASE_SIGN_KEY
+仅存 CI/发版机，服务器端无私钥，本地无法重生成有效清单。
 """
 import os
 import sys
@@ -69,6 +70,8 @@ PROTECTED_FILES = [
 def _discover_plugin_files(project_dir: str) -> list:
     """动态发现插件核心文件：*.py + plugin.json + migrations/*.sql。
 
+    含插件运行时基座 plugins/_base（`_` 前缀例外，见下方循环内注释）。
+
     排除资源/生成目录（templates/static/i18n/data/workspace 等），
     这些不属于安全关键路径，避免清单体积膨胀与频繁误报。
     """
@@ -83,7 +86,13 @@ def _discover_plugin_files(project_dir: str) -> list:
     }
     for entry in sorted(os.listdir(plugins_dir)):
         pdir = os.path.join(plugins_dir, entry)
-        if not os.path.isdir(pdir) or entry.startswith("_"):
+        # _base 例外（2026-10-17，_base 收归步骤一）：plugins/_base 是无 plugin.json 的
+        # 平台共享运行模块（plugin_manager.SHARED_PLUGIN_MODULES），被 40+ 插件 import
+        # 承重。`_` 前缀约定让它被插件发现跳过，但完整性保护不能跳——否则连接池/PII/
+        # egress 等基座代码被篡改时 Ed25519 验签不报警、guardian 不进入受限态。
+        # 显式纳入扫描，与插件核心文件同一 walk 规则（_skip_dirs 资源目录排除同样
+        # 生效）；其余 `_` 前缀目录（_templates 等）保持跳过。
+        if not os.path.isdir(pdir) or (entry.startswith("_") and entry != "_base"):
             continue
         for root, dirs, files in os.walk(pdir):
             dirs[:] = [d for d in dirs
@@ -93,6 +102,38 @@ def _discover_plugin_files(project_dir: str) -> list:
                         or fname.endswith(".sql")):
                     found.append(os.path.relpath(os.path.join(root, fname),
                                                  project_dir))
+    return found
+
+
+# ── 系统级共享基座（_base 收归步骤二，2026-10-17）──
+# plugins/_base 实体迁至 shared/plugin_base/ 后，原路径只留 re-export shim
+# （保 40+ 消费方与安装期校验的目录存在性）。完整性保护必须跟着实体走：
+# 扫描 shared/plugin_base/，与 plugins/_base 的 shim 一同入册，severity=high
+# （连接池/PII/egress/evolution 基座被篡改时 Ed25519 验签报警、guardian 进受限态）。
+SHARED_BASE_DIR = os.path.join("shared", "plugin_base")
+
+
+def _discover_shared_base_files(project_dir: str) -> list:
+    """动态发现系统级共享基座文件（shared/plugin_base/**）：*.py。
+
+    与 _discover_plugin_files 同一 walk 规则（_skip_dirs 资源目录排除）。
+    """
+    base_dir = os.path.join(project_dir, SHARED_BASE_DIR)
+    if not os.path.isdir(base_dir):
+        return []
+    found = []
+    _skip_dirs = {
+        "__pycache__", "_templates", "templates", "static",
+        "i18n", "data", "workspace", "screenshots", "images",
+        "agents", "prompts",
+    }
+    for root, dirs, files in os.walk(base_dir):
+        dirs[:] = [d for d in dirs
+                   if d not in _skip_dirs and not d.startswith("__")]
+        for fname in sorted(files):
+            if fname.endswith(".py"):
+                found.append(os.path.relpath(os.path.join(root, fname),
+                                             project_dir))
     return found
 
 
@@ -130,6 +171,9 @@ SEVERITY_MAP = [
     ("deploy/", "critical"),
     # 提示词资产：不涉及凭据/授权，但直接决定所有 Agent 的行为，故定为 high
     ("agent_matrix/prompts/", "high"),
+    # 系统级共享基座（_base 收归步骤二）：连接池/PII/egress/evolution，
+    # 与 plugins/ 下的受保护插件核心同级
+    ("shared/plugin_base/", "high"),
 ]
 
 
@@ -154,9 +198,12 @@ def _git_commit(project_dir: str) -> str:
 
 def build_manifest(project_dir: str) -> dict:
     """扫描 PROJECT_DIR 下的 PROTECTED_FILES + 动态发现的插件核心文件，生成清单"""
-    # 静态清单 + 动态发现的插件核心文件 + 内核提示词资产（去重）
+    # 静态清单 + 动态发现的插件核心文件 + 系统级共享基座 + 内核提示词资产（去重）
     files_to_scan = list(PROTECTED_FILES)
     for rel in _discover_plugin_files(project_dir):
+        if rel not in files_to_scan:
+            files_to_scan.append(rel)
+    for rel in _discover_shared_base_files(project_dir):
         if rel not in files_to_scan:
             files_to_scan.append(rel)
     for rel in _discover_core_prompt_files(project_dir):

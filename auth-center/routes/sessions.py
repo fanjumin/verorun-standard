@@ -81,6 +81,10 @@ def session_current():
                 # Record this as a new session
                 user_agent = request.headers.get('User-Agent', '')[:256]
                 ip = request.remote_addr or ''
+                # F1：补记为当前会话前先复位同用户的旧会话（与登录入口一致）
+                conn.execute(
+                    "UPDATE user_sessions SET is_current = 0 WHERE user_id = %s AND is_current = 1",
+                    (uid,))
                 sid = conn.execute(
                     "INSERT INTO user_sessions (user_id, token_hash, device_type, ip_address, user_agent, is_current) "
                     "VALUES (%s,%s,%s,%s,%s,1) RETURNING id",

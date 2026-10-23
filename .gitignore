@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *.pyo
 venv/
+.venv/
 *.egg-info/
 dist/
 build/
@@ -72,6 +73,7 @@ Thumbs.db
 
 # Temp debug/deploy scripts (local only)
 check_*.py
+!scripts/check_prompt_originality.py
 debug_*.py
 deploy_*.py
 fix_cache.py
@@ -139,6 +141,10 @@ node_modules/
 tools/
 !veroguard/tools/
 !plugins/hr_recruit/tools/
+!plugins/bayes_engine/tools/
+!plugins/chaos_engine/tools/
+!plugins/survey/tools/
+!plugins/search_hub/tools/
 site/
 deploy/caddy/
 docs/*

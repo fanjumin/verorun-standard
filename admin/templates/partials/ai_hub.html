@@ -1,6 +1,6 @@
 // ============================================================
 // AI Hub — 统一 AI/LLM 管理中枢
-// 整合: Matrix / Model Management / Provider Keys / Token Usage / LLM Quotas
+// 整合: Providers / Model Mgmt / Role Settings / Prompts / Quotas / Tokens / Health / Sync
 // ============================================================
 
 window.l_ai_hub = function() {
@@ -8,13 +8,14 @@ window.l_ai_hub = function() {
 
   var mc = document.getElementById("mc");
   var tabs = [
-    { id: "keys",      label: "{{ _('Provider Keys') }}", icon: "🔑" },
+    { id: "providers", label: "{{ _('Providers') }}",   icon: "🔑" },
     { id: "models",    label: "{{ _('Model Mgmt') }}",    icon: "🔧" },
-    { id: "matrix",    label: "{{ _('Matrix') }}",        icon: "🤖" },
+    { id: "matrix",    label: "{{ _('Role Settings') }}", icon: "🤖" },
     { id: "prompts",   label: "{{ _('Prompts') }}",       icon: "📝" },
     { id: "quotas",    label: "{{ _('LLM Quotas') }}",    icon: "⚖️" },
     { id: "tokens",    label: "{{ _('Token Usage') }}",   icon: "📈" },
-    { id: "health",    label: "{{ _('Model Health') }}",  icon: "❤️" }
+    { id: "health",    label: "{{ _('Model Health') }}",  icon: "❤️" },
+    { id: "sync",      label: "{{ _('Model Sync') }}",    icon: "🔄" }
   ];
 
   var h = '<div class="ai-hub">';
@@ -35,8 +36,8 @@ window.l_ai_hub = function() {
   h += '</div>';
   mc.innerHTML = h;
 
-  // 默认加载 Provider Keys
-  aiHubSwitchTab('keys');
+  // 默认加载 供应商
+  aiHubSwitchTab('providers');
 };
 
 // Tab 切换函数
@@ -52,12 +53,13 @@ window.aiHubSwitchTab = function(tabId) {
 
   // 委托给各模块的嵌入式渲染函数
   switch (tabId) {
-    case 'keys':     l_provider_keys('aiHubContent');    break;
+    case 'providers': l_ai_providers('aiHubContent');     break;
     case 'models':   l_model_providers('aiHubContent'); break;
-    case 'matrix':   l_matrix('aiHubContent');        break;
+    case 'matrix':   l_role_settings('aiHubContent');    break;
     case 'prompts':  l_prompts_db('aiHubContent');    break;
     case 'quotas':   l_llm_quotas('aiHubContent');       break;
     case 'tokens':   l_token_monitoring('aiHubContent'); break;
     case 'health':   l_model_health('aiHubContent');     break;
+    case 'sync':     l_model_sync('aiHubContent');       break;
   }
 };

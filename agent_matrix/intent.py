@@ -21,13 +21,13 @@ def classify_intent(user_query):
     try:
         from .engine import UnifiedLLM
 
-        prompt = f"""分析以下用户消息，输出 JSON，不要多余文字：
+        prompt = f"""Analyze the following user message and output JSON only, with no extra text:
 {{
-  "intent": "意图类别（purchase=购买意向, aftersale=售后, complaint=投诉, consult=咨询, technical=技术支持, other=其他）",
-  "sentiment": "情绪（positive=正面, neutral=中性, negative=负面, urgent=紧急）"
+  "intent": "intent category (purchase=purchase intent, aftersale=aftersale, complaint=complaint, consult=consultation, technical=technical support, other=other)",
+  "sentiment": "sentiment (positive=positive, neutral=neutral, negative=negative, urgent=urgent)"
 }}
 
-消息：{user_query[:500]}"""
+Message: {user_query[:500]}"""
 
         from .models import get_master_agent_config
 
@@ -38,7 +38,7 @@ def classify_intent(user_query):
         from .llm_text import iter_stream_text
         reply = ''.join(
             t for t in iter_stream_text(engine.chat_stream([
-                {'role': 'system', 'content': '你是一个精准的分类器。只输出 JSON。'},
+                {'role': 'system', 'content': 'You are a precise classifier. Output JSON only.'},
                 {'role': 'user', 'content': prompt}
             ], temperature=0.1, max_tokens=128))
             if not t.startswith('Error:'))

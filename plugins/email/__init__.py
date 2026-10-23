@@ -54,6 +54,24 @@ class EmailPlugin(BasePlugin):
         from .routes import email_bp
         return [email_bp]
 
+    def register_dag_nodes(self):
+        """注册工作流节点（WP-E1）：send_email。
+
+        经 BasePlugin.register_dag_nodes() 由平台注入 WorkflowEngine，
+        内核不感知邮件业务。
+
+        这里把 self.manager 绑定进处理器：节点在裸线程里执行，无 Flask app
+        context，services 读不到 current_app.extensions['plugin_manager']，
+        会把“SMTP 未配置”误报成节点失败（WP-E2）。
+        """
+        from functools import partial
+
+        from .dag_nodes import get_dag_nodes
+        nodes = get_dag_nodes()
+        if self.manager is None:
+            return nodes
+        return {name: partial(fn, pm=self.manager) for name, fn in nodes.items()}
+
     # ── 钩子契约兑现（plugin.json hooks.provides 声明的 3 个 action）──
 
     def activate(self):

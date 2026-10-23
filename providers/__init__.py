@@ -35,23 +35,43 @@ def _lazy_load(module_path: str, class_name: str = None):
 _PROVIDER_REGISTRY = {
     'cn': {
         'sms':       [('providers.sms.aliyun', 'AliyunSMSProvider')],
-        'payment':   [],
-        'verify':    [('providers.verify.alipay', 'AlipayVerificationProvider')],
-        'social':    [('providers.social.wechat', 'WeChatPushProvider'),
-                      ('providers.social.weibo', 'WeiboPushProvider'),
-                      ('providers.social.toutiao', 'ToutiaoPushProvider')],
-        'logistics': [('providers.logistics.kdniao', 'KdNiaoProvider')],
+        'payment':   [],  # 国内支付渠道未在 providers 包内实现
+        'verify':    [],  # 见 _PROVIDER_BACKLOG
+        'social':    [],  # 见 _PROVIDER_BACKLOG
+        'logistics': [],  # 见 _PROVIDER_BACKLOG
         'address':   [('cn', None)],  # 使用行政区划 code 体系
     },
     'intl': {
         'sms':       [('providers.sms.twilio', 'TwilioSMSProvider')],
-        'payment':   [('providers.payment.stripe', 'StripeGateway'),
-                      ('providers.payment.paypal', 'PayPalGateway')],
+        'payment':   [('providers.payment.stripe', 'StripePaymentGateway'),
+                      ('providers.payment.paypal', 'PayPalPaymentGateway')],
         'verify':    [],  # 国际区跳过实名认证
         'social':    [('providers.social.twitter', 'TwitterPushProvider'),
                       ('providers.social.linkedin', 'LinkedInPushProvider')],
         'logistics': [('providers.logistics.shippo', 'ShippoProvider')],
         'address':   [('intl', None)],  # 使用自由文本地址体系
+    },
+}
+
+# ─── 待实现登记（backlog）─────────────────────────────────────────────
+# 下列条目曾直接写在 _PROVIDER_REGISTRY 中，但 providers 包内并不存在对应模块，
+# _lazy_load() 恒返回 None —— 即 cn 市场下 get_provider('verify'/'social'/
+# 'logistics') 永远拿不到类，属于"声明了但没实现"的悬空条目。
+#
+# 主注册表只保留真实可导入的条目（scripts/selfcheck.py 的 registry 项据此判定），
+# 悬空条目降格登记到这里，注明能力当前的真实承载方；待实现落地后再移回主注册表。
+_PROVIDER_BACKLOG = {
+    'cn': {
+        'verify':    [('providers.verify.alipay', 'AlipayVerificationProvider',
+                       '实名认证实际由 auth-center/services/verification_service.py 承载')],
+        'social':    [('providers.social.wechat', 'WeChatPushProvider',
+                       '社媒推送实际由插件 plugins/social_push 承载'),
+                      ('providers.social.weibo', 'WeiboPushProvider',
+                       '社媒推送实际由插件 plugins/social_push 承载'),
+                      ('providers.social.toutiao', 'ToutiaoPushProvider',
+                       '社媒推送实际由插件 plugins/social_push 承载')],
+        'logistics': [('providers.logistics.kdniao', 'KdNiaoProvider',
+                       '快递鸟物流查询，未实现')],
     },
 }
 

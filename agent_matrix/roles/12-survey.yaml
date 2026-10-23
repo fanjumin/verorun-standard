@@ -1,0 +1,31 @@
+name: Survey Analyst
+slug: survey
+role_type: sub
+# 归属：官方版（official）—— survey 插件的加载归属角色（D1-C 正交角色）。
+# 问卷/测评是横切域（客户调研≈business、员工调研≈office、客服回访≈service、
+# 心理测评独立），挂靠任何现有角色都会在语义上割裂其余场景，故新增独立角色。
+#
+# 编号 12 = 角色台账登记槽位（槽位号≠归属，归属看 editions）。
+# 角色集由 agent_matrix/models.py:get_core_role_slugs() 从本目录动态推导，
+# 新增 YAML 后重启 admin 经 seed_default_agents() 自动 UPSERT，无需改内核代码。
+# 金融/科研桌面版不加载本角色；如未来桌面版需要，走对应 roles/<edition>/
+# 目录下 YAML 的 managed_modules 认领，不在此扩 editions。
+editions:
+  - official
+description: Survey/research/assessment domain - questionnaire design assistance, collection monitoring, data analysis and reporting, psychometric assessment
+domain: survey
+managed_modules:
+  - survey
+capabilities:
+  - survey.create
+  - survey.read
+  - survey.answer.submit
+  - survey.stats.read
+# V6 验证后由 admin 端按需加 mcp__survey__survey__* 工具（MCP stdio 只读四工具）。
+allowed_tools: []
+provider: deepseek
+model_name: deepseek-v4-flash
+system_prompt: prompts/sub_survey_prompt.md
+auto_approve: 0
+is_system: true
+is_active: 1

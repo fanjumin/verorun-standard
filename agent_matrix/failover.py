@@ -60,6 +60,46 @@ def _send_alert(message):
                 'internal', message, {}, feature='failover_alert')
 
 
+class StreamFailoverResult:
+    """stream_with_failover() 的返回值：可迭代 + 暴露实际生效的 used_cfg。
+
+    为什么需要包装对象：generator 不支持任意属性赋值
+    （'generator' object has no attribute ... and no __dict__），早期实现把
+    used_cfg 挂到生成器*函数* 上（_iter.used_cfg = cfg），而调用方拿到的是
+    生成器对象，getattr(gen, 'used_cfg', cfg) 永远读不到 → 兜底生效时 token
+    用量仍记在主模型名下，用量统计与配额扣减全部错位。
+
+    这里用 sink 字典在闭包与包装对象之间传递实际生效配置：
+    - 未产出任何 chunk：sink 保持初值（主模型 cfg），与旧行为一致；
+    - 产出首个 chunk：sink 更新为真正生效的 cfg（可能是兜底模型）。
+    """
+
+    __slots__ = ('_gen', '_sink')
+
+    def __init__(self, gen, sink):
+        self._gen = gen
+        self._sink = sink
+
+    @property
+    def used_cfg(self):
+        return self._sink.get('used_cfg')
+
+    def __iter__(self):
+        return self._gen
+
+    def __next__(self):
+        return next(self._gen)
+
+    def send(self, value):
+        return self._gen.send(value)
+
+    def throw(self, *args, **kwargs):
+        return self._gen.throw(*args, **kwargs)
+
+    def close(self):
+        return self._gen.close()
+
+
 class CircuitBreaker:
     """进程内熔断器：key = 'provider::model'"""
 
@@ -292,6 +332,8 @@ class FallbackEngine:
     def stream_with_failover(self, primary_cfg, fallback_cfgs, stream_call_fn, request_id=''):
         """流式兜底：返回生成器。产出首个 chunk 前失败可切换；已产出后失败直接上抛（防重复）。
         stream_call_fn(cfg, is_fallback=False) 签名。"""
+        sink = {'used_cfg': primary_cfg}  # 实际生效配置回填容器（见 StreamFailoverResult）
+
         def _iter():
             last_err = None
             primary_err = None
@@ -305,7 +347,7 @@ class FallbackEngine:
                     for chunk in stream:
                         if not started:
                             started = True
-                            _iter.used_cfg = cfg
+                            sink['used_cfg'] = cfg
                             if idx > 0:
                                 self.health.log_failover_event(
                                     primary_cfg, cfg, reason='health',
@@ -339,4 +381,4 @@ class FallbackEngine:
                 _send_alert(f'[AI 兜底引擎] 全部候选不可用 | {primary_msg}; fallbacks also failed, last: {last_err}')
                 raise RuntimeError(f'{primary_msg}; fallbacks also failed, last: {last_err}') from last_err
             raise RuntimeError('All models unavailable (circuit open)')
-        return _iter()
+        return StreamFailoverResult(_iter(), sink)

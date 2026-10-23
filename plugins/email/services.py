@@ -52,6 +52,10 @@ logger = logging.getLogger(__name__)
 
 _MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024  # 10MB
 
+# IMAP 连接/读取超时（秒）。与 SMTP 侧 smtplib(..., timeout=15) 保持同一量级，
+# 目的：主机不可达时快速失败并回可读错误，而不是占住 gunicorn 线程挂到 OS 超时。
+IMAP_CONNECT_TIMEOUT = 15
+
 # ── 邮件头注入防护（EM-4）──
 _HEADER_CTRL_RE = re.compile(r'[\r\n\x00]')
 _HEADER_CRLF_RE = re.compile(r'[\r\n]+')
@@ -108,8 +112,19 @@ CONFIG_DEFS = {
 
 # ─── Config helpers ────────────────────────────────────────────────────────
 
-def _get_plugin_manager_config():
-    """尝试从 PluginManager 读取邮件配置（优先级次于 env var，高于 system_config）"""
+def _get_plugin_manager_config(pm=None):
+    """读取 PluginManager 中的邮件配置。
+
+    pm: 显式传入的 PluginManager 引用。工作流节点运行在裸线程（无 Flask
+    app context），此时 current_app 不可用，必须由插件在注册节点时把
+    manager 传进来（WP-E2）。pm 为 None 时保持原有 Web 请求内行为。
+    """
+    if pm is not None:
+        try:
+            return pm.get_config('email') or {}
+        except Exception as e:  # noqa: BLE001
+            print(f'[EmailPlugin] read plugin_manager config failed: {e}')
+            return {}
     try:
         from flask import current_app
         mgr = current_app.extensions.get('plugin_manager')
@@ -198,7 +213,8 @@ def daily_sent_count():
         from .models import get_email_db
         with get_email_db() as db:
             row = db.execute(
-                "SELECT COUNT(*) AS c FROM email_sent WHERE sent_at >= CURRENT_DATE").fetchone()
+                "SELECT COUNT(*) AS c FROM email_sent "
+                "WHERE sent_at >= CURRENT_DATE AND status = 'sent'").fetchone()
         return int(row['c']) if row else 0
     except Exception as e:
         logger.warning(_("Failed to read daily send quota, allowing this send: {}").format(e))
@@ -344,12 +360,17 @@ def _apply_provider_derivation(cfg):
             cfg[k] = v
 
 
-def _get_mail_config():
-    """Merge env → plugin_manager → system_config → defaults for all mail config keys."""
+def _get_mail_config(pm=None):
+    """Merge plugin_manager → system_config → env → defaults.
+
+    优先级（NEW-09）：后台设置页写入的 plugin_registry 为权威，其次旧
+    system_config，最后才是环境变量兜底。改造前 env 排第一，.env 里残留
+    的旧 SMTP_HOST 会永久盖掉后台新配置，且不重启不生效。
+    """
     cfg = {}
 
     # 1. 尝试从 PluginManager 读取（新建/编辑设置页的配置）
-    pm_config = _get_plugin_manager_config()
+    pm_config = _get_plugin_manager_config(pm)
 
     # 2. 尝试从主库 system_config 读取（兼容旧配置）
     db_config = {}
@@ -366,11 +387,11 @@ def _get_mail_config():
     except Exception:
         pass
 
-    # 3. 优先级：环境变量 > plugin_manager > system_config > 默认值
+    # 3. 优先级：plugin_manager > system_config > 环境变量 > 默认值（NEW-09）
     for k in _MAIL_KEYS:
-        cfg[k] = (os.environ.get(_ENV_MAP[k], '')
-                  or str(pm_config.get(k, '') or '')
+        cfg[k] = (str(pm_config.get(k, '') or '')
                   or db_config.get(k, '')
+                  or os.environ.get(_ENV_MAP[k], '')
                   or _DEFAULTS[k])
 
     # 4. 域名自动推导：账号匹配预置服务商时补全空白的服务器/端口字段
@@ -405,9 +426,42 @@ def get_smtp_config():
 
 # ─── IMAP Helpers ──────────────────────────────────────────────────────────
 
+def mail_config_error():
+    """邮箱凭据 pre-flight 校验：未配置时返回可读文案，已配置返回 None。
+
+    根因背景（2026-10-13 实测）：`smtp_user` / `smtp_pass` 为空时，
+    `_connect_imap()` 仍会执行 `imap.login('', '')`，被服务器回
+    `LOGIN command error: BAD [b'invalid command or parameters']`，
+    管理端表现为 `/admin/email/folders` 502 + 控制台红色 "Failed to load
+    resource"，运维看不出是"没配凭据"。这里提前判空，给出可行动提示。
+    """
+    cfg = _get_mail_config()
+    if not (cfg.get('smtp_user') or '').strip():
+        return _("邮箱账号未配置：请在「邮件服务 → ⚙ 设置」填写完整邮箱地址")
+    if not (cfg.get('smtp_pass') or '').strip():
+        return _("邮箱授权码未配置：请在「邮件服务 → ⚙ 设置」填写客户端授权码（非登录密码）")
+    if not (cfg.get('imap_host') or '').strip():
+        return _("IMAP 服务器地址未配置：请在「邮件服务 → ⚙ 设置」填写 imap_host")
+    return None
+
+
 def _connect_imap():
     cfg = _get_mail_config()
-    imap = imaplib.IMAP4_SSL(cfg['imap_host'], cfg['imap_port'])
+    host = cfg['imap_host']
+    port = cfg['imap_port']
+    try:
+        # 必须带 timeout：不带时 IMAP4_SSL 会一直挂到 OS 层 TCP 超时。
+        # 2026-10-13 在 agent.easykai.cn 实测：IMAP_HOST 被 .env 覆盖成不可达的
+        # mail.easykai.cn:993 → /admin/email/folders 挂 60.2s 后 nginx 504，
+        # 期间白占一个 gunicorn 线程（该机 2 worker × 4 thread = 8 槽），
+        # 反复打开面板即可拖垮管理端。SMTP 侧早有 timeout=15，唯独这里漏了。
+        imap = imaplib.IMAP4_SSL(host, port, timeout=IMAP_CONNECT_TIMEOUT)
+    except OSError as e:
+        raise RuntimeError(
+            _("IMAP 服务器不可达: {host}:{port} —— 请到「邮件服务 → ⚙ 设置」核对 IMAP 主机与端口"
+              "（若 .env 配了 IMAP_HOST，其优先级高于界面设置）").format(
+                host=host, port=port) + f" [{type(e).__name__}: {str(e)[:60]}]"
+        ) from e
     imap.login(cfg['smtp_user'], cfg['smtp_pass'])
     imap.select("INBOX")
     return imap
@@ -577,6 +631,9 @@ def fetch_inbox(page=1, per_page=20, keyword=''):
 
     UID 语义与 read_email / 批量操作（delete/mark/move）保持一致。
     """
+    cfg_err = mail_config_error()
+    if cfg_err:
+        return {"error": cfg_err, "items": [], "total": 0}
     try:
         imap = _connect_imap()
     except Exception as e:
@@ -706,7 +763,7 @@ def get_attachment(uid, filename):
 
 # ─── SMTP Public API ───────────────────────────────────────────────────────
 
-def send_email(to_addr, subject, body_text, body_html=None, cc=None, bcc=None, reply_to=None, attachments=None, cfg=None):
+def send_email(to_addr, subject, body_text, body_html=None, cc=None, bcc=None, reply_to=None, attachments=None, cfg=None, dedup_key=None, pm=None):
     """Send email with optional HTML body, CC, BCC, reply-to, and file attachments.
 
     Args:
@@ -719,12 +776,15 @@ def send_email(to_addr, subject, body_text, body_html=None, cc=None, bcc=None, r
         reply_to: str — optional Reply-To address
         attachments: list of {"filename": str, "data": base64_str, "content_type": str}
         cfg: dict — 预构造配置（MCP 子进程注入，跳过 DB/环境读取）；默认 None 走 _get_mail_config()
+        dedup_key: str — 工作流节点幂等键（WP-E1）；重复键只保留首条记录
+        pm: PluginManager 引用 — 无 Flask app context 的调用方（工作流节点）
+            必须传入，否则读不到后台设置（WP-E2）
 
     Returns:
         (success: bool, message: str)
     """
     if cfg is None:
-        cfg = _get_mail_config()
+        cfg = _get_mail_config(pm)
     if not cfg['smtp_user'] or not cfg['smtp_pass']:
         return False, _("SMTP 未配置 (请先设置 SMTP_USER/SMTP_PASS 环境变量)")
 
@@ -839,8 +899,11 @@ def send_email(to_addr, subject, body_text, body_html=None, cc=None, bcc=None, r
             from .models import get_email_db
             with get_email_db() as db:
                 db.execute(
-                    "INSERT INTO email_sent (from_addr, to_addr, subject, body_text, body_html) VALUES (%s, %s, %s, %s, %s)",
-                    (cfg['smtp_from'], ", ".join(to_addr), subject, body_text, body_html)
+                    "INSERT INTO email_sent (from_addr, to_addr, subject, body_text, "
+                    "body_html, dedup_key) VALUES (%s, %s, %s, %s, %s, %s) "
+                    "ON CONFLICT (dedup_key) WHERE dedup_key IS NOT NULL DO NOTHING",
+                    (cfg['smtp_from'], ", ".join(to_addr), subject, body_text,
+                     body_html, dedup_key)
                 )
                 db.commit()
         except Exception as _db_e:
@@ -858,6 +921,28 @@ def send_email(to_addr, subject, body_text, body_html=None, cc=None, bcc=None, r
     except Exception as e:
         logger.error(_("邮件发送异常: {}").format(e))
         return False, _("发送异常: {}").format(e)
+
+
+def log_failed_send(to_addr, subject, body_text, error):
+    """记录一次失败的发送（status='failed'），失败原因一并落库。
+
+    旧实现只在成功分支写 email_sent：发送失败既不落库也无异步任务记录，
+    后台无法审计，排障只能翻服务器日志。
+    """
+    from .models import get_email_db
+    try:
+        cfg = _get_mail_config()
+        targets = ", ".join(to_addr) if isinstance(to_addr, (list, tuple)) else str(to_addr or '')
+        with get_email_db() as db:
+            db.execute(
+                "INSERT INTO email_sent "
+                "(from_addr, to_addr, subject, body_text, status, error) "
+                "VALUES (%s, %s, %s, %s, 'failed', %s)",
+                (cfg.get('smtp_from') or '', targets, subject or '',
+                 body_text or '', str(error or '')[:1000]))
+            db.commit()
+    except Exception as e:
+        logger.warning(_("记录失败发送日志失败: {}").format(e))
 
 
 def get_sent_emails(page=1, per_page=20):
@@ -938,6 +1023,9 @@ def delete_draft(draft_id):
 
 def list_folders():
     """列出邮箱文件夹（IMAP LIST）；失败返回 {"error", "folders": []}。"""
+    cfg_err = mail_config_error()
+    if cfg_err:
+        return {"error": cfg_err, "folders": []}
     try:
         imap = _connect_imap()
     except Exception as e:

@@ -44,7 +44,7 @@ class WecomAdapter(BaseIMAdapter):
         cached = _token_cache.get(cache_key)
         if cached:
             return cached
-        _, rd = http_client.request_json(
+        _rc, rd = http_client.request_json(
             'GET', _TOKEN_URL,
             params={'corpid': corp_id, 'corpsecret': secret}
         )
@@ -61,7 +61,7 @@ class WecomAdapter(BaseIMAdapter):
         if not corp_id or not secret:
             return False, _('Enterprise ID and Secret cannot be empty')
         try:
-            _, rd = http_client.request_json(
+            _rc, rd = http_client.request_json(
                 'GET', _TOKEN_URL,
                 params={'corpid': corp_id, 'corpsecret': secret}
             )
@@ -116,7 +116,7 @@ class WecomAdapter(BaseIMAdapter):
         if webhook:
             body = {"msgtype": "text", "text": {"content": str(content)[:4000]}}
             try:
-                _, resp = http_client.request_json('POST', webhook, json=body)
+                _rc, resp = http_client.request_json('POST', webhook, json=body)
                 if resp.get('errcode', -1) != 0:
                     return {'success': False, 'error': resp.get('errmsg', _('WeCom send failed'))}
                 return {'success': True}
@@ -132,7 +132,7 @@ class WecomAdapter(BaseIMAdapter):
             return {'success': False, 'error': _('WeCom webhook_url or corp credentials are required')}
         try:
             token = self._get_token(corp_id, secret)
-            _, send_resp = http_client.request_json(
+            _rc, send_resp = http_client.request_json(
                 'POST', _SEND_URL,
                 params={'access_token': token},
                 json={'touser': touser, 'msgtype': 'text', 'agentid': int(agent_id),
@@ -166,7 +166,7 @@ class WecomAdapter(BaseIMAdapter):
             body = {"msgtype": "markdown",
                     "markdown": {"content": _("**{}**\n[Download file]({})").format(filename, file_url)}}
 
-        _, resp = http_client.request_json('POST', webhook, json=body)
+        _rc, resp = http_client.request_json('POST', webhook, json=body)
         if resp.get('errcode', -1) != 0:
             raise Exception(resp.get('errmsg', _('WeCom push failed')))
 

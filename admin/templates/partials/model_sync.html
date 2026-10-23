@@ -1,0 +1,139 @@
+// Model Sync — AI Hub 模型目录自动对齐体检页（Phase C）
+window.l_model_sync = function(targetId){
+  if(!targetId) document.getElementById("pt").textContent="{{ _('Model Sync') }}";
+  var target = document.getElementById(targetId||"mc");
+  render();
+
+  function render(){
+    target.innerHTML='<div class="lo"><div class="s"></div>{{ _('Loading...') }}</div>';
+    var p1 = fetch("/admin/ai-hub/models/sync/runs?limit=10",{headers:{"Authorization":"Bearer "+T}}).then(function(r){return r.json()});
+    var p2 = fetch("/admin/ai-hub/models/sync/diffs?status=pending",{headers:{"Authorization":"Bearer "+T}}).then(function(r){return r.json()});
+    Promise.all([p1,p2]).then(function(res){
+      var rd = res[0]||{}, dd = res[1]||{};
+      if(!rd.success){target.innerHTML='<div class="em">{{ _('Load failed') }}</div>';return}
+      var t = targetId||'';
+      var h='<div class="cd">';
+      h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">';
+      h+='<h3 style="margin:0;font-size:16px;color:var(--accent)">{{ _('Model Sync') }}</h3>';
+      h+='<span style="flex:1"></span>';
+      h+='<button class="bp" onclick="msSyncRun(1,\''+t+'\')" style="padding:6px 16px;font-size:13px;cursor:pointer">{{ _('Run check now (report only)') }}</button>';
+      h+='<button class="bp" onclick="msSyncRun(0,\''+t+'\')" style="padding:6px 16px;font-size:13px;cursor:pointer">{{ _('Run check and persist') }}</button>';
+      h+='<button class="bp" onclick="l_model_sync(\''+t+'\')" style="padding:6px 16px;font-size:13px;cursor:pointer">{{ _('Refresh') }}</button>';
+      h+='</div>';
+
+      var runs = rd.data||[];
+      if(!runs.length){
+        h+='<div class="em">{{ _('No sync runs yet.') }}</div>';
+      }else{
+        var s0 = runs[0];
+        var st = s0.stats||{};
+        h+='<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:10px;font-size:13px">';
+        h+='<span>{{ _('Last run') }}: <b>'+esc(s0.started_at||'—')+'</b></span>';
+        h+='<span>{{ _('Status') }}: <b>'+esc(s0.status||'—')+'</b>'+(s0.dry_run?' ({{ _('dry run') }})':'')+'</span>';
+        h+='<span>{{ _('Providers scanned') }}: <b>'+(st.providers_scanned!=null?st.providers_scanned:'—')+'</b></span>';
+        h+='<span>{{ _('New upstream') }}: <b>'+(st.new_count!=null?st.new_count:'—')+'</b></span>';
+        h+='<span>{{ _('Missing upstream') }}: <b>'+(st.missing_count!=null?st.missing_count:'—')+'</b></span>';
+        h+='</div>';
+      }
+      h+='</div>';
+
+      h+='<div class="cd" style="margin-top:12px">';
+      h+='<h3 style="margin:0 0 12px;font-size:16px;color:var(--accent)">{{ _('Pending diffs') }}</h3>';
+      var diffs = dd.data||[];
+      if(!diffs.length){
+        h+='<div class="em">{{ _('No pending diffs.') }}</div>';
+      }else{
+        h+='<table class="dt"><thead><tr>';
+        h+='<th>{{ _('Provider') }}</th><th>{{ _('Upstream Model') }}</th><th>{{ _('Type') }}</th><th>{{ _('Context') }}</th><th>{{ _('Discovered') }}</th><th>{{ _('Actions') }}</th>';
+        h+='</tr></thead><tbody>';
+        diffs.forEach(function(d){
+          var isNew = d.diff_type==='new';
+          var pl = d.payload||{};
+          var label = isNew ? '{{ _('New upstream') }}' : '{{ _('Missing upstream') }}';
+          var ctx = (pl.context_tokens!=null)?pl.context_tokens:'—';
+          var shown = isNew ? (d.remote_model||pl.remote_id||'') : (d.remote_model||'');
+          h+='<tr>';
+          h+='<td>'+esc(d.provider_slug)+'</td>';
+          h+='<td><b>'+esc(shown)+'</b>'+(isNew&&pl.display_name&&pl.display_name!==shown?' <span style="font-size:10px;color:var(--dim)">'+esc(pl.display_name)+'</span>':'')+'</td>';
+          h+='<td><span class="bdg '+(isNew?'on':'off')+'">'+esc(label)+'</span></td>';
+          h+='<td>'+ctx+'</td>';
+          h+='<td style="font-size:11px;color:var(--dim)">'+esc((d.created_at||'—'))+'</td>';
+          h+='<td>';
+          if(isNew){
+            h+='<button class="bp" onclick="msApply('+d.id+',\'insert\',false)" style="padding:4px 10px;font-size:12px;cursor:pointer">{{ _('Insert (disabled)') }}</button> ';
+            h+='<button class="bp" onclick="msApply('+d.id+',\'insert\',true)" style="padding:4px 10px;font-size:12px;cursor:pointer">{{ _('Insert & enable') }}</button> ';
+          }else{
+            h+='<button class="bp" onclick="msApply('+d.id+',\'gray\')" style="padding:4px 10px;font-size:12px;cursor:pointer">{{ _('Gray out') }}</button> ';
+          }
+          h+='<button class="bp" onclick="msApply('+d.id+',\'ignore\')" style="padding:4px 10px;font-size:12px;cursor:pointer">{{ _('Ignore') }}</button>';
+          h+='</td>';
+          h+='</tr>';
+        });
+        h+='</tbody></table>';
+      }
+      h+='<div id="msApplyResult" style="margin-top:10px;font-size:13px"></div>';
+      h+='</div>';
+
+      h+='<div class="cd" style="margin-top:12px">';
+      h+='<h3 style="margin:0 0 12px;font-size:16px;color:var(--accent)">{{ _('Run history') }}</h3>';
+      if(!runs.length){
+        h+='<div class="em">{{ _('No sync runs yet.') }}</div>';
+      }else{
+        h+='<table class="dt"><thead><tr>';
+        h+='<th>{{ _('Started') }}</th><th>{{ _('Status') }}</th><th>{{ _('Mode') }}</th><th>{{ _('Providers scanned') }}</th><th>{{ _('New upstream') }}</th><th>{{ _('Missing upstream') }}</th>';
+        h+='</tr></thead><tbody>';
+        runs.forEach(function(r){
+          var st = r.stats||{};
+          h+='<tr>';
+          h+='<td style="font-size:11px;color:var(--dim)">'+esc(r.started_at||'—')+'</td>';
+          h+='<td>'+esc(r.status||'—')+'</td>';
+          h+='<td>'+(r.dry_run?'{{ _('dry run') }}':'{{ _('persisted') }}')+'</td>';
+          h+='<td>'+(st.providers_scanned!=null?st.providers_scanned:'—')+'</td>';
+          h+='<td>'+(st.new_count!=null?st.new_count:'—')+'</td>';
+          h+='<td>'+(st.missing_count!=null?st.missing_count:'—')+'</td>';
+          h+='</tr>';
+        });
+        h+='</tbody></table>';
+      }
+      h+='</div>';
+
+      target.innerHTML=h;
+    }).catch(function(e){
+      target.innerHTML='<div class="em">{{ _('Load failed') }}: '+esc(String(e))+'</div>';
+    });
+  }
+};
+
+window.msSyncRun = function(dry, targetId){
+  var btns = document.querySelectorAll('.ai-tab-content .bp');
+  for (var i=0;i<btns.length;i++) btns[i].disabled = true;
+  fetch("/admin/ai-hub/models/sync?dry_run="+dry,{method:"POST",headers:{"Authorization":"Bearer "+T}})
+    .then(function(r){return r.json()})
+    .then(function(rep){
+      for (var i=0;i<btns.length;i++) btns[i].disabled = false;
+      var box = document.getElementById('msApplyResult');
+      if(box) box.innerHTML = '<b>'+esc(rep.message||'')+'</b>';
+      l_model_sync(targetId||'aiHubContent');
+    })
+    .catch(function(e){
+      for (var i=0;i<btns.length;i++) btns[i].disabled = false;
+      var box = document.getElementById('msApplyResult');
+      if(box) box.innerHTML = '<span style="color:var(--rose)">'+esc(String(e))+'</span>';
+    });
+};
+
+window.msApply = function(diffId, action, enable){
+  var body = JSON.stringify({actions:[{diff_id:diffId, action:action, enable:!!enable}]});
+  fetch("/admin/ai-hub/models/sync/apply",{method:"POST",headers:{"Authorization":"Bearer "+T,"Content-Type":"application/json"},body:body})
+    .then(function(r){return r.json()})
+    .then(function(rep){
+      var box = document.getElementById('msApplyResult');
+      var lines = (rep.results||[]).map(function(x){return esc(x.message||'')});
+      if(box) box.innerHTML = lines.join('<br>') || esc(rep.message||'');
+      setTimeout(function(){ l_model_sync('aiHubContent'); }, 400);
+    })
+    .catch(function(e){
+      var box = document.getElementById('msApplyResult');
+      if(box) box.innerHTML = '<span style="color:var(--rose)">'+esc(String(e))+'</span>';
+    });
+};

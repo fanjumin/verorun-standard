@@ -22,6 +22,7 @@ API 端点概览:
 
 from i18n import _
 import os, sys, json
+import threading
 from flask import Blueprint, request, jsonify, g
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -32,6 +33,13 @@ from . import models as m
 from . import nodes as node_handlers
 from .worker import WorkerPool
 from .scheduler import SchedulerEngine
+
+# 手动"立即运行"的进程内重入守卫（G2）。_execute_job_wrapper 是直接开线程跑的，
+# 不经过 APScheduler，因此拿不到 max_instances=1 的保护；连点会并发重入。
+# 注意：这是**进程内**集合，admin 多 worker 部署下跨进程重入仍可能发生，
+# 彻底修法是把"运行中"状态落库并在启动前 CAS 校验（列入待办）。
+_RUN_NOW_LOCK = threading.Lock()
+_RUNNING_NOW = set()
 
 # ============================================================
 # Blueprint 定义
@@ -125,7 +133,9 @@ def _error(message, code=400):
 # （super_admin 旁路；否则需 admin_profiles.permissions 含该权限点）。
 # B1 收敛为 shared.admin_auth 后，本处改为直接复用，不再保留副本。
 
-DANGEROUS_NODE_TYPES = ('script', 'http_request')
+# send_email（WP-E1）：节点会真实外发邮件，与 script/http_request 同级治理，
+# 必须持有授权且上游存在 approval 节点。
+DANGEROUS_NODE_TYPES = ('script', 'http_request', 'send_email')
 DANGEROUS_NODE_PERM = 'workflow.script.author'
 
 
@@ -246,8 +256,8 @@ def _guard_dangerous_nodes(definition, admin):
     if perm_err:
         return perm_err
     if not _has_approval_before(definition, dangerous):
-        return _error(_('Workflows containing script/http_request nodes must '
-                        'place an approval node before them'), 400)
+        return _error(_('Workflows containing script/http_request/send_email '
+                        'nodes must place an approval node before them'), 400)
     return None
 
 
@@ -422,13 +432,27 @@ def run_job_now(job_id):
     if not job:
         return _error(_('Task does not exist'), 404)
 
-    # 通过 Worker 池异步执行（不阻塞请求线程）
+    # 重入守卫（G2）：手动"立即运行"是直接开线程调 _execute_job_wrapper，
+    # 绕过了 APScheduler 的 max_instances=1 / coalesce，连点 N 次就会并发重入
+    # N 份。这里在本进程内挡住同一 job 的并发重入；跨 worker 的重入仍需依赖
+    # job 运行状态落库后校验（见下方 _job_already_running 检查）。
     import threading
+    with _RUN_NOW_LOCK:
+        if job_id in _RUNNING_NOW:
+            return _error(_('Task is already running'), 409)
+        _RUNNING_NOW.add(job_id)
+
     if _scheduler:
         # 异步启动任务 — 不阻塞 HTTP 响应
+        def _run_now():
+            try:
+                _scheduler._execute_job_wrapper(job_id)
+            finally:
+                with _RUN_NOW_LOCK:
+                    _RUNNING_NOW.discard(job_id)
+
         thread = threading.Thread(
-            target=_scheduler._execute_job_wrapper,
-            args=(job_id,),
+            target=_run_now,
             daemon=True,
             name=f'job-run-{job_id}'
         )
@@ -440,6 +464,9 @@ def run_job_now(job_id):
             'message': 'Job execution started in background'
         }, _('Task has been started'))
 
+    # 调度器未初始化：释放本进程的重入标记，避免该 job 之后被永久挡住
+    with _RUN_NOW_LOCK:
+        _RUNNING_NOW.discard(job_id)
     return _error(_('Scheduler not initialized'), 500)
 
 

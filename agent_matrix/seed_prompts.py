@@ -10,7 +10,8 @@ Agent Matrix — Prompt 迁移脚本 (Dynamic Prompt System)
   - 绑定：同 (agent_id, prompt_id, binding_type) 已存在则跳过
   - 缺失的 prompt 文件直接跳过，不影响现有行为
 
-迁移内容为 .md 文件原文（逐字节），保证 Agent 行为不变。
+迁移内容为 .md 文件原文（逐字节）。WP-0：当文件内容与该 slug 最新版本不一致时，
+自动插入 version+1 的新版本行（旧版本保留，运行时按 version DESC 取最新版）。
 """
 import json, os, sys
 
@@ -43,7 +44,7 @@ PROMPT_SEEDS = [
      'sub_ops_prompt.md', ['ops'], ['finance-desktop', 'standard']),
     ('chatbot-role', 'Chatbot Agent Role Base', 'system', 'service',
      '["chatbot","user_service"]', '[]',
-     'sub_chatbot_prompt.md', ['service'], ['standard']),
+     'sub_chatbot_prompt.md', ['service'], ['standard', 'omni-service']),
     ('business-role', 'Business Agent Role Base', 'system', 'business',
      '["business","planning"]', '[]',
      'sub_business_prompt.md', ['business'], ['standard']),
@@ -75,6 +76,13 @@ PROMPT_SEEDS = [
     ('peer-auditor-role', 'Peer Auditor Role', 'system', 'review',
      '["peer_review","novelty","ethics","audit"]', '[]',
      'sub_peer_auditor_prompt.md', ['peer_auditor'], ['research-desktop']),
+    # WP-3：内置验证/探索角色提示词（角色行由 roles/*.yaml 经 seed_default_agents 同步）
+    ('verification-role', 'Verification Agent Role Base', 'system', 'verification',
+     '["verification","adversarial_probe","acceptance"]', '[]',
+     'verification_agent.md', ['verifier'], None),
+    ('explorer-role', 'Explorer Agent Role Base', 'system', 'research',
+     '["exploration","read_only_research","aggregation"]', '[]',
+     'explorer_agent.md', ['explorer'], None),
 ]
 
 
@@ -95,6 +103,8 @@ def _detect_edition():
         return 'research-desktop'
     if e in ('pro', 'finance', 'finance-desktop'):
         return 'finance-desktop'
+    if e in ('omni', 'omni-desktop', 'omni-service'):
+        return 'omni-service'
     return e or 'standard'
 
 
@@ -124,12 +134,28 @@ def seed_prompts():
                 content = f.read()
 
             row = conn.execute(
-                "SELECT id FROM agent_prompts WHERE slug=%s "
+                "SELECT id, version, content FROM agent_prompts WHERE slug=%s "
                 "ORDER BY version DESC LIMIT 1",
                 (slug,)
             ).fetchone()
             if row:
-                prompt_id = row['id']
+                # WP-0: content drift -> insert a NEW version row (version+1);
+                # old rows are kept for rollback and the resolver picks the
+                # latest version (ORDER BY version DESC). Identical content is
+                # a no-op (idempotent re-run).
+                _latest_version = int(row['version'] or 1)
+                if (row['content'] or '') != content:
+                    prompt_id = conn.execute("""
+                        INSERT INTO agent_prompts
+                        (name, slug, version, content, prompt_type, domain, tags, task_triggers)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                        RETURNING id
+                    """, (name, slug, _latest_version + 1, content,
+                          prompt_type, domain, tags, triggers)).fetchone()['id']
+                    inserted += 1
+                    print(f'[SeedPrompts] Insert prompt (content changed): {slug} (v{_latest_version + 1})')
+                else:
+                    prompt_id = row['id']
             else:
                 prompt_id = conn.execute("""
                     INSERT INTO agent_prompts

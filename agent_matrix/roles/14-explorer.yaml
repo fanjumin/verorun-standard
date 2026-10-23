@@ -1,0 +1,27 @@
+name: Explorer
+slug: explorer
+role_type: sub
+# WP-3：内置只读探索/聚合角色 —— 供 Master 把「了解现状/查数据/找知识」
+# 类子任务派给一个零写权限的角色；与 WP-2 并行窗口天然兼容（全部 safe 工具）。
+description: Read-only exploration and aggregation specialist — gathers evidence, cross-checks sources, returns structured digests
+domain: research
+managed_modules: []
+provider: deepseek
+model_name: deepseek-v4-flash
+system_prompt: prompts/explorer_agent.md
+auto_approve: 0
+is_system: true
+is_active: 1
+capabilities:
+  - exploration
+  - read_only_research
+  - aggregation
+allowed_tools:
+  - get_system_health
+  - query_stats
+  - search_knowledge
+  - ads_list
+  - ads_get_stats
+  - ads_analyze
+  - ads_render_snippet
+  - cms_list_channels

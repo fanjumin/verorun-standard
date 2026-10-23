@@ -37,6 +37,7 @@ import json
 import logging
 import logging.handlers
 import os
+import sys
 import queue
 import subprocess
 import threading
@@ -108,7 +109,7 @@ class McpStdioClient:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 env=full_env,
-                bufsize=1,  # 行缓冲
+                bufsize=0,  # KERNEL-1：二进制管道无行缓冲语义
             )
         except Exception as e:
             raise McpError(f'failed to start mcp server: {e}')
@@ -568,9 +569,14 @@ def _get_client(plugin_id: str, server_name: str, config: Dict[str, Any]):
                 timeout=timeout,
             )
         else:
+            command = (config.get('command') or '').strip()
+            if command in ('python', 'python3'):
+                # BE-1：systemd 部署 PATH 无裸 python，且系统解释器缺插件依赖
+                # （psycopg2 等在应用 venv）。统一解析为父进程解释器。
+                command = sys.executable
             client = McpStdioClient(
                 server_key,
-                config.get('command') or '',
+                command,
                 args=config.get('args') or [],
                 env=config.get('env') or {},
                 timeout=timeout,

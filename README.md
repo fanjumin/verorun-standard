@@ -1,9 +1,9 @@
 # VeroRun — Enterprise Multi-Core AI Operating System
 
-[![Version](https://img.shields.io/badge/version-0.62.3-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.63.0-blue.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-EULA%20v1.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)]()
-[![Plugins](https://img.shields.io/badge/plugins-42-orange.svg)]()
+[![Plugins](https://img.shields.io/badge/plugins-43-orange.svg)]()
 
 **VeroRun is a multi-core AI operating system that makes intelligent execution trustworthy, verifiable, and traceable — driven by core capabilities including agent collaboration, knowledge retrieval, content generation, and process orchestration, deployed on customer-owned servers.**
 
@@ -18,10 +18,10 @@ The engine core provides five intelligent execution primitives: **Multi-Agent co
 - **Dynamic Prompt System**: database-driven `PromptResolver`, four-layer assembly + scenario differentiation + multi-version management.
 - **Cognitive Evolution Engine (CogEvolution)**: RAG vector retrieval, layered memory, Reflexion learning, Prompt Evolution, forming a "memory → reflection → optimization → behavioral evolution" loop.
 - **Visual Workflow Engine**: DAG node orchestration, Cron scheduling, tiered worker pools — a general execution carrier for any process.
-- **Multi-Provider LLM Gateway (UnifiedLLM)**: provider-agnostic unified API, 7 native + 2 dynamically resolved providers + 25 first-party local model seeds (Ollama: Qwen3/Gemma3-Gemma4/Mistral/Llama3.1/Mixtral/Phi-4/DeepSeek-R1/nomic-embed-text/bge-m3), transparent model substitution, automatic failover, key management, budget gate, 4-level quota — **zero kernel hardcoded provider/model** (engine.py PROVIDER_CONFIGS removed, all provider/model resolved from `system_config` + database seed, tools.py markdown/docx unified).
+- **Multi-Provider LLM Gateway (UnifiedLLM)**: provider-agnostic unified API, 14 landed providers — 9 self-hosted vendors (DeepSeek / OpenAI / Ollama / Gemini / Grok / KIMI / 智谱 GLM / Anthropic / Edge-TTS) + 5 aggregators (阿里百炼 DashScope / 腾讯 TokenHub / 百度千帆 / OpenRouter / SiliconFlow) + 120 model seed records (main seed 96 + OpenRouter free-tier 24), transparent model substitution, automatic failover, key management, budget gate, 4-level quota — **zero kernel hardcoded provider/model** (engine.py PROVIDER_CONFIGS removed, all provider/model resolved from `system_config` + database seed, tools.py markdown/docx unified).
 - **Runtime-Free Plugin Config**: plugin-level provider/model no longer hardcoded — both `enterprise_verify` OCR + audit and plugins that previously had fallback literals (`mini_app_builder`, `analytics`) now read from `system_config` keys (`ai_text_provider` / `ai_text_model` / `enterprise_verify_ocr_*` / `enterprise_verify_audit_*`).
 - **VeroGuard Guard Layer**: health monitoring + integrity verification + encrypted heartbeat, dual-process mutual protection, client-side asset protection; Ed25519-signed releases, integrity manifests, and source watermarks guard the supply chain.
-- **Plugin Ecosystem**: 42 built-in plugins carry any business form, full lifecycle management, plugin marketplace, licensing engine.
+- **Plugin Ecosystem**: 43 built-in plugins carry any business form, full lifecycle management, plugin marketplace, licensing engine.
 
 Kernel design principle: **business semantics are declared entirely by plugins** — adding a business capability is equivalent to assembling a plugin, keeping the kernel stable.
 
@@ -37,7 +37,7 @@ Kernel design principle: **business semantics are declared entirely by plugins**
 ┌──────────────────────────────────────────────────────────────┐
 │ Application Layer  Plugin apps: knowledge · content · commerce│
 │                   · communications · ops …                    │
-│                   42 built-in plugins; any business via plugins│
+│                   43 built-in plugins; any business via plugins│
 ├──────────────────────────────────────────────────────────────┤
 │ Engine Base       Multi-role AI Agent Matrix + Discussion     │
 │                   Knowledge memory (vector) · Workflow · PromptResolver │
@@ -122,7 +122,7 @@ flask run --port 8081
 
 ## Engine Base
 
-### AI Engine — Multi-Role Agent Matrix (9 Core + Edition-Specific Roles)
+### AI Engine — Multi-Role Agent Matrix (Athena + 9 Typed Sub-Roles = 10 Core Roles)
 
 VeroRun hands complex tasks to a group of specialized, reviewable Agent roles: the master decomposes tasks, sub-roles each do their part, the reviewer challenges the plan, and the decider signs off on the conclusion.
 
@@ -137,12 +137,14 @@ VeroRun hands complex tasks to a group of specialized, reviewable Agent roles: t
 | Media | `media` | sub | siliconflow/FLUX.1-pro | Multimodal media: image understanding (recognition, OCR, diagram analysis) + generation (text-to-image, covers, illustrations) |
 | Office | `office` | sub | deepseek/deepseek-v4-flash | Enterprise operations: HR affairs, administration, secretarial documents |
 | Business | `business` | sub | deepseek/deepseek-v4-flash | Business analysis, products, orders, supply chain, reviews, wishlist |
+| Stock Analyst | `stock_analyst` | sub | gemini/gemini-2.5-flash | Financial analysis: market data, indicators, strategy research (core role, finance-desktop 默认装配) |
 
-**Edition-Specific Roles** (shipped per edition — official / finance-desktop / research-desktop):
+> 以上 10 个为核心角色（根目录 `agent_matrix/roles/`，`is_system=1`）。发行版在其上叠加专属角色：finance-desktop 含 `rs_compliance`/`rs_fundamental`/`rs_risk`/`rs_quant`/`rs_pm`/`rs_planner`/`ops` 等 8 个；research-desktop 含 `veroscholar`/`academic_writer`/`lit_scout`/`method_architect`/`peer_auditor`/`thesis_smith` 等 7 个。
+
+**Edition-Specific Roles** (shipped per edition — finance-desktop / research-desktop; layered on the 10 core roles above):
 
 | Role | Slug | Purpose |
 |---|---|---|
-| Stock Analyst | `stock_analyst` | Financial analysis: market data, indicators, strategy research (official) |
 | Veroscholar | `veroscholar` | Academic research: literature search, review, experiment design, paper writing (research-desktop) |
 | Academic Writer | `academic_writer` | Academic writing support (research-desktop) |
 | Literature Scout | `lit_scout` | Literature discovery and retrieval for hypothesis evidence |
@@ -244,7 +246,7 @@ Any task drivable by agent collaboration and process orchestration can be arrang
 
 | Capability | Description |
 |---|---|
-| Provider access | 7 native providers: DashScope / OpenAI / DeepSeek / OpenRouter / SiliconFlow / Gemini / Grok; GLM and Moonshot are resolved dynamically via the `provider_models` table |
+| Provider access | 14 landed providers — 9 self-hosted vendors (DeepSeek / OpenAI / Ollama / Gemini / Grok / KIMI / 智谱 GLM / Anthropic / Edge-TTS) + 5 aggregators (阿里百炼 DashScope / 腾讯 TokenHub / 百度千帆 / OpenRouter / SiliconFlow); endpoint is provider-level with per-model override; each provider carries a `kind` (vendor / aggregator); legacy Hunyuan retired — Tencent served via TokenHub |
 | Dual addressing | via `provider_model_id` (recommended) or legacy `provider + model` |
 | Client cache | 5-minute TTL, thread-safe |
 | Key resolution priority | `provider_api_keys` table (encrypted) → environment vars → `system_config` table |
@@ -295,7 +297,8 @@ Full lifecycle management (6 states: `UNKNOWN → INSTALLED → ENABLED → ACTI
 
 | Domain | Plugins |
 |---|---|
-| Knowledge management | `chatbot`, `memory_engine`, `cogevolution_substrate`, `project_workspace`, `veroscholar` (incl. Discovery Engine) |
+| Knowledge management | `chatbot`, `memory_engine`, `project_workspace`, `veroscholar` (incl. Discovery Engine) |
+| Edge / IIoT evolution | `cogevolution_substrate` (CES 边缘/IIoT 进化底座，能力 memory.curate/extract/iiot；与 `memory_engine` v0.62.1 起 conflicts 互斥，默认不启用) |
 | Content publishing | `content_factory`, `site_builder`, `mini_app_builder`, `ads`, `social_push` |
 | Business operations | `shop`, `payment`, `logistics`, `subscription`, `coupons`, `order_notify`, `reviews`, `wishlist`, `stock_analysis`, `risk_control`, `ai_relay` |
 | Communications | `im_gateway`, `email`, `sms`, `oauth_config`, `verification` |
@@ -401,7 +404,7 @@ VeroRun/
 │   ├── orchestrator.py     # Task decomposition, parallel dispatch
 │   └── agent_runner.py     # Self-evaluating executor
 ├── orchestrator/           # Visual workflow engine (DAG)
-├── plugins/                # 42 built-in plugins (business form assembly)
+├── plugins/                # 43 built-in plugins (business form assembly)
 ├── plugin_manager/         # Plugin lifecycle / marketplace / licensing / regional routing
 ├── veroguard/              # VeroGuard guard layer (7 modules)
 ├── health_guardian/        # Guardian support package (with health_guardian.py entry)
@@ -427,7 +430,7 @@ VeroRun/
 
 ## Codebase Metrics
 
-Measured on the v0.62.3 working copy (2026-10-05) with a `cloc`-style single-pass scan that classifies every line of every source file as **code / comment / blank** using language-specific comment syntax. Excluded from the count: build artifacts and vendored third-party code (`__pycache__`, `node_modules`, `backups/`, `data/`, `tmp/`, `outputs/`, `server_backup/`, `_ssh/`, hidden dependency caches such as `.stock_deps/`, minified bundles), and the internal engineering documents under `docs/` (plans, session handoffs, audit reports) — so the numbers reflect first-party product source only.
+Measured on the v0.63.0 working copy (2026-10-05) with a `cloc`-style single-pass scan that classifies every line of every source file as **code / comment / blank** using language-specific comment syntax. Excluded from the count: build artifacts and vendored third-party code (`__pycache__`, `node_modules`, `backups/`, `data/`, `tmp/`, `outputs/`, `server_backup/`, `_ssh/`, hidden dependency caches such as `.stock_deps/`, minified bundles), and the internal engineering documents under `docs/` (plans, session handoffs, audit reports) — so the numbers reflect first-party product source only.
 
 **Total: 300,787 code lines across 1,874 files** (plus 47,686 comment and 48,550 blank lines). Excluding prompt/documentation formats (Markdown, Text), executable code + markup ≈ **280,200 lines**.
 
@@ -451,7 +454,7 @@ Measured on the v0.62.3 working copy (2026-10-05) with a `cloc`-style single-pas
 
 | Module | Code lines | Share | Role |
 |---|---:|---:|---|
-| `plugins/` | 186,784 | 62.1% | Application layer — 42 plugins |
+| `plugins/` | 186,784 | 62.1% | Application layer — 43 plugins |
 | `admin/` | 21,257 | 7.1% | Admin console (8084) |
 | `main_site/` | 15,794 | 5.3% | Platform console (8083) |
 | `plugin_manager/` | 14,815 | 4.9% | Lifecycle / marketplace / licensing |
@@ -479,12 +482,15 @@ Kernel proper (`agent_matrix` + `orchestrator` + `plugin_manager` + `veroguard` 
 
 ## Documentation
 
-- `GUIDE.md` — installation and usage guide
+- `GUIDE.md` — installation & deployment guide
 - `CHANGELOG.md` — version changelog
 - `agent_matrix/ARCHITECTURE.md` — Agent matrix design
 - `sdks/README.md` — SDK usage
 - `deploy/README.md` — deployment notes
 - `plugins/memory_engine/README.md` — cognitive evolution engine
+- `docs/VeroRun-技术白皮书-v0.63.0-审计修订版.md` — 技术架构白皮书（系统级架构与插件体系）
+- `help/core/` — 用户指南（终端用户手册，00-overview → 99-faq）
+- `docs/plugin-standard-v1.8.md` — 插件开发标准（v1.8，现行规范）
 - `docs/official-api-security-spec.md` — official API security spec (token revocation + command signing)
 - `docs/security-remediation-tracker.md` — copyright-protection audit remediation tracker
 

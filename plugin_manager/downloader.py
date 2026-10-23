@@ -221,6 +221,14 @@ def _extract_archive(archive_path: str, dest_dir: str):
     elif tarfile.is_tarfile(archive_path):
         with tarfile.open(archive_path, 'r:*') as tf:
             for member in tf.getmembers():
+                # G7：路径校验挡得住 Tar Slip，挡不住符号链接 —— 一个指向
+                # /etc/... 的 link 成员路径本身是合法的，但解包后写入会穿过
+                # 链接落到目标目录之外。Python 3.12 的 extractall(filter='data')
+                # 才原生处理，104 运行的是 3.10，这里显式拒绝链接成员。
+                if member.issym() or member.islnk():
+                    raise ValueError(
+                        f'Symbolic/hard link member rejected: {member.name} '
+                        f'-> {getattr(member, "linkname", "")}')
                 member_path = os.path.realpath(os.path.join(dest_dir, member.name))
                 if not member_path.startswith(dest_dir + os.sep) and member_path != dest_dir:
                     raise ValueError(f'Tar Slip detected: {member.name}')

@@ -1,0 +1,22 @@
+name: System Ops
+slug: ops
+role_type: sub
+editions:
+  - research-desktop
+description: System operations — email notification channel, backup/restore/audit (vault)
+domain: ops
+managed_modules:
+  # 2026-10-20 用户裁决（科研版新增本角色）：email / vault 的 plugin.json 保持官方版
+  # 语义的 agent_role（service / ops）不改，在本版由本角色 managed_modules 认领
+  # （② 通道，与金融版 ops 认领 email/im_gateway/vault 完全同一惯例，见
+  # models.resolve_agent_roles ②）。依据：科研单机版原 include 内此二插件无归属
+  # 角色（agent_role 不在本版核心角色集且无人认领，enable 硬拒绝）；本角色为其
+  # 提供系统运维 lane。captcha_embedded 仍归 athena 认领，不重复认领。
+  - email
+  - vault
+provider_model_id: 401638
+provider: deepseek
+model_name: deepseek-v4-flash
+system_prompt: prompts/sub_ops_prompt.md
+is_system: true
+is_active: 1

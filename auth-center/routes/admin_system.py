@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from flask import Response, jsonify, request
 from models import get_db
 import os
+import re
 import json
 import logging
 import psycopg2
@@ -801,7 +802,7 @@ def list_providers():
     if err: return err
     with get_db() as conn:
         providers = [dict(r) for r in conn.execute(
-            'SELECT * FROM providers ORDER BY id'
+            'SELECT * FROM providers ORDER BY kind DESC, id'
         ).fetchall()]
         for p in providers:
             p['models'] = [dict(r) for r in conn.execute(
@@ -811,9 +812,41 @@ def list_providers():
     return jsonify({'success': True, 'data': providers})
 
 
+@admin_bp.route('/providers', methods=['POST'])
+def create_provider():
+    """新增提供商（基础信息 + 调用端点地址 + 类型）"""
+    admin, err = _require_admin()
+    if err: return err
+    data = request.get_json(force=True) or {}
+    slug = (data.get('slug') or '').strip().lower()
+    name = (data.get('name') or '').strip()
+    desc = (data.get('description') or '').strip()
+    endpoint_url = (data.get('endpoint_url') or '').strip()
+    kind = (data.get('kind') or 'vendor').strip().lower()
+    if kind not in ('vendor', 'aggregator'):
+        kind = 'vendor'
+    is_active = data.get('is_active', 1)
+    if not slug or not name:
+        return jsonify({'success': False, 'error': _('Slug and Name cannot be empty')}), 400
+    if not re.match(r'^[a-z0-9_\-]+$', slug):
+        return jsonify({'success': False, 'error': _('Slug may only contain a-z, 0-9, _ and -')}), 400
+    with get_db() as conn:
+        exists = conn.execute('SELECT id FROM providers WHERE slug=%s', (slug,)).fetchone()
+        if exists:
+            return jsonify({'success': False, 'error': _('Slug already exists')}), 400
+        pid = conn.execute(
+            'INSERT INTO providers (slug, name, description, endpoint_url, kind, is_active) '
+            'VALUES (%s,%s,%s,%s,%s,%s) RETURNING id',
+            (slug, name, desc, endpoint_url, kind,
+             int(is_active) if is_active is not None else 1)).fetchone()['id']
+        conn.commit()
+        _log(admin['user_id'], 'create', 'provider', str(pid), f'Add provider: {name}')
+    return jsonify({'success': True, 'data': {'id': pid}})
+
+
 @admin_bp.route('/providers/<int:pid>', methods=['PUT'])
 def update_provider(pid):
-    """更新提供商"""
+    """更新提供商（基础信息 + 调用端点地址 + 类型）"""
     admin, err = _require_admin()
     if err: return err
     data = request.get_json(force=True) or {}
@@ -823,12 +856,44 @@ def update_provider(pid):
             return jsonify({'success': False, 'error': _('Does not exist')}), 404
         name = (data.get('name') or row['name']).strip()
         desc = data.get('description', row['description'])
+        endpoint_url = data.get('endpoint_url', row['endpoint_url'])
+        kind = (data.get('kind', row['kind']) or 'vendor').strip().lower()
+        if kind not in ('vendor', 'aggregator'):
+            kind = row['kind']
         is_active = data.get('is_active', row['is_active'])
         conn.execute(
-            "UPDATE providers SET name=%s, description=%s, is_active=%s, updated_at=NOW() WHERE id=%s",
-            (name, desc, int(is_active) if is_active is not None else 1, pid))
+            "UPDATE providers SET name=%s, description=%s, endpoint_url=%s, kind=%s, "
+            "is_active=%s, updated_at=NOW() WHERE id=%s",
+            (name, desc, endpoint_url, kind,
+             int(is_active) if is_active is not None else 1, pid))
         conn.commit()
         _log(admin['user_id'], 'update', 'provider', str(pid), f'Update provider: {name}')
+    return jsonify({'success': True})
+
+
+@admin_bp.route('/providers/<int:pid>', methods=['DELETE'])
+def delete_provider(pid):
+    """删除提供商（名下有模型或角色绑定条目时拒绝）"""
+    admin, err = _require_admin()
+    if err: return err
+    with get_db() as conn:
+        row = conn.execute('SELECT slug, name FROM providers WHERE id=%s', (pid,)).fetchone()
+        if not row:
+            return jsonify({'success': False, 'error': _('Does not exist')}), 404
+        model_cnt = conn.execute(
+            'SELECT COUNT(*) AS c FROM provider_models WHERE provider_id=%s', (pid,)).fetchone()['c']
+        if model_cnt:
+            return jsonify({'success': False,
+                            'error': _('Provider still has models; delete them first')}), 400
+        bind_cnt = conn.execute(
+            'SELECT COUNT(*) AS c FROM provider_api_keys WHERE provider=%s', (row['slug'],)
+        ).fetchone()['c']
+        if bind_cnt:
+            return jsonify({'success': False,
+                            'error': _('Provider still has API keys; delete them first')}), 400
+        conn.execute('DELETE FROM providers WHERE id=%s', (pid,))
+        conn.commit()
+        _log(admin['user_id'], 'delete', 'provider', str(pid), f'Delete provider: {row["name"]}')
     return jsonify({'success': True})
 
 
@@ -855,30 +920,30 @@ def list_provider_models():
 
 @admin_bp.route('/provider-models', methods=['POST'])
 def create_provider_model():
-    """新增模型"""
+    """新增模型：只需 provider_id + 供应商侧 Model ID（显示名默认=Model ID）"""
     admin, err = _require_admin()
     if err: return err
     data = request.get_json(force=True) or {}
-    name = (data.get('name') or '').strip()
     provider_id = data.get('provider_id')
-    model_name = (data.get('model_name') or '').strip()
+    model_name = (data.get('model_name') or data.get('name') or '').strip()
+    # 显示名默认 = Model ID（模型维护仅需对齐 Model ID）
+    name = (data.get('name') or '').strip() or model_name
     endpoint_url = (data.get('endpoint_url') or '').strip()
-    api_key_ref = (data.get('api_key_ref') or '').strip()
     capabilities = (data.get('capabilities') or 'text').strip()
-    if not name or not provider_id:
-        return jsonify({'success': False, 'error': _('Name and Provider cannot be empty')}), 400
+    if not model_name or not provider_id:
+        return jsonify({'success': False, 'error': _('Model ID and Provider cannot be empty')}), 400
     with get_db() as conn:
         mid = conn.execute(
-            'INSERT INTO provider_models (provider_id, name, model_name, endpoint_url, api_key_ref, capabilities) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id',
-            (provider_id, name, model_name, endpoint_url, api_key_ref, capabilities)).fetchone()['id']
+            'INSERT INTO provider_models (provider_id, name, model_name, endpoint_url, capabilities) VALUES (%s,%s,%s,%s,%s) RETURNING id',
+            (provider_id, name, model_name, endpoint_url, capabilities)).fetchone()['id']
         conn.commit()
-        _log(admin['user_id'], 'create', 'provider_model', str(mid), f'Add Model: {name}')
+        _log(admin['user_id'], 'create', 'provider_model', str(mid), f'Add Model: {model_name}')
     return jsonify({'success': True, 'data': {'id': mid}})
 
 
 @admin_bp.route('/provider-models/<int:mid>', methods=['PUT'])
 def update_provider_model(mid):
-    """更新模型"""
+    """更新模型（Model ID / 供应商绑定）"""
     admin, err = _require_admin()
     if err: return err
     data = request.get_json(force=True) or {}
@@ -886,34 +951,39 @@ def update_provider_model(mid):
         row = conn.execute('SELECT * FROM provider_models WHERE id=%s', (mid,)).fetchone()
         if not row:
             return jsonify({'success': False, 'error': _('Does not exist')}), 404
-        name = (data.get('name') or row['name']).strip()
         provider_id = data.get('provider_id', row['provider_id'])
-        model_name = data.get('model_name', row['model_name'])
+        model_name = (data.get('model_name', row['model_name']) or '').strip()
+        name = (data.get('name') or '').strip() or model_name or row['name']
         endpoint_url = data.get('endpoint_url', row['endpoint_url'])
-        api_key_ref = data.get('api_key_ref', row['api_key_ref'])
         capabilities = data.get('capabilities', row['capabilities'])
         is_active = data.get('is_active', row['is_active'])
         sort_order = data.get('sort_order', row['sort_order'])
         conn.execute(
             '''UPDATE provider_models SET provider_id=%s, name=%s, model_name=%s, endpoint_url=%s,
-               api_key_ref=%s, capabilities=%s, is_active=%s, sort_order=%s,
+               capabilities=%s, is_active=%s, sort_order=%s,
                updated_at=NOW() WHERE id=%s''',
-            (provider_id, name, model_name, endpoint_url, api_key_ref, capabilities,
+            (provider_id, name, model_name, endpoint_url, capabilities,
              int(is_active) if is_active is not None else 1, sort_order, mid))
         conn.commit()
-        _log(admin['user_id'], 'update', 'provider_model', str(mid), f'Update model: {name}')
+        _log(admin['user_id'], 'update', 'provider_model', str(mid), f'Update model: {model_name}')
     return jsonify({'success': True})
 
 
 @admin_bp.route('/provider-models/<int:mid>', methods=['DELETE'])
 def delete_provider_model(mid):
-    """删除模型"""
+    """删除模型（被 Agent 角色条目引用时拒绝）"""
     admin, err = _require_admin()
     if err: return err
     with get_db() as conn:
         row = conn.execute('SELECT name FROM provider_models WHERE id=%s', (mid,)).fetchone()
         if not row:
             return jsonify({'success': False, 'error': _('Does not exist')}), 404
+        bind_cnt = conn.execute(
+            'SELECT COUNT(*) AS c FROM agent_key_bindings WHERE provider_model_id=%s', (mid,)
+        ).fetchone()['c']
+        if bind_cnt:
+            return jsonify({'success': False,
+                            'error': _('Model is referenced by agent key bindings; remove them first')}), 400
         conn.execute('DELETE FROM provider_models WHERE id=%s', (mid,))
         conn.commit()
         _log(admin['user_id'], 'delete', 'provider_model', str(mid), f'Delete Model: {row["name"]}')
@@ -1525,3 +1595,113 @@ def ai_model_failover_events():
         return err
     from agent_matrix.failover import ModelHealthStore
     return jsonify({'success': True, 'data': ModelHealthStore().get_recent_events()})
+
+
+# ── AI Hub model catalog sync (Phase A: fetch + diff, report only) ──────────
+
+@admin_bp.route('/ai-hub/models/sync', methods=['POST'])
+def ai_hub_models_sync():
+    """Scan every configured provider and diff its live model list against
+    provider_models.  dry_run=1 (default) reports only; dry_run=0 persists
+    the run and its diffs.  Nothing is ever grayed/inserted here (Phase B)."""
+    admin, err = _require_admin()
+    if err:
+        return err
+    from services.model_sync import run_sync
+    dry_run = request.args.get('dry_run', '1') != '0'
+    provider_slug = (request.args.get('provider') or '').strip() or None
+    include_offline = request.args.get('include_offline', '0') == '1'
+    report = run_sync(dry_run=dry_run, provider_slug=provider_slug,
+                      include_offline=include_offline)
+    return jsonify(report), (200 if report.get('success') else 500)
+
+
+@admin_bp.route('/ai-hub/models/sync/runs', methods=['GET'])
+def ai_hub_models_sync_runs():
+    """Run history for the admin model-health page."""
+    admin, err = _require_admin()
+    if err:
+        return err
+    from services.model_sync import get_recent_runs
+    limit = request.args.get('limit', '20')
+    try:
+        limit = max(1, min(int(limit), 100))
+    except ValueError:
+        limit = 20
+    return jsonify({'success': True, 'data': get_recent_runs(limit=limit)})
+
+
+@admin_bp.route('/ai-hub/models/sync/apply', methods=['POST'])
+def ai_hub_models_sync_apply():
+    """Apply admin decisions on diff rows: gray | insert | ignore.
+
+    Body: {"actions": [{"diff_id": 12, "action": "gray"},
+                       {"diff_id": 15, "action": "insert", "enable": false}]}
+    Single transaction; gray never deletes and inserts default to disabled."""
+    admin, err = _require_admin()
+    if err:
+        return err
+    from services.model_sync import apply_actions
+    data = request.get_json(silent=True) or {}
+    actions = data.get('actions') or []
+    if not actions:
+        return jsonify({'success': False, 'message': _('No actions supplied')}), 400
+    result = apply_actions(actions)
+    return jsonify(result), (200 if result.get('success') else 400)
+
+
+@admin_bp.route('/ai-hub/models/sync/diffs', methods=['GET'])
+def ai_hub_models_sync_diffs():
+    """Diff rows for the review page. ?run_id=&status=pending|all&limit="""
+    admin, err = _require_admin()
+    if err:
+        return err
+    from services.model_sync import get_pending_diffs
+    run_id = request.args.get('run_id')
+    status = request.args.get('status', 'pending')
+    limit = request.args.get('limit', '200')
+    try:
+        run_id = int(run_id) if run_id else None
+    except ValueError:
+        run_id = None
+    return jsonify({'success': True, 'data': get_pending_diffs(run_id=run_id, status=status, limit=limit)})
+
+
+@admin_bp.route('/ai-hub/models/catalog', methods=['GET'])
+def ai_hub_models_catalog():
+    """Curated offline model list for one provider (?provider=<slug>).
+
+    Overseas providers cannot be scanned from this network, so the admin UI
+    renders this list and writes the rows the operator ticks.  ``offline``
+    tells the UI to skip the network scan entirely.
+    """
+    admin, err = _require_admin()
+    if err:
+        return err
+    from services.model_sync import get_static_catalog
+    slug = (request.args.get('provider') or '').strip()
+    if not slug:
+        return jsonify({'success': False, 'message': _('No provider supplied')}), 400
+    return jsonify({'success': True, 'data': get_static_catalog(slug)})
+
+
+@admin_bp.route('/ai-hub/models/probe', methods=['POST'])
+def ai_hub_models_probe():
+    """1-token reachability probe with circuit-breaker linkage.
+
+    Body (optional): {"provider": "openai", "sample_limit": 3}
+    Models failing 2 consecutive runs are auto-grayed (never deleted);
+    429 counts as reachable."""
+    admin, err = _require_admin()
+    if err:
+        return err
+    from services.model_sync import probe_provider_models
+    data = request.get_json(silent=True) or {}
+    provider = data.get('provider') or request.args.get('provider') or None
+    sample = data.get('sample_limit') or request.args.get('sample_limit') or 3
+    try:
+        sample = int(sample)
+    except (TypeError, ValueError):
+        sample = 3
+    report = probe_provider_models(provider_slug=provider, sample_limit=sample)
+    return jsonify(report), (200 if report.get('success') else 500)

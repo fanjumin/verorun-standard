@@ -54,7 +54,12 @@ def _edu_admin_login():
     """教育版公开入口统一重定向到管理后台登录。"""
     return redirect('/admin/login')
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder=None)
+# static_folder=None：关闭 Flask 内置 /static 处理器，改由下方显式路由接管。
+# 内置处理器一旦注册，`/static/<path>` 规则会先匹配并在文件不存在时直接 404，
+# 不会落到我们带 admin/static 回退的同名路由上（2026-10-13 在 104 实测：
+# 加了回退路由后 /static/css/themes.css 仍 404）。全站无 url_for('static') 调用，
+# 关闭内置静态目录不影响任何模板（已 grep 验证为 0 处）。
 
 # Main site (www) templates live under site/templates and platform/templates, not beside this file.
 # Mount them explicitly on the jinja loader to avoid TemplateNotFound for public_home.html etc.
@@ -369,6 +374,29 @@ def i18n_set_lang():
 def health():
     """Liveness probe — used by health checks/watchdog to probe 8081 main site liveness."""
     return jsonify({'status': 'ok', 'service': 'auth-center+site'})
+
+
+# ── 静态文件：仓库根 static/ 优先，未命中回退 admin/static/ ──────────────
+# 为什么必须有：插件标准 §15.6 强制 iframe/独立页面引用
+#   /static/css/design-system.css + /static/css/themes.css
+# 而 nginx 把 /static/* 全部交给本进程（8081）。themes.css 只存在于
+# admin/static/css/（管理端资产），本进程原先只有 Flask 默认 static 目录
+# （仓库根 static/，无 themes.css）→ 实测 404 且响应体是 text/html 的
+# Flask 默认 404 页，浏览器 strict MIME 直接拒绝加载样式表（表现为插件页
+# 输入框/按钮全部退回浏览器默认样式）。main_site/app.py 与 admin/app.py
+# 早已有同构回退，此处补齐第三个进程，一次覆盖 12 个插件模板的引用。
+_ROOT_STATIC = os.path.join(_SCRIPT_DIR, 'static')
+_ADMIN_STATIC = os.path.join(_SCRIPT_DIR, 'admin', 'static')
+
+
+@app.route('/static/<path:filename>')
+def static_files(filename):
+    """仓库根 static/ 优先，回退 admin/static/（与 main_site/app.py 同构）。"""
+    from flask import send_from_directory
+    local_path = os.path.join(_ROOT_STATIC, filename)
+    if os.path.isfile(local_path):
+        return send_from_directory(_ROOT_STATIC, filename)
+    return send_from_directory(_ADMIN_STATIC, filename)
 
 
 if __name__ == '__main__':

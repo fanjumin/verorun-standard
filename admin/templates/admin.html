@@ -2,6 +2,8 @@
 {% include 'partials/head.html' %}
 {% include 'partials/icons.html' %}
 {% include 'partials/ai_hub.html' %}
+{% include 'partials/ai_providers.html' %}
+{% include 'partials/role_settings.html' %}
 {% include 'partials/core.html' %}
 {% include 'partials/dashboard.html' %}
 {% include 'partials/users.html' %}
@@ -13,6 +15,7 @@
 {% include 'partials/provider_api_keys.html' %}
 {% include 'partials/llm_quotas.html' %}
 {% include 'partials/model_health.html' %}
+{% include 'partials/model_sync.html' %}
 {% include 'partials/posts.html' %}
 {% include 'partials/tickets.html' %}
 {% include 'plugins/im_gateway/templates/admin_imgateway.html' ignore missing %}
@@ -70,6 +73,13 @@
 {% include 'plugins/ali_api/templates/admin_ali_api.html' ignore missing %}
 {% include 'plugins/site_domains/templates/admin_sitedomains.html' ignore missing %}
 {% include 'plugins/logistics/templates/admin_logistics.html' ignore missing %}
+{# hr_recruit / bayes_engine / butterfly_engine：内联 partial（裸 JS，§10.3 + §12.11）。
+   管理端外壳只有一个大 <script> 块，插件的 window.l_<key>() 渲染函数**必须**在这里
+   登记 include 才会存在；菜单 key 与 l_<key> 同名，缺失时 goPlugin() 重试 10 次后
+   报「插件渲染函数 l_<key>() 未找到」。2026-10-13 补齐三项登记。 #}
+{% include 'plugins/hr_recruit/templates/hr_recruit.html' ignore missing %}
+{% include 'plugins/bayes_engine/templates/bayes_admin.html' ignore missing %}
+{% include 'plugins/butterfly_engine/templates/butterfly_admin.html' ignore missing %}
 {% include 'plugins/coupons/templates/admin_coupons.html' ignore missing %}
 {% include 'plugins/iot_hub/templates/iot_admin.html' ignore missing %}
 {% include 'plugins/currency_converter/templates/currency_admin.html' ignore missing %}

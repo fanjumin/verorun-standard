@@ -1,0 +1,62 @@
+# VeroRun 全网智能客服（omni-service）版发行配置（单一事实源：插件白名单 + 角色集 + 核心文件）
+# 接线方案：outputs/omni-service-desktop_2026-10-21/omni-service-desktop-接线设计方案.md §3.1
+#
+# ★ 2026-10-21 用户裁决：omni-desktop（桌面 standalone）版废弃，改为「服务器 + 轻壳」的
+#   omni-service 版 —— 插件白名单安装于云端服务器；桌面壳不内嵌任何插件/载荷，
+#   仅以轻壳形式动态接线到用户公网 IP（远程 admin API）。
+# 服务裁剪：user_login（auth_server/8081 用户登录）与 main_site（8083 网站）关闭；
+# admin(8084) / health(8085) / guardian 在服务器运行（由 install 的 DEPLOY_TYPE 门控）。
+edition: omni-service
+label: 全网智能客服服务版
+services:
+  # 服务器裁剪版：关闭用户向 Web 服务（对应物理服务 verorun-main/8081 与 verorun-auth/8083）
+  user_login: false
+  user_console: false
+  main_site: false
+# 许可证/订阅到期强制：本版未声明 → 不启用（opt-in 语义，与 finance-desktop 刻意相反）。
+# 若产品后续要求「订阅到期即锁」，在此显式加 `license_enforcement: true` 即可，
+# 内核 agent_matrix.models.edition_requires_license() 会立即生效，无需改代码。
+plugins:
+  # include 同时承担两件事：
+  #   ① 发包裁剪：stage-verorun-core.mjs 只把这些目录拷进安装包；
+  #   ② 运行期白名单（runtime_whitelist: true）：插件中心 / discover / enable 只放行这些。
+  # 后果（显式接受，与金融桌面版同口径）：包外插件不出现在本版界面、不可启用；
+  # 新增客服相关插件须随发行版一起更新本清单。
+  runtime_whitelist: true
+  include:
+    # ── 基座 ──
+    - _base
+    # ── 客服主线 ──
+    - omni_service     # 全网客服会话编排（多渠道接入 / 转人工 / SSE 事件流 / 会话总结）
+    - im_gateway       # IM 通道网关（企微群 / 飞书 / 钉钉 等平台侧收发）
+    - chatbot          # AI 应答唯一引擎（RAG 知识库问答，omni_service 经其 service.answer() 取答）
+    - visitor_profile  # 访客画像（omni 会话消息经 visitor.activity 事件进入画像提取）
+    - memory_engine    # 记忆引擎（Agent 任务完成后自动提取记忆）
+    # ── 辅助能力 ──
+    - vault            # 保险库（各渠道凭据加密存放）
+    - sms              # 短信通道（客服外呼 / 通知）
+    - email            # 邮件通道（工单 / 通知）
+    - project_workspace # AI 项目工作空间（客服知识沉淀）
+    - site_domains     # 站点域名（网页渠道接入）
+  # 运行时无效（勿依赖）：edition_plugin_excludes() 恒返回空列表，可见性只由上面的
+  # include（runtime_whitelist: true）决定。本段仅作"本版明确不提供"的登记。
+  exclude:
+    - veroscholar      # 科研版专属
+    - stock_analysis   # 投研版专属
+    - cogevolution_substrate # 物联网（边缘）场景认知进化
+roles:
+  # 本版角色集 = agent_matrix/roles/ 根目录（官方角色集）。
+  # 说明：_load_all_role_yamls() 的 editions 过滤只对 research / finance 生效，
+  # omni-service 版因此加载整套官方角色；本清单仅作「本版侧重」的文档登记，不是运行期门控。
+  #   · athena 编排 Master / service 客服（omni_service 的 agent_role=service）/
+  #     ops 系统运维（vault）/ business 访客画像 / content 项目工作空间 / builder 站点域名
+  - athena
+  - service
+  - ops
+  - business
+  - content
+  - builder
+core_files:
+  - agent_matrix/models.py
+  - agent_matrix/routes.py
+  - auth-center/models/database.py

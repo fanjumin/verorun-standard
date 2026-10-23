@@ -115,6 +115,20 @@ def generate_offline_token(plugin_id: str, license_key: str,
     return token
 
 
+def _sig_equal(provided: str, expected: str) -> bool:
+    """常量时间比较两段签名（防时序侧信道）。
+
+    不用 `==`：字符串比较在首个不同字节处即返回，比较耗时会随"猜对的前缀长度"
+    单调变化，可被远程计时放大后逐字节爆破签名。
+    hmac.compare_digest() 对 str 仅接受 ASCII，token 中若夹带非 ASCII 字符会抛
+    TypeError —— 这里统一按 UTF-8 字节比较，任何异常一律判为不相等（fail-closed）。
+    """
+    try:
+        return hmac.compare_digest(provided.encode('utf-8'), expected.encode('utf-8'))
+    except Exception:
+        return False
+
+
 def verify_offline_token(token: str, plugin_id: str, site_id: str) -> Tuple[bool, str]:
     """验证离线 token，返回 (is_valid, expires_at|error_msg)"""
     try:
@@ -128,7 +142,7 @@ def verify_offline_token(token: str, plugin_id: str, site_id: str) -> Tuple[bool
         secret = _get_license_secret()
         expected_sig = hmac.new(secret.encode(), payload_str.encode(),
                                 hashlib.sha256).hexdigest()[:32]
-        if sig != expected_sig:
+        if not _sig_equal(sig, expected_sig):
             return False, 'signature mismatch'
 
         # 验证插件 ID

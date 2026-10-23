@@ -8,6 +8,15 @@ domain: research
 managed_modules:
   - stock_analysis
   - multi_asset
+  # 2026-10-20 用户裁决（金融版角色侧调整）：bayes_engine 的 plugin.json 保持
+  # agent_role=athena 不改，在本版由本角色 managed_modules 认领（② 通道，与 ops 认领
+  # search_hub / rs_planner 认领 content_factory 同一惯例，见 models.resolve_agent_roles ②）。
+  # 依据 FIN-14：贝叶斯推断/校准（bayes.infer/update/predict/compare/calibrate）属
+  # "量化口径与统计"域；signal-calibration / source-reliability / sentiment-credibility
+  # 三个 Skill 的原生使用者即本角色。不认领则本角色调用 bayes.* 构成 NT-03 越权。
+  # bayes_engine 跨版认领惯例（2026-10-20 定稿）：金融版本角色 / 科研版
+  # method_architect（依据 RES-09/10），详见 research-desktop CHANGELOG [1.1.0]。
+  - bayes_engine
 provider: deepseek
 model_name: deepseek-v4-flash
 system_prompt: prompts/rs_quant.md

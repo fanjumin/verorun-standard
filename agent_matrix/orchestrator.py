@@ -4,13 +4,43 @@ Agent Matrix — 任务协调核心 (Orchestrator)
 ========================================
 负责任务分解 → Agent 选择 → 任务下发 → 结果收集 → 报告生成。
 """
-from i18n import _
+from i18n import _, _current_locale
 import json, os, sys, logging, time
+import threading
 from datetime import datetime
 
 from agent_matrix.cache_utils import get_summary_store
 
 logger = logging.getLogger(__name__)
+
+# 超时后仍在后台跑的讨论轮次（C3）。daemon 线程无法被外部停止，只能登记留痕：
+# 每轮超时泄漏一个仍在调用 LLM 的线程，持续消耗 token 并继续写库。
+# 查询入口：orphan_rounds()，供自检脚本/巡检使用。
+_ORPHAN_ROUNDS = []
+
+
+def orphan_rounds():
+    """返回超时后仍在后台运行的讨论轮次（最近 50 条）。"""
+    return list(_ORPHAN_ROUNDS)
+
+
+# 整条讨论链的时间预算（C2）：discuss_and_execute 是 6 轮线性流程，每轮
+# AGENT_TIMEOUT=120s，理论最长 720s —— 远超 gunicorn --timeout 300，慢任务会被
+# SIGKILL 并连带杀死同一 worker 上的其它请求。这里给"本次讨论"设一个线程级
+# deadline，每轮的超时按剩余预算裁剪，保证整条链不超过预算。
+# 用 thread-local 而不是实例属性：Orchestrator 是共享实例，多个请求并发时
+# 实例属性会互相覆盖。
+_DISCUSS_DEADLINE = threading.local()
+
+# 默认 240s：给 300s 的 gunicorn timeout 留 60s 余量（响应头写回 + 收尾）。
+DISCUSS_BUDGET_DEFAULT = 240
+
+
+def _discuss_budget():
+    try:
+        return float(os.environ.get('AGENT_DISCUSS_BUDGET') or DISCUSS_BUDGET_DEFAULT)
+    except (TypeError, ValueError):
+        return DISCUSS_BUDGET_DEFAULT
 
 
 class AgentOrchestrator:
@@ -351,7 +381,7 @@ class AgentOrchestrator:
             content = engine.chat(
                 [
                     {'role': 'system',
-                     'content': '你是事实提取器。每行输出一条以 "- " 开头的客观事实，无可提取则只输出：无'},
+                     'content': 'You are a fact extractor. Output one objective fact per line, each starting with "- ". If nothing can be extracted, output only: none'},
                     {'role': 'user', 'content': prompt},
                 ],
                 temperature=0.2, max_tokens=500, module='memory_extract',
@@ -363,7 +393,7 @@ class AgentOrchestrator:
                 line = line.strip()
                 if line.startswith('- ') and len(line) > 3:
                     fact = line[2:].strip()
-                    if fact and fact != '无':
+                    if fact and fact.lower() != 'none':
                         facts.append(fact)
 
             logger.info(f"提取事实 {len(facts)} 条: {facts}")
@@ -419,41 +449,42 @@ class AgentOrchestrator:
             'task_type': 'decompose',
             'mode': getattr(self, '_current_mode', '') or '',
             'user_query': instruction[:200],
+            'locale': _current_locale(),
         }
         master_prompt = self._resolve_prompt(master_config, task_ctx)
 
         decompose_prompt = f"""{master_prompt}
 
-现在，用户下达了以下指令：
+The user has now issued the following instruction:
 
 <instruction>
 {instruction}
 </instruction>
 
-当前可用的 Sub Agent 团队：
+Currently available Sub Agent team:
 {agent_list_str}
 
-请按以下 JSON 格式输出任务分解方案（不要加 markdown 代码块标记，只输出纯 JSON）：
+Output the task decomposition in the following JSON format (no markdown code fences - pure JSON only):
 
 {{
   "tasks": [
     {{
-      "title": "子任务简要标题",
-      "description": "子任务详细描述，包含执行要求",
-      "target_agent_name": "目标Agent名称（必须是上面列表中的）",
+      "title": "short sub-task title",
+      "description": "detailed sub-task description including execution requirements",
+      "target_agent_name": "target agent name (must be one from the list above)",
       "task_type": "execute",
       "priority": 5,
-      "input_data": {{"action": "具体操作", "params": {{...}}}},
-      "expected_output": {{"fields": ["期望输出字段名"]}}
+      "input_data": {{"action": "concrete operation", "params": {{...}}}},
+      "expected_output": {{"fields": ["expected output field names"]}}
     }}
   ]
 }}
 
-注意：
-- 如果没有合适的 Sub Agent，设 target_agent_name 为 "none" 说明原因
-- 如果指令可以直接回复（无需子任务），输出一个空 tasks 数组并设置 direct_reply
-- 任务之间如果有依赖关系，在 description 中注明
-- 每个任务必须能独立执行"""
+Notes:
+- If no suitable Sub Agent exists, set target_agent_name to "none" and explain why
+- If the instruction can be answered directly (no sub-tasks needed), output an empty tasks array and set direct_reply
+- If tasks depend on each other, state the dependency in the description
+- Every task must be independently executable"""
 
         response = engine.ask(decompose_prompt, temperature=0.3)
 
@@ -577,7 +608,7 @@ class AgentOrchestrator:
                         a = agent_map[agent_name]
                         target_module = 'image' if kw in _image_kw else a.get('domain', '')
                         matched.append({
-                            'title': f'{a["description"].split("—")[0] if "—" in a["description"] else a["name"]} — 指令相关操作',
+                            'title': f'{a["description"].split("—")[0] if "—" in a["description"] else a["name"]} - instruction-related task',
                             'description': instruction[:200],
                             'target_agent_id': a['id'],
                             'target_agent_name': a['name'],
@@ -679,6 +710,9 @@ class AgentOrchestrator:
                 'target_agent_id': target_id,
                 'parent_task_id': master_task_id,
                 'master_task_id': master_task_id,
+                # WP-3：链路归因（chain 根 = master 任务，子任务 depth=1）
+                'chain_id': master_task_id,
+                'depth': 1,
                 'task_type': task_def.get('task_type', 'execute'),
                 'title': task_def.get('title', ''),
                 'description': task_def.get('description', ''),
@@ -753,45 +787,42 @@ class AgentOrchestrator:
 
         # 用 ThreadPoolExecutor 并行提交所有任务
         max_workers = min(len(tasks), 5)  # 最多5个并行
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # 注意：这里是"整批预算"，不是每任务各 300s。concurrent.futures 的
+        # as_completed(timeout=) 同样是整体截止，但它在超时后仍会把执行器留到
+        # `with` 退出时 shutdown(wait=True) —— 也就是"宣布超时"之后函数还要阻塞
+        # 到所有线程真正跑完才返回。改为显式 shutdown(wait=False, cancel_futures=True)：
+        # 超时立即返回，未开始的任务直接取消，已在跑的线程不再阻塞返回路径
+        # （Python 无法强制杀线程，它们仍会跑完，见 C3）。
+        budget = 300
+        deadline = time.time() + budget
+        executor = ThreadPoolExecutor(max_workers=max_workers)
+        try:
             for task_def in tasks:
-                future = executor.submit(_run_single, task_def)
-                futures[future] = task_def
+                futures[executor.submit(_run_single, task_def)] = task_def
 
-            # 等待完成（带超时）
-            timeout_per_task = 300  # 每个任务最多300秒
-            try:
-                for future in as_completed(futures, timeout=timeout_per_task):
-                    try:
-                        result = future.result()
-                        with results_lock:
-                            results.append(result)
-                            completed_count += 1
-                    except Exception as e:
-                        task_def = futures[future]
-                        with results_lock:
-                            results.append({
-                                'sub_task_id': None,
-                                'agent_name': task_def.get('target_agent_name', '?'),
-                                'status': 'failed',
-                                'error': str(e),
-                                'title': task_def.get('title', ''),
-                            })
-                            completed_count += 1
-            except TimeoutError:
-                # 超时未完成的任务标记为 failed
-                for future in futures:
-                    if not future.done():
-                        task_def = futures[future]
-                        with results_lock:
-                            results.append({
-                                'sub_task_id': None,
-                                'agent_name': task_def.get('target_agent_name', '?'),
-                                'status': 'failed',
-                                'error': _('Task execution timed out (300s)'),
-                                'title': task_def.get('title', ''),
-                            })
-                            completed_count += 1
+            for future in list(futures):
+                remaining = max(0.0, deadline - time.time())
+                try:
+                    result = future.result(timeout=remaining)
+                    with results_lock:
+                        results.append(result)
+                        completed_count += 1
+                except Exception as e:
+                    task_def = futures[future]
+                    future.cancel()
+                    logger.warning('[dispatch] sub-task %s did not finish within the '
+                                   'batch budget: %s', task_def.get('title', '?'), e)
+                    with results_lock:
+                        results.append({
+                            'sub_task_id': None,
+                            'agent_name': task_def.get('target_agent_name', '?'),
+                            'status': 'failed',
+                            'error': str(e),
+                            'title': task_def.get('title', ''),
+                        })
+                        completed_count += 1
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
         return results
 
@@ -833,7 +864,7 @@ class AgentOrchestrator:
             # 摘要失败，回退为最近 6 条原文
             return recent_msgs
 
-        memory_msg = {'role': 'assistant', 'content': f'[历史对话摘要]\n{summary}'}
+        memory_msg = {'role': 'assistant', 'content': f'[History summary]\n{summary}'}
         return [memory_msg] + recent_msgs
 
     def _summarize_messages(self, messages, agent_config):
@@ -869,6 +900,7 @@ class AgentOrchestrator:
             'task_type': task_def.get('task_type', 'execute'),
             'mode': task_def.get('_mode', getattr(self, '_current_mode', '') or ''),
             'user_query': task_def.get('description', ''),
+            'locale': _current_locale(),
         }
         prompt = self._resolve_prompt(agent_config, task_ctx)
         if prompt:
@@ -943,11 +975,11 @@ class AgentOrchestrator:
                 try:
                     from services.ai_content_generator import analyze_image
                     if any(kw in prompt for kw in [_('Extract'),_('Crop'),_('Capture'),_('Background Removal'),_('Withdraw')]):
-                        vq = f'用户要求: {prompt}\n请分析这张图片中用户想要提取的区域的精确位置坐标(x,y,width,height)，只返回JSON: {{"x":数字,"y":数字,"w":数字,"h":数字}}'
+                        vq = f'User request: {prompt}\nAnalyze the exact region coordinates (x, y, width, height) the user wants to extract from this image. Return JSON only: {{"x": number, "y": number, "w": number, "h": number}}'
                     elif any(kw in prompt for kw in [_('Add Text'),_('Write Text'),_('Add Text')]):
-                        vq = f'用户要求: {prompt}\n请描述图片的布局，建议文字添加的最佳位置'
+                        vq = f'User request: {prompt}\nDescribe the image layout and suggest the best positions for adding text'
                     else:
-                        vq = f'用户要求: {prompt}\n请详细描述这张图片的内容、风格、颜色、布局'
+                        vq = f'User request: {prompt}\nDescribe this image in detail: content, style, colors, layout'
                     vision_analysis = analyze_image(ref_image_url, question=vq)
                 except:
                     pass
@@ -1044,7 +1076,7 @@ class AgentOrchestrator:
             elif ref_image_url:
                 from services.ai_content_generator import generate_image, _validate_image_url
                 import urllib.request as _urlreq
-                gen_prompt = f'{prompt}\n\n参考图分析: {vision_analysis[:500]}' if vision_analysis else prompt
+                gen_prompt = f'{prompt}\n\nReference-image analysis: {vision_analysis[:500]}' if vision_analysis else prompt
                 oss_url = generate_image(gen_prompt, size='1280x720', reference_image_url=ref_image_url)
                 if oss_url:
                     _validate_image_url(oss_url)
@@ -1210,19 +1242,27 @@ class AgentOrchestrator:
         'planner': 'prompts/discuss_planner.md',
         'reviewer': 'prompts/discuss_reviewer.md',
         'decider': 'prompts/discuss_decider.md',
+        'verifier': 'prompts/verification_agent.md',
     }
 
-    def _get_discussion_prompt(self, agent_config, role):
+    def _get_discussion_prompt(self, agent_config, role, task_context=None):
         """动态解析 Discussion 角色提示词。
 
         优先按标签 discussion_<role> 从 agent_prompts 表查询；
         无匹配时回退读取原 .md 文件（保持既有行为）。
 
         agent_config: 对应讨论角色的 Agent 配置（供 Resolver 上下文参考）。
+        task_context: 给定（非 None）时对 DB 命中的标签 prompt 应用
+            before_prompt_resolve 过滤器链（记忆/画像注入）。刻意仅让
+            planner/reviewer/decider 传入；verifier 保持 None 以维护其
+            对抗验证独立性。
         """
         resolver = self._get_prompt_resolver()
         if resolver:
-            content = resolver.get_by_tag(f'discussion_{role}')
+            content = resolver.get_by_tag(
+                f'discussion_{role}',
+                task_context=task_context,
+                agent_config=agent_config if task_context is not None else None)
             if content:
                 return content
         return self._load_prompt(self._DISCUSSION_PROMPT_FILES.get(role, ''))
@@ -1315,6 +1355,19 @@ class AgentOrchestrator:
         if timeout is None:
             timeout = self.AGENT_TIMEOUT
 
+        # C2：整条讨论链共享一个预算，单轮超时按剩余预算裁剪。
+        deadline = getattr(_DISCUSS_DEADLINE, 'value', None)
+        if deadline:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                # 预算耗尽。同时清掉残留标记：discuss_and_execute 是生成器，
+                # 无法用 finally 收尾，若不清除，同一线程后续与该讨论无关的
+                # 调用会被这个过期 deadline 误伤。
+                _DISCUSS_DEADLINE.value = None
+                raise TimeoutError('discussion budget exhausted '
+                                   f'({_discuss_budget():.0f}s for the whole chain)')
+            timeout = min(timeout, remaining)
+
         result_queue = queue.Queue()
 
         def runner():
@@ -1335,6 +1388,20 @@ class AgentOrchestrator:
         t.join(timeout=timeout)
 
         if t.is_alive():
+            # Python 无法从外部杀掉线程：这一轮会继续调用 LLM、继续写库（token
+            # 用量、agent 统计、任务日志），只是它的结果已无人接收、会被丢弃。
+            # 这里做两件事：留痕（可观测），并登记到孤儿计数供自检/巡检读取。
+            _ORPHAN_ROUNDS.append({
+                'at': time.time(),
+                'agent': (agent_config or {}).get('name') or (agent_config or {}).get('slug', '?'),
+                'timeout': timeout,
+            })
+            if len(_ORPHAN_ROUNDS) > 50:
+                del _ORPHAN_ROUNDS[:-50]
+            logger.warning('[discuss] round timed out after %ss (agent=%s): the thread '
+                           'keeps running and its result will be discarded; the LLM call '
+                           'and DB writes inside cannot be cancelled from outside',
+                           timeout, (agent_config or {}).get('name', '?'))
             raise TimeoutError(f'Agent round timed out after {timeout}s')
 
         status, value = result_queue.get_nowait()
@@ -1388,7 +1455,7 @@ class AgentOrchestrator:
                     task=fix_prompt,
                     context=[],
                     user_id=user_id,
-                    prompt_path=self._get_discussion_prompt(agent_config, 'decider')
+                    prompt_path=self._get_discussion_prompt(agent_config, 'decider', task_context=_disc_prompt_ctx)
                 )
 
                 match = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', fixed)
@@ -1517,6 +1584,61 @@ class AgentOrchestrator:
         )
 
     # ============================================================
+    # WP-4: verification gate helpers
+    # ============================================================
+
+    def _get_verify_risky_modules(self):
+        """高危模块清单（system_config: agent_verify_risky_modules，JSON 数组）。"""
+        try:
+            from agent_matrix.engine import _get_system_key
+            raw = _get_system_key('agent_verify_risky_modules')
+            import json as _json
+            data = _json.loads(raw) if raw else None
+            if isinstance(data, list) and data:
+                return {str(x) for x in data}
+        except Exception:
+            pass
+        return {'payment', 'subscription', 'shop', 'email', 'sms',
+                'order_notify', 'vault'}
+
+    def _plan_has_risky_modules(self, plan_text):
+        """highrisk 策略判定：计划文本是否触及高危模块。"""
+        try:
+            risky = self._get_verify_risky_modules()
+            low = (plan_text or '').lower()
+            return any(k in low for k in risky)
+        except Exception:
+            return False
+
+    @staticmethod
+    def _extract_verify_verdict(text):
+        """从验证报告提取 verdict；解析失败按 warn（放行但留痕）。
+
+        F1 修复后同时接受两种输出契约：
+        1. 报告式（verification_agent.md 系统提示契约，优先）：报告末尾的
+           ``## VERDICT: PASS|FAIL|BLOCKED``。BLOCKED 表示环境受限无法完成
+           检查，映射为 warn —— 放行但留痕、不触发 revision 补救回路；
+        2. JSON 风格（向后兼容历史调用）：``"verdict": "pass|warn|fail"``。
+        任何无法解析的输出一律回落 warn，方向 fail-open（不误伤执行），
+        真实 FAIL→revision 回路依赖报告式契约稳定触发。
+        """
+        import re as _re
+        t = text or ''
+        # 报告式：## VERDICT: <value>，大小写/空白/markdown 装饰容错；
+        # 取最后一个匹配（verdict 块按契约位于报告末尾）。负向先行断言
+        # (?!\s*\|) 防止模型原样复制模板行 "PASS|FAIL|BLOCKED" 时把 PASS 误命中。
+        m = _re.findall(
+            r'##\s*verdict\s*:?\s*(pass|fail|blocked)(?!\s*\|)\b',
+            t, _re.IGNORECASE)
+        if m:
+            v = m[-1].lower()
+            return 'warn' if v == 'blocked' else v
+        # JSON 风格兜底（向后兼容）
+        m = _re.search(r'"verdict"\s*:\s*"(pass|warn|fail)"', t,
+                       _re.IGNORECASE)
+        return m.group(1).lower() if m else 'warn'
+
+    # ============================================================
     # Main entry: discuss_and_execute (SSE generator)
     # ============================================================
 
@@ -1535,6 +1657,12 @@ class AgentOrchestrator:
         startup = time.time()
         discussion_context = []
         round_num = 0
+        # C2：本次讨论的整体预算（线程级）。6 轮 ×120s 会撞穿 gunicorn 300s，
+        # 这里统一裁剪每轮超时，使整条链不超过预算（默认 240s）。
+        _DISCUSS_DEADLINE.value = startup + _discuss_budget()
+        # Discussion 角色（planner/reviewer/decider）每轮 prompt 解析时的
+        # 记忆/画像注入上下文；verifier 刻意不使用，保持对抗验证独立性。
+        _disc_prompt_ctx = {'user_query': instruction, 'user_id': user_id}
 
         # Helper to emit a discussion event
         def _emit(typ, **kwargs):
@@ -1546,9 +1674,29 @@ class AgentOrchestrator:
         # ── Agent availability check with degradation (Fix #5) ──
         # 选角规则（2026-09-21）：优先本版设计角色（投研流水线 rs_planner / rs_pm），
         # 官方版无这些 slug 时回落官方 domain（site_builder / finance）。
-        planner_agent = self._find_agent_for_protocol(['rs_planner'], 'site_builder')
-        reviewer_agent = self._find_agent_by_domain('ops')           # Ops → Reviewer
-        decider_agent = self._find_agent_for_protocol(['rs_pm'], 'finance')
+        # 阶段→角色 动态分派（系统能力，单一事实来源 sa_discuss_stage_roles，
+        # 见 agent_matrix/discussion.py；未配置时回退 DEFAULT_STAGE_ROLES）。
+        from agent_matrix.discussion import load_stage_roles, DEFAULT_STAGE_ROLES
+        _stage_roles = load_stage_roles()
+        # 字面兜底统一引用 discussion.DEFAULT_STAGE_ROLES（单一事实源，勿在此处另写角色 slug）
+        planner_agent = self._find_agent_for_protocol(
+            [_stage_roles.get('planner', DEFAULT_STAGE_ROLES['planner'])], 'site_builder')
+        reviewer_agent = self._find_agent_for_protocol(
+            [_stage_roles.get('reviewer', DEFAULT_STAGE_ROLES['reviewer'])], 'ops')
+        decider_agent = self._find_agent_for_protocol(
+            [_stage_roles.get('decider', DEFAULT_STAGE_ROLES['decider'])], 'finance')
+        # WP-4：验证关选角（verifier slug 优先，回落 research 域的 explorer）
+        verifier_agent = self._find_agent_for_protocol(
+            [_stage_roles.get('verifier', 'verifier')], 'research')
+        # WP-4：验证关策略（agent_verify_policy: off|highrisk|all，默认 off；
+        # off 时行为与引入前逐字节一致）
+        try:
+            from agent_matrix.engine import _get_system_key
+            verify_policy = (_get_system_key('agent_verify_policy') or 'off').strip().lower()
+        except Exception:
+            verify_policy = 'off'
+        if verify_policy not in ('off', 'highrisk', 'all'):
+            verify_policy = 'off'
 
         missing = []
         if not planner_agent:
@@ -1573,7 +1721,7 @@ class AgentOrchestrator:
                              'and output it as JSON:\n\n' + instruction,
                         context=[],
                         user_id=user_id,
-                        prompt_path=self._get_discussion_prompt(available, 'decider')
+                        prompt_path=self._get_discussion_prompt(available, 'decider', task_context=_disc_prompt_ctx)
                     )
                     exec_plan = self._parse_decision_json(plan, available, user_id)
 
@@ -1623,7 +1771,7 @@ class AgentOrchestrator:
             task=instruction,
             context=discussion_context,
             user_id=user_id,
-            prompt_path=self._get_discussion_prompt(planner_agent, 'planner')
+            prompt_path=self._get_discussion_prompt(planner_agent, 'planner', task_context=_disc_prompt_ctx)
         )
 
         discussion_context.append({
@@ -1654,7 +1802,7 @@ class AgentOrchestrator:
             task=review_task,
             context=discussion_context,
             user_id=user_id,
-            prompt_path=self._get_discussion_prompt(reviewer_agent, 'reviewer')
+            prompt_path=self._get_discussion_prompt(reviewer_agent, 'reviewer', task_context=_disc_prompt_ctx)
         )
 
         discussion_context.append({
@@ -1686,7 +1834,7 @@ class AgentOrchestrator:
             task=revision_task,
             context=discussion_context,
             user_id=user_id,
-            prompt_path=self._get_discussion_prompt(planner_agent, 'planner')
+            prompt_path=self._get_discussion_prompt(planner_agent, 'planner', task_context=_disc_prompt_ctx)
         )
 
         discussion_context.append({
@@ -1698,6 +1846,84 @@ class AgentOrchestrator:
                     content=plan_v2)
 
         discussion_context = self._compact_context(discussion_context)
+
+        # ── Round 3.5 (WP-4): Verification gate — adversarial plan check ──
+        verify_report = ''
+        verify_verdict = 'skipped'
+        verify_needed = (verify_policy == 'all'
+                         or (verify_policy == 'highrisk'
+                             and self._plan_has_risky_modules(plan_v2)))
+        if verify_needed and verifier_agent:
+            round_num += 1
+            yield _emit('phase', phase='verification',
+                        agent=verifier_agent['name'], role='Verifier',
+                        content=f'Round {round_num}: Adversarial plan verification...')
+            verify_task = (
+                'You are the Verification gate. Adversarially verify the revised plan '
+                'BEFORE execution: (1) agent/module availability for each step, '
+                '(2) step dependencies and ordering, (3) risky or irreversible '
+                'operations lacking rollback, (4) missing success criteria. '
+                'Follow the REPORT FORMAT in your system prompt exactly: every check '
+                'must show the executed call and the output you observed, and the '
+                'report must end with the machine-readable verdict block — '
+                '"## VERDICT: PASS" when the plan is sound, "## VERDICT: FAIL" when '
+                'it must be revised (list every issue under ## Issues), '
+                '"## VERDICT: BLOCKED" only when the environment prevents a check. '
+                'Do not emit a bare JSON object in place of the evidence report.\n\n'
+                f'Original user request:\n{instruction}\n\n'
+                f'Final revised plan (v2):\n{plan_v2}'
+            )
+            try:
+                verify_report = self._run_discussion_agent_with_timeout(
+                    agent_config=verifier_agent,
+                    task=verify_task,
+                    context=discussion_context,
+                    user_id=user_id,
+                    prompt_path=self._get_discussion_prompt(verifier_agent, 'verifier')
+                )
+                verify_verdict = self._extract_verify_verdict(verify_report)
+            except Exception as e:
+                verify_report = f'Verification round failed: {e}'
+                verify_verdict = 'error'
+            discussion_context.append({
+                'agent': verifier_agent['name'],
+                'role': 'Verifier',
+                'content': verify_report
+            })
+            yield _emit('message', agent=verifier_agent['name'], role='Verifier',
+                        content=verify_report)
+            discussion_context = self._compact_context(discussion_context)
+            if verify_verdict == 'fail':
+                # 一次补救回路：按验证问题重修计划；再失败则由 Decider/人工裁决
+                round_num += 1
+                yield _emit('phase', phase='revision',
+                            agent=planner_agent['name'], role='Planner (Re-revise)',
+                            content=f'Round {round_num}: Re-revising plan to address verifier issues...')
+                fix_task = (
+                    'The verification gate REJECTED the plan. Revise it to resolve '
+                    'every issue below. Output the corrected plan as a JSON object '
+                    'with "steps".\n\n'
+                    f'Plan:\n{plan_v2}\n\n'
+                    f'Verifier report:\n{verify_report}'
+                )
+                plan_v2 = self._run_discussion_agent_with_timeout(
+                    agent_config=planner_agent,
+                    task=fix_task,
+                    context=discussion_context,
+                    user_id=user_id,
+                    prompt_path=self._get_discussion_prompt(planner_agent, 'planner', task_context=_disc_prompt_ctx)
+                )
+                discussion_context.append({
+                    'agent': planner_agent['name'],
+                    'role': 'Planner (Re-revised)',
+                    'content': plan_v2
+                })
+                yield _emit('message', agent=planner_agent['name'], role='Planner (Re-revised)',
+                            content=plan_v2)
+                discussion_context = self._compact_context(discussion_context)
+        elif verify_needed and not verifier_agent:
+            yield _emit('warning',
+                        content='Verification policy enabled but no Verifier agent found (slug: verifier). Gate skipped.')
 
         # ── Round 4: Decider (Agent C) makes final decision ──
         round_num += 1
@@ -1711,13 +1937,18 @@ class AgentOrchestrator:
             f'Final revised plan (v2):\n{plan_v2}\n\n'
             'Output ONLY a JSON object with "approved", "confidence", "reason", and "steps".'
         )
+        if verify_verdict != 'skipped':
+            decision_task += (
+                f'\n\nVerification gate verdict: {verify_verdict}\n'
+                f'Verifier report (truncated):\n{verify_report[:2000]}'
+            )
 
         decision = self._run_discussion_agent_with_timeout(
             agent_config=decider_agent,
             task=decision_task,
             context=discussion_context,
             user_id=user_id,
-            prompt_path=self._get_discussion_prompt(decider_agent, 'decider')
+            prompt_path=self._get_discussion_prompt(decider_agent, 'decider', task_context=_disc_prompt_ctx)
         )
 
         discussion_context.append({

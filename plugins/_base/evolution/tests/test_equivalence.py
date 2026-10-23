@@ -119,7 +119,7 @@ def test_ces_pii_blocked():
 
 
 # ── P1a 等价性：memory_engine 三处 keywords 委托基座后与基座同输出 ─────
-from plugins._base.evolution import text as evo_text
+from shared.plugin_base.evolution import text as evo_text
 from plugins.memory_engine.services.extractor import MemoryExtractor as _MeExtractor
 from plugins.memory_engine.services.reflexion import _keywords as _me_reflexion_keywords
 from plugins.memory_engine.services.sedimentation import (

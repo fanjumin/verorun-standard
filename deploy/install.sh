@@ -22,11 +22,12 @@
 #   --skip-deps: skip system + Python dependency installation (existing env re-deploy)
 #   --region=cn|global: region routing (default global)
 #
-# Supported INSTALL_TYPE values: website | professional | development | educational
+# Supported INSTALL_TYPE values: website | professional | development | educational | omni
 #   website      → DEPLOY_TYPE=production (domain + HTTPS)
 #   professional → DEPLOY_TYPE=lan         (no domain, LAN access)
 #   development  → DEPLOY_TYPE=dev         (verorun-code SSH, no plugins)
 #   educational  → DEPLOY_TYPE=edu         (no domain, edu license)
+#   omni         → DEPLOY_TYPE=omni-service (全网智能客服服务版：服务器 + 轻壳，裁剪用户登录/网站，只留 admin/health/guardian)
 #
 # install-code.sh is the team full-plugin (code) shortcut; Development maps to dev (no plugins).
 # install-local.sh and install-dev.sh have been removed (logic merged into Professional / Development).
@@ -48,7 +49,7 @@ fi
 : "${SERVICE_DIR:=/etc/systemd/system}"
 : "${DOMAIN:=}"
 : "${REGION:=global}"                # cn | global
-: "${DEPLOY_TYPE:=production}"       # production | lan | code | dev | edu — default; select_deploy_type may override
+: "${DEPLOY_TYPE:=production}"       # production | lan | code | dev | edu | omni-service — default; select_deploy_type may override
 : "${VR_ADMIN_USERNAME:=}"
 : "${VR_ADMIN_PASSWORD:=}"
 : "${SSL_EMAIL:=}"
@@ -75,12 +76,12 @@ else
         _COMMON_REMOTE="${EDU_COMMON_REMOTE:-https://raw.githubusercontent.com/fanjumin/verorun-edu/master/deploy/lib/common.sh}"
         _COMMON_MIRROR="${EDU_COMMON_MIRROR:-https://ghfast.top/https://raw.githubusercontent.com/fanjumin/verorun-edu/master/deploy/lib/common.sh}"
         # Computed and backfilled at release time by deploy/scripts/sign_release.py (LF-normalized hash)
-        _COMMON_SHA256="${EDU_COMMON_SHA256:-504647ffe4baebf324d01ec4bde99c138179f3220da61a693e205830b702d802}"
+        _COMMON_SHA256="${EDU_COMMON_SHA256:-b2a636f7520a42f2c1d2f85c8452d8d5053816d273ceca416e8ac15ab3ad0307}"
     else
         _COMMON_REMOTE="${COMMON_REMOTE:-https://raw.githubusercontent.com/fanjumin/verorun-pro/master/deploy/lib/common.sh}"
         _COMMON_MIRROR="${COMMON_MIRROR:-https://ghfast.top/https://raw.githubusercontent.com/fanjumin/verorun-pro/master/deploy/lib/common.sh}"
         # Computed and backfilled at release time by deploy/scripts/sign_release.py (LF-normalized hash)
-        _COMMON_SHA256="${COMMON_SHA256:-504647ffe4baebf324d01ec4bde99c138179f3220da61a693e205830b702d802}"
+        _COMMON_SHA256="${COMMON_SHA256:-b2a636f7520a42f2c1d2f85c8452d8d5053816d273ceca416e8ac15ab3ad0307}"
     fi
     _tmp_common="$(mktemp)"
     # Audit P3-2: clean up the temp file on Ctrl+C interruption
@@ -128,7 +129,7 @@ fi
 
 # ══════════════════════════════════════════════════════════════════════
 # Deploy type resolution (unified entry, build-2026.08.11)
-# DEPLOY_TYPE: production | lan | code | edu
+# DEPLOY_TYPE: production | lan | code | dev | edu | omni-service
 # ══════════════════════════════════════════════════════════════════════
 select_deploy_type() {
     # ================================================================
@@ -143,6 +144,7 @@ select_deploy_type() {
                 professional) DEPLOY_TYPE="lan" ;;
                 development)  DEPLOY_TYPE="dev" ;;
                 educational)  DEPLOY_TYPE="edu" ;;
+                omni)         DEPLOY_TYPE="omni-service" ;;
                 *) echo -e "${FAIL} Unknown INSTALL_TYPE: ${INSTALL_TYPE}"; exit 1 ;;
             esac
             echo -e "${INFO} Deploy type from INSTALL_TYPE: ${DEPLOY_TYPE}"
@@ -154,7 +156,7 @@ select_deploy_type() {
         if ! { exec 3<>/dev/tty; } 2>/dev/null; then
             echo -e "${FAIL} No interactive terminal available — pass INSTALL_TYPE explicitly:"
             echo -e "${INFO}   curl ... | sudo env INSTALL_TYPE=professional bash"
-            echo -e "${INFO}   INSTALL_TYPE: website | professional | development | educational"
+            echo -e "${INFO}   INSTALL_TYPE: website | professional | development | educational | omni"
             exit 1
         fi
         exec 3>&-
@@ -165,13 +167,15 @@ select_deploy_type() {
         echo "  [2] Professional   Pro edition (no domain, LAN access)"
         echo "  [3] Development    Dev edition (verorun-code, no plugins, requires SSH key)"
         echo "  [4] Educational    Edu edition (no domain, requires edu license code)"
-        echo -n "  Enter your choice [1-4]: " > /dev/tty
+        echo "  [5] Omni Service   全网智能客服服务版（服务器+轻壳，裁剪用户登录/网站，需公网 IP/域名）"
+        echo -n "  Enter your choice [1-5]: " > /dev/tty
         read -r _choice < /dev/tty
         case "${_choice}" in
             1) DEPLOY_TYPE="production" ;;
             2) DEPLOY_TYPE="lan" ;;
             3) DEPLOY_TYPE="dev" ;;
             4) DEPLOY_TYPE="edu" ;;
+            5) DEPLOY_TYPE="omni-service" ;;
             *) echo -e "${FAIL} Invalid choice, please try again"; exit 1 ;;
         esac
         echo -e "${INFO} Deploy type selected: ${DEPLOY_TYPE}"
@@ -237,6 +241,17 @@ apply_deploy_type() {
             # 全量检出（含全部插件）——教育版需运行全部插件（VeroScholar 等）。
             # 2026-08-20：sparse 白名单漏 plugins/ 曾导致插件被清空、蓝图挂载失败、
             # 菜单点击落入 SPA catch-all 出现重叠 Admin。教育版必须全量。
+            SPARSE_DIRS=""
+            ;;
+        omni-service)
+            # 全网智能客服服务版（服务器 + 轻壳）：主仓库全量检出（白名单插件在 plugins/），
+            # 运行期 runtime_whitelist 门控（deploy/editions/omni-service.yaml），白名单之外不可启用；
+            # 用户登录（8081）/网站（8083）服务由 common.sh _skip_user_login / _skip_user_console 裁剪。
+            # 2026-10-21 用户裁决：官方站保留 verorun-code 仓库源（不切 verorun-pro），
+            # 使 update 继续从本地对齐推送的 d8373f58 拉取 omni-service 发行。
+            if [ "${GIT_REPO}" = "https://github.com/fanjumin/verorun-pro.git" ]; then
+                GIT_REPO="git@github.com:fanjumin/verorun-code.git"
+            fi
             SPARSE_DIRS=""
             ;;
     esac

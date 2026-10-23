@@ -1,7 +1,7 @@
 # IM Gateway Plugin — 中文翻译
-plugin.name: IM 网关
+plugin.name: 通讯频道
 Channel Management: 频道管理
-IM Gateway: IM 网关
+IM Gateway: 通讯频道
 Feishu: 飞书
 WeCom: 企业微信
 DingTalk: 钉钉
@@ -104,7 +104,7 @@ WeCom webhook_url is empty: 企业微信 webhook_url 为空
 'WeCom returned: {} (errcode={})': '企业微信返回: {} (errcode={})'
 'Channel {channel} does not support media push': '渠道 {channel} 不支持媒体推送'
 # 卡片式多层级管理 UI (Phase 2)
-Instant Messaging: 即时通讯
+Instant Messaging: 通讯频道
 Third-party Login: 第三方登录
 Configured: 已配置
 Not Configured: 未配置
@@ -127,7 +127,7 @@ Test: 测试
 # IM adapter / gateway message strings (C4)
 Channel {channel} does not support send: 渠道 {channel} 不支持发送消息
 Feishu receive_id is not configured: 飞书接收方（receive_id）未配置
-IM Gateway is not enabled: IM 网关未启用
+IM Gateway is not enabled: 通讯频道未启用
 LINE Channel Access Token is empty: LINE Channel Access Token 为空
 LINE channel is not configured: LINE 通道未配置
 LINE recipient (userId) is required: 必须指定 LINE 接收方（userId）

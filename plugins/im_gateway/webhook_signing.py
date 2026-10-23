@@ -7,7 +7,8 @@
   - line     : X-Line-Signature = base64(HMAC-SHA256(channel_secret, body))
   - slack    : X-Slack-Signature = 'v0=' + HMAC-SHA256(signing_secret, 'v0:{ts}:{body}')，且 ts 新鲜度 ±5 分钟
   - discord  : X-Signature-Ed25519 对 (timestamp + body) 的 Ed25519 验签，公钥来自 channel_configs.application_public_key
-  - qq       : Ed25519 验签，公钥由机器人 Secret 派生（官方约定：私钥 = sha256(secret)），
+  - qq       : Ed25519 验签，公钥由机器人 Secret 派生（私钥种子 = secret 反复拼接至 32 字节，
+               不是 sha256(secret)——官方回调验证样例可逐字复算），
                同时支持回调地址验证（op=13）的签名应答
 """
 import base64
@@ -18,6 +19,9 @@ import time
 
 # Slack 时间戳新鲜度窗口（秒），防重放
 _SLACK_MAX_SKEW = 300
+
+# QQ 机器人 Ed25519 私钥种子的固定长度（字节）
+_QQ_SEED_LEN = 32
 
 
 def _load_channel_config(channel: str) -> dict:
@@ -78,10 +82,27 @@ def verify_slack(headers, body: str, signing_secret: str) -> tuple:
     return True, ''
 
 
+def _qq_seed(secret: str) -> bytes:
+    """QQ 机器人 Ed25519 私钥种子：secret 反复拼接后截断到 32 字节。
+
+    官方给的样例（secret=DG5g3B4j9X2KOErG、event_ts=1725442341、
+    plain_token=Arq0D5A61EgUu4OxUvOp）期望签名
+    87befc99c42c651b...c2d652c706 只有本派生能复现；sha256(secret) 派生
+    得到完全不同的签名，会导致回调地址验证与真实回调双向失败。
+    回归用例：tests/test_webhook_signing.py::QqOfficialVectorTest
+    """
+    raw = secret.encode('utf-8')
+    if not raw:
+        raise ValueError('qq bot_secret is empty')
+    if len(raw) >= _QQ_SEED_LEN:
+        return raw[:_QQ_SEED_LEN]
+    return (raw * (_QQ_SEED_LEN // len(raw) + 1))[:_QQ_SEED_LEN]
+
+
 def _qq_public_key(secret: str):
-    """由机器人 Secret 派生 Ed25519 公钥（官方约定：私钥字节 = sha256(secret)）"""
+    """由机器人 Secret 派生 Ed25519 公钥"""
     from cryptography.hazmat.primitives.asymmetric import ed25519
-    private_key = ed25519.Ed25519PrivateKey.from_private_bytes(hashlib.sha256(secret.encode()).digest())
+    private_key = ed25519.Ed25519PrivateKey.from_private_bytes(_qq_seed(secret))
     return private_key.public_key()
 
 
@@ -128,7 +149,7 @@ def build_qq_validation_response(bot_secret: str, plain_token: str, event_ts: st
     if not plain_token:
         # 无 token 时为防时序/空值攻击，用随机值避免误签
         plain_token = _os.urandom(8).hex()
-    private_key = ed25519.Ed25519PrivateKey.from_private_bytes(hashlib.sha256(bot_secret.encode()).digest())
+    private_key = ed25519.Ed25519PrivateKey.from_private_bytes(_qq_seed(bot_secret))
     signature = private_key.sign((event_ts + plain_token).encode('utf-8')).hex()
     return {'plain_token': plain_token, 'signature': signature}
 

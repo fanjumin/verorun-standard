@@ -1,12 +1,12 @@
 {
-  "name": "IM Gateway",
+  "name": "通讯频道",
   "name_i18n_key": "plugin.name",
   "identifier": "im_gateway",
   "python_dependencies": {
     "required": [],
     "optional": {}
   },
-  "version": "3.1.0",
+  "version": "3.1.2",
   "category": "system",
   "tags": [
     "im",
@@ -17,12 +17,12 @@
     "channel"
   ],
   "icon": "channels",
-  "description": "IM Gateway — Unified instant-messaging channel gateway: outbound messaging for Feishu / WeCom / Telegram / LINE / Slack / Discord / DingTalk / QQ, signed inbound webhooks (fail-closed), plus web third-party login",
+  "description": "Channels — Unified instant-messaging channel gateway: outbound messaging for Feishu / WeCom / Telegram / LINE / Slack / Discord / DingTalk / QQ, signed inbound webhooks (fail-closed), plus web third-party login",
   "tagline": "统一即时消息通道网关",
   "tagline_subtitle": "飞书 · 企业微信 · Telegram · LINE · Slack · Discord · 钉钉 · QQ 消息通道（入站验签 fail-closed），含 Web 第三方登录",
   "author": "VeroRun",
   "min_app_version": "0.10.0",
-  "compatible_editions": ["enterprise", "standard", "pro", "finance", "minipro"],
+  "compatible_editions": ["enterprise", "standard", "pro", "finance", "minipro", "omni-service"],
   "agent_role": "service",
   "capabilities": [
     "im.channel.list",
@@ -50,7 +50,7 @@
     "group": "System",
     "key": "channels",
     "icon": "channels",
-    "label": "IM Gateway"
+    "label": "通讯频道"
   },
   "dashboard": {
     "stats": [

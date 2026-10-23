@@ -24,7 +24,7 @@ from i18n import _
 import os, sys, time, json
 import threading
 from datetime import datetime
-from typing import Optional, Callable
+from typing import Optional, Callable, List
 from collections import deque
 import traceback
 
@@ -69,6 +69,14 @@ class WorkflowEngine:
     def register_node_handler(self, node_type: str, handler: Callable):
         """注册节点类型处理器"""
         self._node_executor_map[node_type] = handler
+
+    def registered_node_types(self) -> List[str]:
+        """已注册且真正可执行的节点类型（含插件自注册节点）。
+
+        供 /admin/workflows/node-types 暴露给编辑器：插件节点（如 email 的
+        send_email）不再需要改内核常量即可出现在节点面板。
+        """
+        return sorted(k for k, v in self._node_executor_map.items() if v is not None)
 
     # ---- 核心执行 ----
 

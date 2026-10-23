@@ -105,17 +105,25 @@ def send_sms(phone, code, purpose='login'):
                 result = _send_aliyun_via_provider(provider, phone, code, purpose)
                 template = TEMPLATE_MAP.get(purpose, DEFAULT_TEMPLATE)
         else:
-            # Fallback: stub mode
-            print(f"[SMS STUB] To: {phone} | Code: {code}")
-            result = {'success': True, 'provider': 'stub', 'code': code}
+            # 无服务商凭据：绝不伪装成功。旧实现返回 success=True 并落库
+            # status='sent'，运营看板与验证码流程都会被假数据污染。
+            print(f"[SMS STUB] To: {phone} | Code: {code} (provider not configured)")
+            result = {'success': False, 'provider': 'stub',
+                      'error': 'provider_not_configured'}
     except Exception as e:
         print(f"[SmsPlugin] send_sms provider error: {e}")
         result = {'success': False, 'provider': provider_type, 'error': str(e)}
 
     # 记录发送日志（无论成功失败均记录）
+    # provider_not_configured 不是"发送失败"，而是"根本没发"，单独记 skipped
+    if result.get('success'):
+        log_status = 'sent'
+    elif result.get('error') == 'provider_not_configured':
+        log_status = 'skipped'
+    else:
+        log_status = 'failed'
     _log_send(phone, code, purpose, result.get('provider', 'stub'),
-              'sent' if result.get('success') else 'failed',
-              result.get('error', ''))
+              log_status, result.get('error', ''))
 
     return result
 

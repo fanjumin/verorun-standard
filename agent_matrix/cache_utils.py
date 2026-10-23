@@ -149,18 +149,26 @@ class LLMResponseCache(CacheStore):
 
     @staticmethod
     def make_key(model: str, system_prompt: str, user_message: str,
-                 history: list | None = None) -> str:
-        """Generate MD5 cache key from input parameters."""
-        parts = [model, system_prompt, user_message]
+                 history: list | None = None, provider: str = '') -> str:
+        """Generate MD5 cache key from input parameters.
+
+        G5: the key must include the provider. Model names collide across
+        vendors ('deepseek-v4-pro' exists on both deepseek and a relay), so
+        without it switching providers silently served the previous vendor's
+        answer. Also note that get and set must pass the same arguments --
+        an omitted history on one side makes the entry unreachable.
+        """
+        parts = [provider or '', model, system_prompt, user_message]
         if history:
             parts.append(json.dumps(history, sort_keys=True, ensure_ascii=False))
         raw = '|'.join(parts)
         return hashlib.md5(raw.encode('utf-8')).hexdigest()
 
     def get_response(self, model: str, system_prompt: str,
-                     user_message: str, history: list | None = None) -> str | None:
+                     user_message: str, history: list | None = None,
+                     provider: str = '') -> str | None:
         """Get cached LLM response. Returns None if not found or expired."""
-        key = self.make_key(model, system_prompt, user_message, history)
+        key = self.make_key(model, system_prompt, user_message, history, provider=provider)
         entry = self.get(key)
         if entry:
             return entry.get('response')
@@ -169,9 +177,10 @@ class LLMResponseCache(CacheStore):
     def set_response(self, model: str, system_prompt: str,
                      user_message: str, response: str,
                      tokens_used: int = 0, history: list | None = None,
-                     ttl: int | None = None):
+                     ttl: int | None = None, provider: str = ''):
         """Cache an LLM response."""
-        key = self.make_key(model, system_prompt, user_message, history)
+        key = self.make_key(model, system_prompt, user_message, history,
+                            provider=provider)
         self.set(key, {
             'model': model,
             'response': response,

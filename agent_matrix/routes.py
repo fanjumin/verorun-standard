@@ -9,9 +9,9 @@ Agent Matrix — Flask Blueprint
 
 API 端点统计: ~35 个
 """
-import os, sys, json, base64, logging
+import os, sys, json, base64, logging, threading, uuid
 
-from i18n import _
+from i18n import _, _current_locale
 from flask import Blueprint, request, jsonify, send_from_directory
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -20,6 +20,8 @@ sys.path.insert(0, os.path.join(BASE_DIR, '..'))
 
 from services.jwt_service import validate_token
 from models import get_db
+
+logger = logging.getLogger(__name__)
 
 agent_matrix_bp = Blueprint('agent_matrix', __name__,
                             url_prefix='/admin/agent-matrix',
@@ -35,20 +37,132 @@ def _m():
     return _models
 
 
+# WP-5：SSE 流运行注册表（run_id → threading.Event 取消闸门）。
+# 跨请求取消：/agent/stream 注册，/agent/cancel 触发 set()，流关闭后清理。
+#
+# A2：注册表是**进程内**字典，而 admin 是 gunicorn -w 2，取消请求约有一半
+# 概率打到不持有该流的 worker，Event 永远不会被 set —— 取消静默失效，流继续
+# 跑、token 继续烧。这里用 agent_stream_runs 表做跨进程桥：注册时登记 run_id，
+# /agent/cancel 同时写本地 Event 和表里的 cancel_requested，持有流的进程由
+# _watch_cancel 轮询线程把标记转成本地 Event。生成器代码无需改动。
+_STREAM_RUNS = {}
+_STREAM_STOP = {}  # run_id -> 轮询线程的停止信号
+_STREAM_RUNS_LOCK = threading.Lock()
+_CANCEL_POLL_INTERVAL = 3.0
+
+
+def _persist_run(run_id):
+    """登记运行中的 run_id（跨 worker 取消的落库侧）。失败不影响流本身。"""
+    try:
+        from models import get_db
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO agent_stream_runs (run_id) VALUES (%s) "
+                "ON CONFLICT (run_id) DO UPDATE "
+                "SET cancel_requested = 0, created_at = NOW()", (run_id,))
+            conn.commit()
+    except Exception as e:
+        logger.debug(f"[stream] run registry persist skipped for {run_id}: {e}")
+
+
+def _drop_run(run_id):
+    try:
+        from models import get_db
+        with get_db() as conn:
+            conn.execute("DELETE FROM agent_stream_runs WHERE run_id = %s", (run_id,))
+            conn.commit()
+    except Exception as e:
+        logger.debug(f"[stream] run registry cleanup failed for {run_id}: {e}")
+
+
+def _watch_cancel(run_id, ev, stop):
+    """把 DB 里的 cancel_requested 转成本进程 Event（另一个 worker 触发的取消）。"""
+    while not stop.is_set():
+        stop.wait(_CANCEL_POLL_INTERVAL)
+        if stop.is_set():
+            return
+        try:
+            from models import get_db
+            with get_db() as conn:
+                row = conn.execute(
+                    "SELECT cancel_requested FROM agent_stream_runs WHERE run_id = %s",
+                    (run_id,)).fetchone()
+        except Exception as e:
+            logger.debug(f"[stream] cancel poll failed for {run_id}: {e}")
+            return
+        if row is None:
+            return  # 流已结束并被清理
+        if int(row['cancel_requested'] or 0) == 1:
+            ev.set()
+            return
+
+
+def _register_run(run_id):
+    """注册一个可取消的运行，返回其取消 Event（单进程路径保持不变）。"""
+    ev = threading.Event()
+    stop = threading.Event()
+    with _STREAM_RUNS_LOCK:
+        _STREAM_RUNS[run_id] = ev
+        _STREAM_STOP[run_id] = stop
+    _persist_run(run_id)
+    threading.Thread(target=_watch_cancel, args=(run_id, ev, stop),
+                     daemon=True, name=f'cancel-watch-{run_id[:8]}').start()
+    return ev
+
+
+def _unregister_run(run_id):
+    with _STREAM_RUNS_LOCK:
+        _STREAM_RUNS.pop(run_id, None)
+        stop = _STREAM_STOP.pop(run_id, None)
+    if stop is not None:
+        stop.set()
+    _drop_run(run_id)
+
+
+def _cancel_run(run_id):
+    """触发取消。返回是否找到该运行（不存在的 run_id 不算错误）。
+
+    同进程走 Event；跨进程写 agent_stream_runs.cancel_requested，由持有该流的
+    worker 的轮询线程转成本地 Event。
+    """
+    found = False
+    with _STREAM_RUNS_LOCK:
+        ev = _STREAM_RUNS.get(run_id)
+    if ev is not None:
+        ev.set()
+        found = True
+    try:
+        from models import get_db
+        with get_db() as conn:
+            cur = conn.execute(
+                "UPDATE agent_stream_runs SET cancel_requested = 1 WHERE run_id = %s",
+                (run_id,))
+            conn.commit()
+        if cur.rowcount:
+            found = True
+    except Exception as e:
+        logger.warning(f"[stream] cross-process cancel failed for {run_id}: {e}")
+    return found
+
+
 # ============================================================
 # RAG 知识检索（Read 层）
 # ============================================================
 
-def _inject_knowledge(user_message: str, top_k: int = 5, scope: str = None) -> str:
+def _inject_knowledge(user_message: str, top_k: int = 5, scope: str = None,
+                      viewer_id=None) -> str:
     """
     基于用户输入实时检索 knowledge_blocks，拼入 system prompt。
     已升级为混合检索（向量+关键词+RRF），实现委托 agent_matrix/rag_retriever.py。
     返回格式化的知识文本，无结果返回空字符串。
     scope: 可选 'system' | 'user'，默认 None（检索全部）
+    viewer_id: 可选，当前会话 user_id；提供时可检索到本人的私有块（C-1-strict），
+               为空（匿名/无身份调用）时只见共享块，私有块不外泄。
     """
     try:
         from agent_matrix.rag_retriever import rag_search
-        top = rag_search(user_message, top_k=top_k, scope=scope)
+        top = rag_search(user_message, top_k=top_k, scope=scope,
+                         viewer_id=viewer_id)
 
         if not top:
             return ''
@@ -226,31 +340,8 @@ def create_agent():
         return _error(_('Agent name cannot be empty'))
 
     try:
-        provider = data.get('provider', 'dashscope')
-        # 处理 API Key 值——仅加密存入 provider_api_keys
-        if 'api_key' in data:
-            api_key_val = data.get('api_key', '')
-            # 同步写入 provider_api_keys 表
-            if api_key_val and provider:
-                try:
-                    from services.crypto import encrypt as _enc
-                    encrypted = _enc(api_key_val)
-                    with get_db() as conn:
-                        row = conn.execute(
-                            "INSERT INTO provider_api_keys (name, key_value_enc, provider, description) "
-                            "VALUES (%s, %s, %s, %s) "
-                            "ON CONFLICT (name, provider) DO UPDATE SET key_value_enc=EXCLUDED.key_value_enc, updated_at=NOW() "
-                            "RETURNING id",
-                            (f'agent:{data["name"]}', encrypted, provider, f'Agent: {data["name"]}')
-                        ).fetchone()
-                        if row:
-                            data['api_key_id'] = row['id']
-                        conn.commit()
-                except Exception:
-                    pass  # 写入 provider_api_keys 失败不影响 Agent 创建
-            if 'api_key_ref' not in data:
-                data['api_key_ref'] = ''
-            del data['api_key']
+        # 密钥不再随 Agent 保存写入；统一走 /agents/<id>/keys 绑定接口（AI Hub 角色矩阵）
+        data.pop('api_key', None)
         agent_id = _m().create_agent(data)
         return _success({'id': agent_id}, _('Agent has been created'))
     except Exception as e:
@@ -274,34 +365,8 @@ def update_agent(aid):
     if err: return err
 
     data = request.get_json(force=True) or {}
-    # 处理 API Key 值——仅加密存入 provider_api_keys
-    if 'api_key' in data:
-        agent = _m().get_agent(aid)
-        provider = data.get('provider') or (agent.get('provider', 'dashscope') if agent else 'dashscope')
-        api_key_val = data.get('api_key', '')
-        # 同步写入 provider_api_keys 表
-        if api_key_val and provider:
-            try:
-                from services.crypto import encrypt as _enc
-                encrypted = _enc(api_key_val)
-                agent_name = data.get('name') or (agent.get('name', '') if agent else '')
-                name = f'agent:{agent_name}' if agent_name else f'{provider}_auto_key'
-                with get_db() as conn:
-                    row = conn.execute(
-                        "INSERT INTO provider_api_keys (name, key_value_enc, provider, description) "
-                        "VALUES (%s, %s, %s, %s) "
-                        "ON CONFLICT (name, provider) DO UPDATE SET key_value_enc=EXCLUDED.key_value_enc, updated_at=NOW() "
-                        "RETURNING id",
-                        (name, encrypted, provider, f'Agent: {agent_name}')
-                    ).fetchone()
-                    if row:
-                        data['api_key_id'] = row['id']
-                    conn.commit()
-            except Exception:
-                pass  # 写入 provider_api_keys 失败不影响 Agent 更新
-        if 'api_key_ref' not in data:
-            data['api_key_ref'] = ''
-        del data['api_key']
+    # 密钥不再随 Agent 保存写入；统一走 /agents/<id>/keys 绑定接口（AI Hub 角色矩阵）
+    data.pop('api_key', None)
     ok = _m().update_agent(aid, data)
     if not ok:
         return _error(_('No fields to update'))
@@ -319,7 +384,11 @@ def delete_agent(aid):
     if agent['role_type'] == 'master':
         return _error(_('Cannot delete main Agent'), 400)
 
-    _m().delete_agent(aid)
+    try:
+        _m().delete_agent(aid)
+    except PermissionError as e:
+        # 内置角色（is_system=1）不可删除，仅可停用
+        return _error(str(e), 403)
     return _success(None, _('Agent has been deleted'))
 
 
@@ -389,6 +458,50 @@ def agent_capabilities(aid):
         'is_active': agent['is_active'],
     }
     return _success(caps)
+
+
+# ── Agent 密钥绑定（AI Hub 角色矩阵）：一个角色可挂多模型/多 Key/多厂家 ──
+
+@agent_matrix_bp.route('/agents/<int:aid>/keys', methods=['GET'])
+def list_agent_keys(aid):
+    """列出该 Agent 的密钥绑定条目（供应商/模型/角色/冷却状态，不含明文 Key）。"""
+    admin, err = _require_admin()
+    if err: return err
+    if not _m().get_agent(aid):
+        return _error(_('Agent does not exist'), 404)
+    return _success(_m().list_agent_key_bindings(aid))
+
+
+@agent_matrix_bp.route('/agents/<int:aid>/keys', methods=['POST'])
+def add_agent_key(aid):
+    """为该 Agent 添加一条「供应商模型 + primary/backup/dedicated + Key」绑定。"""
+    admin, err = _require_admin()
+    if err: return err
+    if not _m().get_agent(aid):
+        return _error(_('Agent does not exist'), 404)
+    data = request.get_json(force=True) or {}
+    provider_model_id = data.get('provider_model_id')
+    pool_role = data.get('pool_role', 'primary')
+    api_key = data.get('api_key', '')
+    if not provider_model_id:
+        return _error(_('Model cannot be empty'))
+    try:
+        bid = _m().add_agent_key_binding(aid, provider_model_id, pool_role, api_key)
+        return _success({'id': bid}, _('Key binding has been added'))
+    except ValueError as e:
+        return _error(str(e), 400)
+    except Exception as e:
+        return _error(str(e), 500)
+
+
+@agent_matrix_bp.route('/agents/<int:aid>/keys/<int:bid>', methods=['DELETE'])
+def delete_agent_key(aid, bid):
+    """删除该 Agent 的一条密钥绑定（对应 Key 无其他引用时一并清理）。"""
+    admin, err = _require_admin()
+    if err: return err
+    if not _m().delete_agent_key_binding(aid, bid):
+        return _error(_('Binding does not exist'), 404)
+    return _success(None, _('Key binding has been deleted'))
 
 
 # ============================================================
@@ -475,8 +588,8 @@ def chat_with_master():
     向 Master Agent 发送指令（核心入口）
 
     请求: {
-        "message": _("Write an intelligent article for me..."),
-        "session_id": _("SESSION-... (Optional, leave blank to create a new session)")
+        "message": "Write an intelligent article for me...",
+        "session_id": "SESSION-... (Optional, leave blank to create a new session)"
     }
     """
     admin, err = _require_admin()
@@ -1081,7 +1194,7 @@ def dispatch_task():
 
     请求: {
         "target_agent_id": 2,
-        "title": _("Create CMS Article"),
+        "title": "Create CMS Article",
         "description": "...",
         "input_data": {...}
     }
@@ -1143,6 +1256,7 @@ def dispatch_task():
         'task_type': data.get('task_type', data.get('action', 'execute')),
         'mode': data.get('mode', ''),
         'user_query': data.get('description', '') or data.get('title', ''),
+        'locale': _current_locale(),
     }
     prompt = orch._resolve_prompt(agent_config, task_ctx)
     if prompt:
@@ -1753,10 +1867,12 @@ def chat_stream_sse():
         'task_type': 'chat',
         'mode': data.get('mode', ''),
         'user_query': message[:200],
+        'locale': _current_locale(),
     })
 
     # 加载知识库（实时 RAG 检索 + 静态兜底）
-    knowledge = _inject_knowledge(user_message=message)
+    # viewer_id 传当前管理员 user_id：可见"共享块 + 自己的私有块"（C-1-strict 私有研报块隔离）
+    knowledge = _inject_knowledge(user_message=message, viewer_id=admin.get('user_id'))
     # 兜底：保留 system_config.chatbot_knowledge_base 作为静态基础知识
     static_knowledge = ''
     with _m().get_db() as conn:
@@ -1800,13 +1916,214 @@ def chat_stream_sse():
     from flask import Response, stream_with_context
 
     def generate():
-        # 先发 role 标识
-        yield "data: {\"role\":\"assistant\"}\n\n"
-        # DEF-008：chunk 是 ChatCompletionChunk 对象，json.dumps 会直接抛
-        # TypeError（对象不可序列化）。必须先归一化为文本再下发。
-        from .llm_text import iter_stream_text
-        for text in iter_stream_text(engine.chat_stream(messages)):
-            yield f"data: {json.dumps(text)}\n\n"
+        # F3：该端点此前完全没有取消通道（4 个流式端点里只有 2 个注册了
+        # _register_run）。与 /agent/stream 对齐：下发 run_start 交出 run_id，
+        # 客户端可凭它调 /agent/cancel；流关闭或异常后必须反注册。
+        run_id = uuid.uuid4().hex
+        cancel_ev = _register_run(run_id)
+        try:
+            yield f"data: {json.dumps({'type': 'run_start', 'run_id': run_id})}\n\n"
+            # 先发 role 标识
+            yield "data: {\"role\":\"assistant\"}\n\n"
+            # DEF-008：chunk 是 ChatCompletionChunk 对象，json.dumps 会直接抛
+            # TypeError（对象不可序列化）。必须先归一化为文本再下发。
+            from .llm_text import iter_stream_text
+            for text in iter_stream_text(engine.chat_stream(messages)):
+                if cancel_ev.is_set():
+                    yield "data: {\"type\": \"cancelled\"}\n\n"
+                    break
+                yield f"data: {json.dumps(text)}\n\n"
+        finally:
+            _unregister_run(run_id)
+        yield "data: [DONE]\n\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype='text/event-stream',
+        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'}
+    )
+
+
+# ============================================================
+# 6.1 Agent 循环流式事件（WP-4）— /agent/stream
+# ============================================================
+
+@agent_matrix_bp.route('/agent/stream', methods=['POST'])
+def agent_stream_sse():
+    """WP-4：Agent ReAct 循环流式事件端点（SSE）。
+
+    请求: { task: {...}, history?: [...], agent_id?: int }
+    返回: text/event-stream —— 逐事件推送 AgentRunner.iter_react() 产出
+    （round_start / assistant_delta / tool_call / tool_result / final / error）；
+    每 30s 发一条 SSE 注释 ``: ping`` 心跳，规避 gunicorn timeout 120s
+    （长任务窗口先例：admin 服务 300s 属仓内既有配置）。
+    """
+    admin, err = _require_admin()
+    if err: return err
+
+    ai_err = _check_ai_access()
+    if ai_err: return ai_err
+
+    data = request.get_json(force=True) or {}
+    task = data.get('task') or {}
+    history = data.get('history', [])
+    agent_id = data.get('agent_id')
+
+    if not task.get('task_id'):
+        return jsonify({'error': _('task.task_id is required')}), 400
+
+    if agent_id:
+        agent_config = _m().get_agent(agent_id)
+    else:
+        agents = _m().list_agents(role_type='master', active_only=True)
+        agent_config = agents[0] if agents else None
+    if not agent_config:
+        return jsonify({'error': _('No available Agent')}), 500
+
+    from agent_matrix.agent_runner import AgentRunner
+    runner = AgentRunner(agent_config, db_models=_m())
+
+    from flask import Response, stream_with_context
+    import time as _t
+
+    def generate():
+        last_ping = _t.time()
+        # WP-5：本流注册可取消运行；run_id 经 run_start 事件交客户端，
+        # 客户端凭它调 /agent/cancel 触发取消。流关闭/异常后必清理。
+        run_id = uuid.uuid4().hex
+        cancel_ev = _register_run(run_id)
+
+        def _maybe_ping():
+            nonlocal last_ping
+            if _t.time() - last_ping >= 30:
+                last_ping = _t.time()
+                yield ': ping\n\n'
+
+        try:
+            yield f"data: {json.dumps({'type': 'run_start', 'run_id': run_id}, ensure_ascii=False)}\n\n"
+            engine = runner._get_engine()
+            tools = runner._get_tools()
+            max_rounds = int(task.get('max_tool_rounds')
+                             or agent_config.get('max_tool_rounds')
+                             or agent_config.get('max_turns') or 5)
+            for ev in runner.iter_react(engine, runner._build_query(task), history,
+                                        tools, [], task.get('task_id'),
+                                        max_rounds=max_rounds,
+                                        task_phase=task.get('phase', ''),
+                                        stream=True, cancel_event=cancel_ev,
+                                        run_id=run_id):
+                for p in _maybe_ping():
+                    yield p
+                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+        finally:
+            _unregister_run(run_id)
+        yield "data: [DONE]\n\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype='text/event-stream',
+        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'}
+    )
+
+
+# WP-5：取消正在流式执行的 Agent 循环（跨请求触发 /agent/stream 注册的 Event）。
+
+@agent_matrix_bp.route('/agent/cancel', methods=['POST'])
+def agent_cancel():
+    """取消正在流式执行的 Agent 循环。
+
+    请求: { run_id: str }（来自 /agent/stream 的 run_start 事件）
+    返回: { success: bool, found: bool } —— 未找到 run_id 不算错误。
+    中断由 iter_react 三个检查点消费：无孤儿 tool_calls，消息序列合法。
+
+    前端契约：取消发生在"工具执行前"（检查点 2）时，本轮工具**未执行**，
+    事件流只收到 `cancelled`，不会收到对应的 tool_result 事件——属预期行为；
+    工具执行后（检查点 3）取消则正常收到本轮全部 tool_result。
+    """
+    admin, err = _require_admin()
+    if err: return err
+
+    data = request.get_json(force=True) or {}
+    run_id = data.get('run_id')
+    if not run_id:
+        return jsonify({'error': _('run_id is required')}), 400
+    found = _cancel_run(str(run_id))
+    return jsonify({'success': True, 'found': found})
+
+
+# WP-6：从检查点恢复 Agent 循环并流式续跑（SSE）。
+# 断流/取消/崩溃后，客户端凭 run_id 恢复；首事件 resume_start 带已恢复轮次。
+
+@agent_matrix_bp.route('/agent/resume', methods=['POST'])
+def agent_resume_sse():
+    """从检查点恢复 Agent ReAct 循环并流式续跑（SSE）。
+
+    请求: { run_id: str }
+    返回: text/event-stream —— 与 /agent/stream 同协议；首事件
+    {type: 'resume_start', run_id, resumed_round}，随后从检查点 round+1
+    续跑 round_start/assistant_delta/tool_call/tool_result/final/error。
+    检查点缺失/损坏返回 404。续跑期间同样支持 /agent/cancel。
+    """
+    admin, err = _require_admin()
+    if err: return err
+
+    ai_err = _check_ai_access()
+    if ai_err: return ai_err
+
+    data = request.get_json(force=True) or {}
+    run_id = str(data.get('run_id') or '').strip()
+    if not run_id:
+        return jsonify({'error': _('run_id is required')}), 400
+
+    from agent_matrix.agent_runner import AgentRunner, load_checkpoint
+    ckpt = load_checkpoint(run_id)
+    if ckpt is None:
+        return jsonify({'error': _('checkpoint not found or expired')}), 404
+
+    agent_config = None
+    if ckpt.get('agent_id'):
+        agent_config = _m().get_agent(ckpt['agent_id'])
+    if not agent_config:
+        agents = _m().list_agents(role_type='master', active_only=True)
+        agent_config = agents[0] if agents else None
+    if not agent_config:
+        return jsonify({'error': _('No available Agent')}), 500
+
+    runner = AgentRunner(agent_config, db_models=_m())
+
+    from flask import Response, stream_with_context
+    import time as _t
+
+    def generate():
+        last_ping = _t.time()
+        cancel_ev = _register_run(run_id)
+
+        def _maybe_ping():
+            nonlocal last_ping
+            if _t.time() - last_ping >= 30:
+                last_ping = _t.time()
+                yield ': ping\n\n'
+
+        try:
+            yield f"data: {json.dumps({'type': 'resume_start', 'run_id': run_id, 'resumed_round': ckpt.get('round', 0)}, ensure_ascii=False)}\n\n"
+            engine = runner._get_engine()
+            tools = runner._get_tools()
+            for ev in runner.iter_react(engine, ckpt.get('user_query', ''),
+                                        ckpt.get('history', []),
+                                        tools, [], run_id,
+                                        max_rounds=int(ckpt.get('max_rounds') or 5),
+                                        task_phase=ckpt.get('task_phase', ''),
+                                        stream=True, cancel_event=cancel_ev,
+                                        run_id=run_id, checkpoint=ckpt):
+                for p in _maybe_ping():
+                    yield p
+                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+        finally:
+            _unregister_run(run_id)
         yield "data: [DONE]\n\n"
 
     return Response(
@@ -1900,14 +2217,28 @@ def health_check():
     for a in agents:
         from agent_matrix.engine import UnifiedLLM
         engine = UnifiedLLM(a)
-        results.append({
+        ready = engine.is_ready()
+        issue = None
+        if ready:
+            # F-03/F-09（2026-10-14）：key 在库 ≠ 模型可解析。104 实测 provider_models
+            # 缺行时此处仍全绿，而真实对话 100% 抛 "Cannot resolve model"（engine.py:604）。
+            # 补验 (provider, model) 能否解析出 active 模型行，缺失则降级 ready 并给出 issue。
+            try:
+                engine._resolve_model(provider=a.get('provider'), model=a.get('model_name'))
+            except Exception as me:
+                ready = False
+                issue = str(me)[:200]
+        row = {
             'id': a['id'],
             'name': a['name'],
             'role_type': a['role_type'],
             'provider': a['provider'],
             'model': a['model_name'],
-            'ready': engine.is_ready(),
-        })
+            'ready': ready,
+        }
+        if issue:
+            row['issue'] = issue
+        results.append(row)
 
     return _success({
         'total': len(results),
@@ -2449,9 +2780,24 @@ def tts_generate_edge():
 # ============================================================
 # 5d. ASR (Speech-to-Text) — 语音转写
 #   POST /admin/agent-matrix/asr/transcribe  入参 {audio_base64: string}
+#   GET  /admin/agent-matrix/asr/status      可用性诊断（vosk/模型/ffmpeg 三项）
 #   出参 {success, data:{text, confidence}}；未配置 ASR provider 时 text 为空且 HTTP 200
 # 路径归在 agent_matrix_bp 下，与 tts/* 同级；禁止再拆独立 Blueprint。
 # ============================================================
+
+
+@agent_matrix_bp.route('/asr/status', methods=['GET'])
+def asr_status():
+    """ASR 可用性诊断：vosk 包 / VOSK_MODEL_PATH 模型 / ffmpeg 逐项检查。
+
+    桌面端语音按钮据此决定：ready → 走后端 Vosk；未 ready → 提示引导
+    （提示文案用诊断返回的 hint），而不是让用户面对"识别为空"却无从排查。
+    """
+    admin, err = _require_admin()
+    if err:
+        return err
+    from agent_matrix.audio import asr_diagnostics
+    return _success(asr_diagnostics())
 
 
 @agent_matrix_bp.route('/asr/transcribe', methods=['POST'])
@@ -2485,6 +2831,57 @@ def asr_transcribe():
 
     # confidence 仅作"是否有结果"指示（Vosk 不提供整段置信度），前端未消费该值
     return _success({'text': text, 'confidence': 1.0 if text else 0.0})
+
+
+# ============================================================
+# 5e. Audio Understanding — 音频语义理解（音频理解大模型经 UnifiedLLM）
+#   POST /admin/agent-matrix/audio/understand  入参 {audio_base64, question?}
+#   出参 {ok, data:{text, provider, model}}；与插件契约一致
+#   模型选择：system_config ai_audio_provider / ai_audio_model
+#   （缺省 dashscope / qwen2-audio-instruct），业务代码零硬编码
+# ============================================================
+
+
+@agent_matrix_bp.route('/audio/understand', methods=['POST'])
+def audio_understand():
+    """音频语义理解：录音/音频文件 → 语义级回答（转写+摘要+意图）。
+
+    与 ASR 的区别：ASR 只出"逐字文本"（本地 Vosk，离线、免 key）；
+    本端点把音频以 input_audio part 直接喂给音频理解大模型，
+    可回答"说话人想干什么""这段会议达成了什么共识"等语义问题。
+    音频量上限 20MB（base64 前）；超限拒绝。
+    """
+    admin, err = _require_admin()
+    if err:
+        return err
+
+    data = request.get_json(force=True) or {}
+    audio_base64 = data.get('audio_base64') or ''
+    question = (data.get('question') or '').strip()
+    if not isinstance(audio_base64, str) or not audio_base64.strip():
+        return _error(_('audio_base64 is required'))
+
+    try:
+        audio_bytes = base64.b64decode(audio_base64)
+    except Exception:
+        return _error(_('Invalid audio_base64'))
+    if len(audio_bytes) > 20 * 1024 * 1024:
+        return _error(_('Audio exceeds 20MB limit'))
+
+    try:
+        from agent_matrix.audio import analyze_audio, _audio_model_config
+        text = analyze_audio(
+            audio_bytes,
+            question or '请完整转写这段音频，并总结其核心内容与说话人意图',
+        )
+    except RuntimeError as e:
+        return _error(str(e), 502)
+    except Exception as e:
+        logging.getLogger(__name__).warning('[AudioUnderstand] 失败: %s', e)
+        return _error(_('audio understanding failed') + f': {e}', 502)
+
+    provider, model = _audio_model_config()
+    return _success({'text': (text or '').strip(), 'provider': provider, 'model': model})
 
 
 # ============================================================
@@ -2533,12 +2930,21 @@ def chat_discuss_sse():
     orchestrator = AgentOrchestrator(models_module=_m())
 
     def generate():
+        # F3：这条流跑的是 orchestrator.discuss_and_execute —— 全仓最长的链路
+        # （见 C2），却恰好是最不能取消的那条。补上取消闸门：讨论各轮之间检查
+        # cancel_ev，客户端可用 run_id 调 /agent/cancel 中断。
+        run_id = uuid.uuid4().hex
+        cancel_ev = _register_run(run_id)
         try:
+            yield f"data: {json.dumps({'type': 'run_start', 'run_id': run_id, 'session_id': session_id})}\n\n"
             for event in orchestrator.discuss_and_execute(
                 instruction=message,
                 user_id=admin.get('user_id', 0),
                 session_id=session_id
             ):
+                if cancel_ev.is_set():
+                    yield f"data: {json.dumps({'type': 'cancelled', 'session_id': session_id})}\n\n"
+                    break
                 event['session_id'] = session_id
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception as e:
@@ -2546,6 +2952,7 @@ def chat_discuss_sse():
             traceback.print_exc()
             yield f"data: {json.dumps({'type': 'error', 'content': str(e), 'session_id': session_id})}\n\n"
         finally:
+            _unregister_run(run_id)
             yield "data: [DONE]\n\n"
 
     return Response(
@@ -2728,10 +3135,17 @@ def _email_mcp_env(app=None):
     """
     env = {'EMAIL_MCP_BRIDGE_URL': '', 'EMAIL_MCP_BRIDGE_TOKEN': ''}
     try:
-        from plugins.email.services import get_mcp_bridge_endpoint
-        url, token = get_mcp_bridge_endpoint(app)
-        env['EMAIL_MCP_BRIDGE_URL'] = url or ''
-        env['EMAIL_MCP_BRIDGE_TOKEN'] = token or ''
+        # 架构红线：核心不得静态 import 业务插件。改经 shared.plugin_access 门面动态解析
+        # （触达点 plugins.email.services 已在 PLUGIN_TOUCHPOINTS 登记），姿势与
+        # orchestrator/nodes.py:_send_email 一致。桥缺失/失败 → 保持注入空值，
+        # 绝不回退为明文密码注入（EM-1(b) 语义不变）。
+        from shared.plugin_access import call_plugin
+        ok, res = call_plugin('plugins.email.services', 'get_mcp_bridge_endpoint',
+                              app, default=None, feature='agent_email_mcp')
+        if ok and res:
+            url, token = res
+            env['EMAIL_MCP_BRIDGE_URL'] = url or ''
+            env['EMAIL_MCP_BRIDGE_TOKEN'] = token or ''
     except Exception as e:
         print(f'[Agent Matrix] ⚠️ email MCP bridge init failed: {e}')
     return env

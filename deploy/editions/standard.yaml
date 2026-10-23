@@ -9,6 +9,42 @@ services:
   user_console: true
   main_site: true
 plugins:
-  # 插件可见性由各插件 plugin.json 的 compatible_editions 决定：
-  #   stock_analysis=["finance"]、veroscholar=["research"] —— 标准版不预装方向版插件
-  # 边缘插件（iot_hub/ros_bridge/cogevolution_substrate）目录可见、可商店安装
+  # ── 临时收敛（2026-10-20，用户裁决）：公开发行只提供三个通信类插件 ──
+  #
+  # 【性质】这是**临时预览版**限制，不是标准版的长期产品定义。
+  #   目的：让用户拿到系统后可预览完整界面，但不能自行安装/启用其余插件。
+  #   恢复长期策略时，删掉本段 include 与 runtime_whitelist 即可（见文末"回滚"）。
+  #
+  # 此前本段为空 → 运行时无版本门控，磁盘上 compatible_editions 含 standard 的
+  # 42 个插件会被 PluginManager 全部自动安装 + 自动启用（manager.py:601-626），
+  # 其中含已决策弃用的 cogevolution_substrate 与会恒定假告警的 health_check。
+  #
+  # include 在本版兼任两职（语义见 agent_matrix/models.edition_runtime_whitelist）：
+  #   ① 发包裁剪：sync-to-standard 按它物理拷贝插件目录，包内只剩这 3 个；
+  #   ② 运行时门控（三层同口径，任一命中即拒）：
+  #      · 可见性：_edition_hidden_map() 判为隐藏 → 不出现在插件中心 / 发现列表；
+  #      · 安装：install() 校验 include → 拒绝写 plugin_registry，覆盖磁盘落地安装
+  #        与商店下载安装两条入口（2026-10-20 补）；
+  #      · 启用：enable() 既有门控 → 兜住升级前遗留的存量行。
+  #      补安装层的原因：此前门控只在可见性/启用层生效，用户从商店或直接调
+  #      /admin/plugins/<id>/install 仍能把插件写进注册表（status=installed），
+  #      直到 enable 才失败 —— 留下"已安装但启用报错"的脏状态，重启后自动启用
+  #      循环还会再失败一次。对预览版而言这既是可绕过的安装口，也是脏数据来源。
+  #
+  # 保留的三个插件均满足独立启用条件：
+  #   email      v1.8.1  agent_role=service  dependencies={}  python_dependencies=[]
+  #   im_gateway v3.1.2  agent_role=service  dependencies={}  python_dependencies=[]
+  #   sms        v1.5.4  agent_role=service  dependencies={}  python_dependencies=[]
+  # 即：无跨插件依赖、无 Python 三方依赖、归属角色在标准版核心角色集内。
+  #
+  # 收敛影响（已核查）：主程序对插件无顶层硬导入，auth_server.py:122-131 的 OAuth
+  # 第三方登录、auth_server.py:140 起的订阅套餐查询均为懒导入 + try/except，
+  # 缺失时按 ImportError 分支降级（功能不可用），不会中断服务启动。
+  #
+  # 回滚：删除本段 include 与 runtime_whitelist 两行即可恢复
+  #       「全部 compatible_editions 兼容插件自动启用」的原行为。
+  include:
+    - email
+    - im_gateway
+    - sms
+  runtime_whitelist: true

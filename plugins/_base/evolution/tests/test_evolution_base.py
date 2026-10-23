@@ -5,8 +5,8 @@ import json
 
 import pytest
 
-from plugins._base.evolution import pii as evo_pii
-from plugins._base.evolution import sql as evo_sql
+from shared.plugin_base.evolution import pii as evo_pii
+from shared.plugin_base.evolution import sql as evo_sql
 
 
 class _FakeCursor:

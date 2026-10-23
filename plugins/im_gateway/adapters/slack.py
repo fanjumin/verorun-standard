@@ -43,7 +43,7 @@ class SlackAdapter(BaseIMAdapter):
         if not bot_token:
             return False, _('Slack bot token is required')
         try:
-            _, rd = http_client.request_json(
+            _rc, rd = http_client.request_json(
                 'POST', _API + '/auth.test',
                 headers=self._auth_header(bot_token)
             )
@@ -68,7 +68,7 @@ class SlackAdapter(BaseIMAdapter):
         if not channel:
             return {'success': False, 'error': _('Slack channel (or default_channel) is not configured')}
         try:
-            _, rd = http_client.request_json(
+            _rc, rd = http_client.request_json(
                 'POST', _API + '/chat.postMessage',
                 json={'channel': channel, 'text': str(content)[:4000]},
                 headers=self._auth_header(bot_token)

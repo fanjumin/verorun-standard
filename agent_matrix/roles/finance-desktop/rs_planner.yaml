@@ -8,6 +8,7 @@ domain: research
 managed_modules:
   - stock_analysis
   - project_workspace
+  - content_factory    # 资讯采集归投研规划功能区（准入：resolve_agent_roles ② 角色侧认领）
 provider: deepseek
 model_name: deepseek-v4-flash
 system_prompt: prompts/rs_planner.md

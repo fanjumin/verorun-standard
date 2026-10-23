@@ -1483,6 +1483,62 @@ def store_readme_proxy(identifier: str):
     return _json_result(True, data={'text': text, 'from_cache': False})
 
 
+# ── 19b. 插件 docs/ 文档代理（WHITEPAPER / USAGE，按 UI 语言选 CN） ─────────
+DOC_FILES = {
+    'whitepaper': ('WHITEPAPER.md', 'WHITEPAPER_CN.md'),
+    'usage': ('USAGE.md', 'USAGE_CN.md'),
+}
+
+
+@bp.route('/store/<identifier>/doc', methods=['GET'])
+def store_doc_proxy(identifier: str):
+    """读取已安装插件 docs/ 下的白皮书或使用指南（原始 Markdown，前端共享渲染器转换）。
+
+    - kind=whitepaper|usage（白名单），不接受文件名参数
+    - 按当前 UI 语言返回 *_CN.md（中文）或英文；中文缺失回落英文
+    - identifier 仅允许 [a-z0-9_]，物理路径限定在 plugins_dir/<id>/docs/，防目录穿越
+    """
+    err = _require_admin()
+    if err:
+        return err
+    import re as _re
+    kind = (request.args.get('kind') or '').strip()
+    if kind not in DOC_FILES:
+        return _json_result(False, error="kind must be 'whitepaper' or 'usage'", code=400)
+    if not _re.fullmatch(r'[a-z0-9_]+', identifier or ''):
+        return _json_result(False, error='Invalid plugin identifier', code=400)
+    mgr = _get_manager()
+    plugins_dir = getattr(mgr, 'plugins_dir', '') if mgr else ''
+    if not plugins_dir or not os.path.isdir(plugins_dir):
+        return _json_result(False, error='PluginManager not ready', code=503)
+    docs_dir = os.path.join(plugins_dir, identifier, 'docs')
+    if not os.path.isdir(docs_dir):
+        return _json_result(True, data={'text': '', 'available': False})
+    try:
+        from i18n import get_lang
+        lang = get_lang()
+    except Exception:
+        lang = 'en'
+    is_cn = str(lang).lower().startswith('zh')
+    en_name, cn_name = DOC_FILES[kind]
+    chosen = cn_name if is_cn else en_name
+    path = os.path.join(docs_dir, chosen)
+    if not os.path.isfile(path):
+        path = os.path.join(docs_dir, en_name)  # fall back to English
+    if not os.path.isfile(path):
+        return _json_result(True, data={'text': '', 'available': False})
+    try:
+        with open(path, 'r', encoding='utf-8') as fh:
+            text = fh.read()
+    except (IOError, OSError) as _e:
+        print(f'[routes] doc read error {identifier}/{chosen}: {_e}')
+        return _json_result(False, error='Failed to read document', code=500)
+    return _json_result(True, data={
+        'text': text, 'file': os.path.basename(path),
+        'language': 'cn' if os.path.basename(path).endswith('_CN.md') else 'en',
+    })
+
+
 # ── 20. 从商店安装 ───────────────────────────────────────
 
 @bp.route('/store/<identifier>/install', methods=['POST'])
@@ -1568,6 +1624,11 @@ def store_install(identifier: str):
     # 安装插件
     try:
         info = mgr.install(identifier)
+    except PluginError as e:
+        # 发行版门控（include 白名单 / compatible_editions）拒绝 → 403。
+        # 原文案走下面 500 分支，前端会把「本版不提供该插件」显示成内部错误，
+        # 预览版用户会误判成系统故障并上报。
+        return _json_result(False, error=str(e), code=403)
     except Exception as e:
         traceback.print_exc()
         return _json_result(False, error=f'Install failed: {e}', code=500)
@@ -1807,6 +1868,17 @@ def _upload_rate_limited(token: str) -> bool:
         return False
 
 
+def _reserved_official_identifier(identifier):
+    """官方插件保留名判定（F-20）——命中返回该 identifier，否则返回 ''。
+
+    独立成纯函数只为可单测：上传入口的真实调用需要 Flask 请求上下文、审核队列表
+    和一个 zip 夹具，而这条规则本身是"名字在不在白名单里"的一次集合判定，
+    用纯函数锁住即可，不必把 DB/HTTP 拖进单测。
+    """
+    from .watermark import OFFICIAL_PLUGIN_IDS
+    return identifier if identifier in OFFICIAL_PLUGIN_IDS else ''
+
+
 @bp.route('/upload', methods=['POST'])
 def upload_plugin():
     """用户上传自研插件 zip 包 → 校验 → 安装。
@@ -1855,6 +1927,24 @@ def upload_plugin():
 
     tmp_path = None
     extract_dir = None
+    # 异常处理前置绑定：identifier / plugins_root 在 try 内部第 4、5 步才赋值，
+    # 而下方各 except 分支需要引用它们做回滚。若在赋值之前抛异常（例如坏压缩包），
+    # 处理器会因引用未绑定名字而再抛异常，最终逃出视图变成 5xx 页面而非结构化 4xx。
+    # 这里预先绑定，保证回滚分支在任何失败路径下都可用。
+    identifier = ''
+    plugins_root = ''
+
+    def _rollback_upload_dir():
+        """清理已创建/已解压的插件目录（与本函数既有三条护栏路径同一手法）。"""
+        if not (plugins_root and identifier):
+            return
+        dest = _os.path.join(plugins_root, identifier)
+        try:
+            if _os.path.isdir(dest):
+                import shutil as _shutil_rb
+                _shutil_rb.rmtree(dest, ignore_errors=True)
+        except Exception:
+            pass
 
     try:
         # 2. 保存上传文件到临时目录
@@ -1896,6 +1986,17 @@ def upload_plugin():
         if not _re.match(r'^[a-z0-9_]+$', identifier):
             return _json_result(False, error=f'Invalid identifier: "{identifier}". Use only lowercase letters, digits, underscores.', code=400)
 
+        # ★ 保留标识检查（F-20）：官方插件名不得经上传入口入队。
+        #   水印检测只拦得住"带官方签名/被篡改痕迹"的二次打包；一个全新包自称
+        #   payment 等官方标识且无水印痕迹时，此前会静默进审核队列，靠人工评审才拦得住。
+        #   本检查不依赖包内容、不依赖该插件是否已安装在本机，因此也不受目录冲突先后影响。
+        if _reserved_official_identifier(identifier):
+            # 尚未 makedirs，无残留需回滚
+            return _json_result(False, error=(
+                f'identifier "{identifier}" 为官方插件保留名，不接受经上传入口提交；'
+                '官方插件请通过插件商店安装。'
+            ), code=403)
+
         # ★ P7: 校验 min_app_version 兼容性
         min_app_ver = (plugin_meta.get('min_app_version') or '').strip()
         if min_app_ver:
@@ -1921,6 +2022,7 @@ def upload_plugin():
         plugins_root = getattr(mgr, '_plugins_root', _os.path.join(_os.path.dirname(__file__), '..', 'plugins'))
         plugins_root = _os.path.abspath(plugins_root)
         dest_dir = _os.path.join(plugins_root, identifier)
+        # 与 _rollback_upload_dir() 共用同一 identifier，回滚路径唯一
 
         if _os.path.exists(dest_dir):
             return _json_result(False, error=f'Plugin directory already exists: {identifier}. Remove it first or choose a different identifier.', code=409)
@@ -2053,20 +2155,21 @@ def upload_plugin():
             'message': '插件已提交审核，审核通过后将自动安装。',
         })
 
+    except _zipfile.BadZipFile as e:
+        # zip magic 通过但归档结构损坏（如截断/伪造头）：属客户端错误，不是 500
+        _rollback_upload_dir()
+        return _json_result(False, error=f'Invalid archive: {e!s}', code=400)
     except json.JSONDecodeError:
+        _rollback_upload_dir()
         return _json_result(False, error='plugin.json is not valid JSON', code=400)
     except ValueError as e:
+        # 解包失败（如归档内含越界条目）会抛 ValueError；此前这条出口直接返回 400
+        # 而不回滚，已创建的目标目录会残留，导致同名再投递撞上 409，并掩盖本次
+        # 真正的拒收原因。统一走 _rollback_upload_dir() 清理。
         return _json_result(False, error=f'Invalid archive: {e!s}', code=400)
     except Exception as e:
         # 出错时尝试清理解压目录
-        if identifier:
-            try:
-                dest = _os.path.join(plugins_root, identifier)
-                if _os.path.exists(dest):
-                    import shutil as _shutil
-                    _shutil.rmtree(dest, ignore_errors=True)
-            except Exception:
-                pass
+        _rollback_upload_dir()
         return _json_result(False, error=f'Upload failed: {e!s}', code=500)
     finally:
         if tmp_path and _os.path.exists(tmp_path):

@@ -20,13 +20,13 @@
     {
       "key": "critique_self_eval",
       "file": "agent_matrix/agent_runner.py",
-      "anchor": "你是严格的质量审查员",
+      "anchor": "You are a strict quality reviewer",
       "must_contain": [
         "\"confidence\": 0.0-1.0",
-        "\"issues\": [\"问题1\"",
-        "\"suggestion\": \"改进建议\"",
-        "【任务】",
-        "【输出】"
+        "\"issues\": [\"issue 1\"",
+        "\"suggestion\": \"improvement suggestion\"",
+        "[TASK]",
+        "[OUTPUT]"
       ],
       "must_not_contain": ["confidence_", "_("],
       "note": "自评契约：键名必须 confidence（A1 事故根因）；插值段 {*} 表示任务标题/描述/输出正文，不在此快照内固化"
@@ -34,16 +34,16 @@
     {
       "key": "intent_classify",
       "file": "agent_matrix/intent.py",
-      "anchor": "分析以下用户消息，输出 JSON",
+      "anchor": "Analyze the following user message and output JSON only",
       "must_contain": [
-        "\"intent\": \"意图类别（purchase=购买意向",
-        "\"sentiment\": \"情绪（positive=正面",
-        "purchase=购买意向",
-        "aftersale=售后",
-        "complaint=投诉",
-        "consult=咨询",
-        "technical=技术支持",
-        "other=其他"
+        "\"intent\": \"intent category (purchase=purchase intent",
+        "\"sentiment\": \"sentiment (positive=positive",
+        "purchase=purchase intent",
+        "aftersale=aftersale",
+        "complaint=complaint",
+        "consult=consultation",
+        "technical=technical support",
+        "other=other"
       ],
       "must_not_contain": ["_("],
       "note": "意图/情绪分类契约：7 个枚举值必须齐备，否则路由与统计口径会静默漂移"
@@ -51,15 +51,15 @@
     {
       "key": "task_decompose",
       "file": "agent_matrix/orchestrator.py",
-      "anchor": "请按以下 JSON 格式输出任务分解方案",
+      "anchor": "Output the task decomposition in the following JSON format",
       "must_contain": [
         "\"tasks\": [",
-        "\"title\": \"子任务简要标题\"",
-        "\"description\": \"子任务详细描述，包含执行要求\"",
-        "\"target_agent_name\": \"目标Agent名称（必须是上面列表中的）\"",
+        "\"title\": \"short sub-task title\"",
+        "\"description\": \"detailed sub-task description including execution requirements\"",
+        "\"target_agent_name\": \"target agent name (must be one from the list above)\"",
         "\"task_type\": \"execute\"",
         "\"priority\": 5",
-        "\"fields\": [\"期望输出字段名\"]"
+        "\"fields\": [\"expected output field names\"]"
       ],
       "must_not_contain": ["_("],
       "note": "任务分解契约（字面量开头是 {*} 即 master_prompt 注入位）。注意：master_prompt 的真实内容属 agent_matrix/prompts/，由 WP-B6.3 的签名清单纳管，不在本快照范围内"

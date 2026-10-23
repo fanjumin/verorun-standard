@@ -171,6 +171,100 @@ try:
         if not pm.is_path_allowed(request.path):
             abort(404)
 
+    # ── 轻量插件调度器（G1/G2 修复） ────────────────────────────────────────
+    #
+    # 为什么 main_site 需要自己的 APScheduler？
+    #   ai_relay 的令牌 last_used_at 冲刷任务 run_last_used_flush 依赖 main_site
+    #   进程内的 _last_used_pending 内存字典（鉴权路径在本进程），但此前定时
+    #   任务只在 admin 进程注册 → admin 侧内存恒空、冲刷空转 → last_used_at
+    #   永不落库（G2）；且 ai_relay 声明的 9 个任务全部只在 admin 注册（G1）。
+    #
+    # 为什么不用 SchedulerEngine？
+    #   SchedulerEngine.add_plugin_job() 内部调 orchestrator.models.add_log()
+    #   （依赖 cron_jobs / scheduler_leader 表），main_site 不初始化 orchestrator
+    #   表 → 故用原生 APScheduler BackgroundScheduler，完全绕开 orchestrator DB。
+    #   ai_relay 的 9 个 job 全部声明幂等（UPDATE NOW() / UPSERT），多进程并发
+    #   执行无脏数据风险；_last_used_flush 各进程自冲刷各自内存 → 正是我们要的。
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        from apscheduler.executors.pool import ThreadPoolExecutor
+
+        class _LightJobAdapter:
+            """极简 adapter：实现 SchedulerEngine 的 add_plugin_job /
+            remove_plugin_jobs 契约签名，内部用原生 APScheduler 注册任务。
+            跳过 add_log（orchestrator DB 依赖），print 替代日志。"""
+
+            def __init__(self, sched):
+                self._s = sched
+                self._plugin_jobs = {}  # job_id -> plugin_id
+
+            def add_plugin_job(self, job: dict, plugin_id: str = None) -> bool:
+                job_id = job.get('id')
+                func = job.get('func')
+                if not job_id or not callable(func):
+                    return False
+                # pop replace_existing/coalesce/max_instances/misfire_grace_time
+                # 避免 job dict 自带的默认值与下方显式参数冲突（APScheduler
+                # add_job 对同名 kwarg 会报 TypeError got multiple values）
+                kwargs = {k: v for k, v in job.items()
+                          if k not in ('id', 'func', 'name',
+                                       'replace_existing', 'coalesce',
+                                       'max_instances', 'misfire_grace_time')}
+                try:
+                    self._s.add_job(
+                        func,
+                        id=f'plugin_{job_id}',
+                        name=job.get('name', job_id),
+                        replace_existing=True,
+                        coalesce=True,
+                        max_instances=1,
+                        misfire_grace_time=300,
+                        **kwargs,
+                    )
+                    if plugin_id:
+                        self._plugin_jobs[job_id] = plugin_id
+                    return True
+                except Exception as _e:
+                    print(f'[LightScheduler] ⚠️ Plugin job [{job_id}] schedule failed: {_e}')
+                    return False
+
+            def remove_plugin_jobs(self, plugin_id: str) -> int:
+                """卸载/禁用插件时摘除其全部 cron（与 SchedulerEngine 签名对齐）。"""
+                removed = 0
+                for jid, owner in list(self._plugin_jobs.items()):
+                    if owner != plugin_id:
+                        continue
+                    try:
+                        self._s.remove_job(f'plugin_{jid}')
+                    except Exception:
+                        pass  # JobLookupError 等属预期
+                    finally:
+                        self._plugin_jobs.pop(jid, None)
+                        removed += 1
+                return removed
+
+        _light_sched = BackgroundScheduler(
+            executors={'default': ThreadPoolExecutor(4)},
+            job_defaults={'coalesce': True, 'max_instances': 1},
+        )
+        _adapter = _LightJobAdapter(_light_sched)
+        # 复用 PluginManager.register_all_plugin_jobs 的遍历逻辑
+        _job_count = pm.register_all_plugin_jobs(_adapter)
+        if _job_count > 0:
+            _light_sched.start()
+            # 进程退出时优雅关闭 scheduler（atexit 在 Gunicorn worker
+            # 退出路径正常触发；wait=False 避免 worker 退出时阻塞主线程）
+            import atexit as _atexit
+            _atexit.register(_light_sched.shutdown, wait=False)
+            print(f'[LightScheduler] ✅ {_job_count} plugin job(s) registered & started (main_site)')
+            app.config['LIGHT_SCHEDULER'] = _light_sched
+        else:
+            print('[LightScheduler] ℹ️ No plugin jobs to register (main_site)')
+    except ImportError:
+        print('[LightScheduler] ⚠️ APScheduler not installed, skipping plugin scheduler (main_site)')
+    except Exception as _e:
+        print(f'[LightScheduler] ⚠️ Plugin scheduler init failed (non-fatal): {_e}')
+
     print('[PluginManager] ✅ Platform 服务插件管理器已初始化')
 except Exception as e:
     print(f'[PluginManager] ⚠️ Platform 服务初始化失败: {e}')

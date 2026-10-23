@@ -47,6 +47,19 @@ def init_email_db():
         )''')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_email_sent_from ON email_sent(from_addr)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_email_sent_sent_at ON email_sent(sent_at)')
+        # 失败也要留审计记录：旧实现只在成功时插入，发送失败既不落库也无记录，
+        # 排障只能翻服务器日志。ADD COLUMN IF NOT EXISTS 保证幂等。
+        conn.execute(
+            "ALTER TABLE email_sent ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'sent'")
+        conn.execute(
+            "ALTER TABLE email_sent ADD COLUMN IF NOT EXISTS error TEXT DEFAULT ''")
+        # 工作流节点幂等键（WP-E1）：同一实例同一节点同一收件人集合只允许一条
+        # 记录。历史行没有该值，因此唯一索引必须是部分索引。
+        conn.execute(
+            "ALTER TABLE email_sent ADD COLUMN IF NOT EXISTS dedup_key TEXT")
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_email_sent_dedup "
+            "ON email_sent(dedup_key) WHERE dedup_key IS NOT NULL")
         conn.execute('''CREATE TABLE IF NOT EXISTS email_drafts (
             id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
             to_addr         TEXT NOT NULL DEFAULT '',

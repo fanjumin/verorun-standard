@@ -34,6 +34,7 @@ window.l_matrix=function(targetId){
         h+='<button class="btn bo bs" onclick="matEditAgent('+ma.id+')">✏️ {{ _('Edit') }}</button>';
         h+='<button class="btn bo bs" onclick="matAIServices()">🤖 AI {{ _('Services') }}</button>';
         h+='<button class="btn bp bs" onclick="go(\'ai_chat\')">💬 AI {{ _('Chat') }}</button>';
+        h+='<button class="btn bp bs" onclick="matKeys('+ma.id+',\''+escJs(ma.name)+'\')">🔑 {{ _('Model Keys') }}</button>';
         h+='</div></div>';
         h+='<div style="font-size:11px;color:var(--muted);margin-top:4px">'+ma.description+'</div>';
         h+='<div style="font-size:11px;color:var(--dim);margin-top:2px">'+ma.provider+'/'+ma.model_name+' | {{ _('Tasks') }}: '+ma.tasks_total+' | {{ _('Success Rate') }}: '+(ma.tasks_total?(Math.round(ma.tasks_success/ma.tasks_total*100)):'0')+'%</div>';
@@ -47,6 +48,7 @@ window.l_matrix=function(targetId){
       h+='<button class="btn bp bs" onclick="matNewSub()">+ {{ _('Create Agent') }}</button>';
       h+='</div>';
       h+='<div id="matNewForm" style="display:none"></div>';
+      h+='<div id="matKeysPanel" style="display:none"></div>';
       if(subs.length){
         h+='<table><tr><th>{{ _('Name') }}</th><th>{{ _('Domain') }}</th><th>{{ _('Managed Modules') }}</th><th>{{ _('Models') }}</th><th>{{ _('Tasks') }}</th><th>{{ _('Status') }}</th><th>{{ _('Actions') }}</th></tr>';
         subs.forEach(function(a){
@@ -58,6 +60,7 @@ window.l_matrix=function(targetId){
           h+=matTgBtn(a);
           h+=matEditBtn(a);
           h+=matTestBtn(a);
+          h+='<button class="btn bo bs" onclick="matKeys('+a.id+',\''+escJs(a.name)+'\')">🔑 {{ _('Model Keys') }}</button>';
           h+='</td></tr>';
         });
         h+='</table>';
@@ -84,6 +87,125 @@ window.l_matrix=function(targetId){
       target.innerHTML='<div class="em">{{ _('Connection Failed') }}, {{ _('Please Confirm Service is Running') }}</div>';
     });
 };
+
+// =============================================
+// {{ _('Model Keys') }} — Agent 角色密钥绑定（以角色为主体）
+//   一条 = 「供应商 → 模型 → primary/backup/dedicated → Key」；可重复添加
+// =============================================
+var _mkAid=null, _mkName='', _mkProviders=null, _mkModels=null;
+
+window.matKeys=function(aid,aname){
+  _mkAid=aid; _mkName=aname;
+  var p=document.getElementById('matKeysPanel');
+  if(!p){showToast("{{ _('Request Failed') }}","error");return}
+  p.style.display='block';
+  p.innerHTML='<div class="lo"><div class="s"></div>{{ _('Loading') }}...</div>';
+  matKeysLoadProviders(function(){ matKeysRender(); });
+};
+
+function matKeysLoadProviders(cb){
+  if(_mkProviders&&_mkModels){cb();return}
+  Promise.all([
+    fetch('/admin/agent-matrix/providers',{headers:{'Authorization':'Bearer '+T}}).then(function(r){return r.json()}),
+    fetch('/admin/provider-models',{headers:{'Authorization':'Bearer '+T}}).then(function(r){return r.json()})
+  ]).then(function(res){
+    _mkProviders=(res[0]&&res[0].data)||[];
+    _mkModels=(res[1]&&res[1].data)||[];
+    cb();
+  }).catch(function(){showToast("{{ _('Request Failed') }}","error")});
+}
+
+function matKeysRender(){
+  fetch('/admin/agent-matrix/agents/'+_mkAid+'/keys',{headers:{'Authorization':'Bearer '+T}})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    if(!d.success){document.getElementById('matKeysPanel').innerHTML='<div class="em">{{ _('Load failed') }}</div>';return}
+    var rows=d.data||[];
+    var provs={},models={};
+    rows.forEach(function(b){provs[b.provider_slug]=1;models[b.model_name]=1});
+    var h='<div class="cd">';
+    h+='<div class="st">{{ _('Model Keys') }} — '+esc(_mkName)+' <span style="font-size:11px;color:var(--dim)">('+rows.length+' {{ _('entries') }} · '+Object.keys(provs).length+' {{ _('providers') }} · '+Object.keys(models).length+' {{ _('models') }})</span></div>';
+    if(rows.length){
+      h+='<table><tr><th>{{ _('Provider') }}</th><th>{{ _('Model ID') }}</th><th>{{ _('Key Role') }}</th><th>{{ _('Status') }}</th><th>{{ _('Actions') }}</th></tr>';
+      rows.forEach(function(b){
+        var st=b.key_active?(b.cooling?'<span class="bdg off">{{ _('Cooling') }}</span>':'<span class="bdg on">{{ _('Normal') }}</span>'):'<span class="bdg off">{{ _('Disable') }}</span>';
+        h+='<tr><td>'+esc(b.provider_name||b.provider_slug)+'</td><td><code style="font-size:11px;color:var(--accent)">'+esc(b.model_name)+'</code></td><td>'+esc(b.pool_role||'primary')+'</td><td>'+st+'</td>';
+        h+='<td><button class="btn bo bs" style="color:#f85149" onclick="matDelKey('+b.id+')">{{ _('Delete') }}</button></td></tr>';
+      });
+      h+='</table>';
+    }else{
+      h+='<div class="em" style="margin:8px">{{ _('No data') }}</div>';
+    }
+    h+='<div style="border-top:1px dashed var(--border);margin-top:10px;padding-top:10px">';
+    h+='<div style="font-size:11px;color:var(--dim);margin-bottom:6px">+ {{ _('Add Key') }}</div>';
+    h+='<div class="g2">';
+    h+='<div><div style="font-size:11px;color:var(--dim)">{{ _('Provider') }}</div><select class="sl" id="mkProv" style="width:100%" onchange="matKeysProvChange()"></select></div>';
+    h+='<div><div style="font-size:11px;color:var(--dim)">{{ _('Model ID') }}</div><select class="sl" id="mkModel" style="width:100%"></select></div>';
+    h+='<div><div style="font-size:11px;color:var(--dim)">{{ _('Key Role') }}</div><select class="sl" id="mkRole" style="width:100%"><option value="primary">primary</option><option value="backup">backup</option><option value="dedicated">dedicated</option></select></div>';
+    h+='</div>';
+    h+='<div style="margin-top:8px"><div style="font-size:11px;color:var(--dim)">{{ _('API Key') }}</div><input class="in" id="mkKey" type="password" placeholder="sk-..." style="width:100%"></div>';
+    h+='<div style="margin-top:10px"><button class="btn bp" onclick="matAddKey()">{{ _('Add') }}</button> <button class="btn bo" onclick="document.getElementById(\'matKeysPanel\').style.display=\'none\'">{{ _('Cancel') }}</button></div>';
+    h+='</div>';
+    h+='</div>';
+    document.getElementById('matKeysPanel').innerHTML=h;
+    var ps=document.getElementById('mkProv');
+    _mkProviders.forEach(function(p){
+      var o=document.createElement('option'); o.value=p.slug; o.textContent=p.name+' ('+p.slug+')'; ps.appendChild(o);
+    });
+    matKeysProvChange();
+  }).catch(function(){document.getElementById('matKeysPanel').innerHTML='<div class="em">{{ _('Request Failed') }}</div>'});
+}
+
+function matKeysProvChange(){
+  var slug=document.getElementById('mkProv').value;
+  var sel=document.getElementById('mkModel');
+  sel.innerHTML='';
+  _mkModels.filter(function(m){return m.provider_slug===slug}).forEach(function(m){
+    var o=document.createElement('option'); o.value=m.id; o.textContent=m.model_name; sel.appendChild(o);
+  });
+  if(!sel.options.length){
+    var o=document.createElement('option'); o.value=''; o.textContent='— {{ _('No Models') }} —'; sel.appendChild(o);
+  }
+}
+
+function matAddKey(){
+  var pm=parseInt(document.getElementById('mkModel').value);
+  var role=document.getElementById('mkRole').value;
+  var key=document.getElementById('mkKey').value.trim();
+  if(!pm){showToast("{{ _('Model ID is required') }}","error");return}
+  if(!key){showToast("{{ _('API Key cannot be empty') }}","error");return}
+  fetch('/admin/agent-matrix/agents/'+_mkAid+'/keys',{method:'POST',headers:{'Authorization':'Bearer '+T,'Content-Type':'application/json'},body:JSON.stringify({provider_model_id:pm,pool_role:role,api_key:key})})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    if(d.success){showToast("{{ _('Added') }}");matKeysRender()}
+    else showToast("{{ _('Add Failed') }}: "+(d.error||''),'error');
+  }).catch(function(){showToast("{{ _('Request Failed') }}",'error')});
+}
+
+function matDelKey(bid){
+  var old=document.getElementById('modal-root');
+  if(old)old.remove();
+  var overlay=document.createElement('div');
+  overlay.id='modal-root'; overlay.className='modal-overlay';
+  overlay.onclick=function(e){if(e.target===overlay)overlay.remove();};
+  var box=document.createElement('div');
+  box.className='modal-box'; box.style.cssText='max-width:400px;width:90%';
+  box.innerHTML='<h3 style="margin:0 0 12px;color:var(--rose)">{{ _('Confirm Deletion') }}</h3>'+
+    '<p style="margin:0 0 20px;font-size:14px;color:var(--ink)">{{ _('Delete this key binding?') }}</p>'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end">'+
+    '<button class="bo mk-c-btn" style="padding:6px 16px">{{ _('Cancel') }}</button>'+
+    '<button class="bp mk-d-btn" style="padding:6px 16px;background:var(--rose);border-color:var(--rose);color:#fff">{{ _('Delete') }}</button>'+
+    '</div>';
+  overlay.appendChild(box); document.body.appendChild(overlay);
+  box.querySelector('.mk-c-btn').onclick=function(){overlay.remove();};
+  box.querySelector('.mk-d-btn').onclick=function(){
+    var btn=this;btn.disabled=true;
+    fetch('/admin/agent-matrix/agents/'+_mkAid+'/keys/'+bid,{method:'DELETE',headers:{'Authorization':'Bearer '+T}})
+    .then(function(r){return r.json()})
+    .then(function(d){overlay.remove();if(d.success){showToast("{{ _('Deleted') }}");matKeysRender()}else{showToast("{{ _('Delete failed') }}: "+(d.error||''),'error')}})
+    .catch(function(){overlay.remove();showToast("{{ _('Request Failed') }}",'error')});
+  };
+}
 
 // =============================================
 // AI {{ _('Chat') }} — {{ _('Independent') }} Athena {{ _('Full Page Chat') }}（{{ _('Split from Matrix Page') }}）
