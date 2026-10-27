@@ -77,14 +77,11 @@ class QQAdapter(BaseIMAdapter):
     # ── 消息发送 ──
 
     def _get_config(self):
-        from plugins.im_gateway.models import get_im_db
-        with get_im_db() as conn:
-            row = conn.execute(
-                "SELECT config_json FROM channel_configs WHERE channel='qq' AND is_enabled=1 LIMIT 1"
-            ).fetchone()
-        if not row or not row['config_json']:
+        from plugins.im_gateway.models import load_channel_config
+        cfg = load_channel_config('qq', enabled_only=True)
+        if not cfg:
             raise Exception(_("QQ channel is not configured"))
-        return _json.loads(row['config_json'])
+        return cfg
 
     def send(self, payload: dict, **kw) -> dict:
         content = payload.get('content') or payload.get('text') or ''

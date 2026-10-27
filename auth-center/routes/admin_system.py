@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Auto-generated split from admin.py"""
-from .admin import admin_bp, _require_admin, _log, _cached_get
+from .admin import admin_bp, _require_admin, _log
 from i18n import _
 from datetime import datetime, timedelta
 from flask import Response, jsonify, request
@@ -14,7 +14,6 @@ import psycopg2
 logger = logging.getLogger(__name__)
 
 @admin_bp.route('/api-keys', methods=['GET'])
-@_cached_get(ttl=3)
 def api_key_list():
     admin, err = _require_admin()
     if err:
@@ -44,7 +43,6 @@ def revoke_key(kid):
     return jsonify({'success': True, 'message': _('Key has been revoked')})
 
 @admin_bp.route('/logs', methods=['GET'])
-@_cached_get(ttl=3)
 def admin_logs():
     admin, err = _require_admin()
     if err:

@@ -68,14 +68,11 @@ class DingTalkAdapter(BaseIMAdapter):
     # ── 消息发送（OAPI 工作通知） ──
 
     def _get_config(self):
-        from plugins.im_gateway.models import get_im_db
-        with get_im_db() as conn:
-            row = conn.execute(
-                "SELECT config_json FROM channel_configs WHERE channel='dingtalk' AND is_enabled=1 LIMIT 1"
-            ).fetchone()
-        if not row or not row['config_json']:
+        from plugins.im_gateway.models import load_channel_config
+        cfg = load_channel_config('dingtalk', enabled_only=True)
+        if not cfg:
             raise Exception(_("DingTalk channel is not configured"))
-        return _json.loads(row['config_json'])
+        return cfg
 
     def send(self, payload: dict, **kw) -> dict:
         """通过企业应用工作通知发送文本：需 agent_id + 接收人 userid。"""

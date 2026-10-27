@@ -14,7 +14,6 @@
 import base64
 import hashlib
 import hmac
-import json
 import time
 
 # Slack 时间戳新鲜度窗口（秒），防重放
@@ -25,18 +24,18 @@ _QQ_SEED_LEN = 32
 
 
 def _load_channel_config(channel: str) -> dict:
-    """读取该频道已启用配置（失败返回空 dict，交由各验签函数判定 fail-closed）"""
+    """读取该频道已启用配置（失败返回空 dict，交由各验签函数判定 fail-closed）。
+
+    委托 models.load_channel_config（唯一读取入口，含字段级解密）。
+    保持同名以便 tests/test_webhook_signing.py 继续 monkeypatch。
+    """
     try:
-        from .models import get_im_db
-        with get_im_db() as conn:
-            row = conn.execute(
-                "SELECT config_json FROM channel_configs WHERE channel=? AND is_enabled=1 LIMIT 1",
-                (channel,),
-            ).fetchone()
-        if not row or not row['config_json']:
-            return {}
-        return json.loads(row['config_json'])
-    except Exception:
+        from .models import load_channel_config
+        return load_channel_config(channel, enabled_only=True)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(
+            '[WebhookSigning] load channel config failed for %s: %s', channel, e)
         return {}
 
 

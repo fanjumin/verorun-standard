@@ -14,10 +14,8 @@ import string
 PASSWORD_POLICY = {
     'min_length': 10,
     'max_length': 128,
-    'require_upper': True,
-    'require_lower': True,
-    'require_digit': True,
-    'require_special': True,
+    # 只声明实际生效的规则：4 类字符中至少 3 类（不做单类硬性要求）。
+    # 不再保留 require_* 单项开关，避免安全审计误读为"每类都强制"。
     'min_categories': 3,
 }
 
@@ -65,21 +63,12 @@ def validate_password(password: str) -> dict:
     if len(password) > PASSWORD_POLICY['max_length']:
         errors.append(f'密码长度不能超过{PASSWORD_POLICY["max_length"]}位')
 
-    # Category checks
+    # Category checks: 4 类中至少 3 类（不再对单类做硬性要求，避免与
+    # “至少 3 类”规则冲突的死分支）
     cats = _count_categories(password)
     categories_matched = sum(cats.values())
     if categories_matched < PASSWORD_POLICY['min_categories']:
         errors.append(f'密码至少包含{PASSWORD_POLICY["min_categories"]}类字符（大写字母、小写字母、数字、特殊字符）')
-
-    # Individual category requirements (for error specificity)
-    if not cats['has_upper'] and categories_matched >= PASSWORD_POLICY['min_categories']:
-        pass  # "at least 3 of 4" — upper can be the missing one
-    elif not cats['has_lower'] and categories_matched >= PASSWORD_POLICY['min_categories']:
-        pass
-    elif not cats['has_digit'] and categories_matched >= PASSWORD_POLICY['min_categories']:
-        pass
-    elif not cats['has_special'] and categories_matched >= PASSWORD_POLICY['min_categories']:
-        pass
 
     # Check against weak passwords (case insensitive)
     if password.lower() in {w.lower() for w in WEAK_PASSWORDS}:

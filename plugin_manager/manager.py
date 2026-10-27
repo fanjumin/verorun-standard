@@ -561,8 +561,36 @@ class PluginManager:
             #   此前本块遍历磁盘上全部插件 seeding，实测每次启动为 33 个包外插件
             #   （site_builder 1286 / shop 866 / ali_api 688 …）写入 7986 条永不展示的
             #   翻译，占该步 86%，与「本版固定插件集」口径也不一致。
-            _hidden_ids, _ = self._edition_hidden_map(
-                [i.identifier for i in discovered])
+            # 候选集含 DB 缓存键：只存在于注册表、磁盘已移除的行同样要参与同一口径，
+            # 否则 _release_previously_excluded 会把它误判为「本版不排除」而放出。
+            _hidden_ids, _edition_name = self._edition_hidden_map(
+                [i.identifier for i in discovered] + list(self._cache.keys()))
+
+            # ★ 2026-10-26 修复（跨版本切换后插件路由全丢 → /admin/<plugin>/api/* 恒 404）：
+            #   版侧「收口为 disabled」与「反向释放为 installed」原本只发生在 _preload_routes()，
+            #   而那一步**晚于**本块的自动启用，且它内部的注册表查询在本方法开头就已执行完毕。
+            #   失效链（实测 2026-10-26 金融版）：
+            #     上一次以 research/omni 版启动 → stock_analysis 等被收口为
+            #     disabled（last_error=not_in_edition_include: research）
+            #     → 本次以金融版启动：自动启用只认 INSTALLED，跳过这些 disabled 行
+            #     → _preload_routes 才把它们放回 INSTALLED，但本进程既不会再启用、
+            #       也不会重查注册表 → 该插件在整个进程生命周期内不挂蓝图，
+            #       前端全部接口 404（实测 stock_analysis / im_gateway / multi_asset /
+            #       content_factory 等 9 个 include 内插件同时卡在 installed，
+            #       stock 页面 15 个接口全部「接口不存在」）。
+            #   修复：把收口/释放提到自动启用**之前**，使被放回 INSTALLED 的行能在本次
+            #   启动走正常启用流程；随后 _preload_routes 的查询即可看到 enabled 并挂载蓝图。
+            try:
+                # 版本身份取不到（_edition_hidden_map 的 fail-safe 分支）时不碰注册表：
+                # 此时 hidden 恒为 {}，release 会把「本版真正排除」的行也放出来，
+                # 随后 enable() 的门禁再把它们写成 error —— 把 disabled 弄脏成 error，
+                # 而 error 会计入 admin /health 的 plugins_error（恒 degraded）。
+                if _edition_name and _edition_name != 'unknown':
+                    if _hidden_ids:
+                        self._converge_excluded_rows(_hidden_ids, _edition_name)
+                    self._release_previously_excluded(_hidden_ids, _edition_name)
+            except Exception as e:
+                print(f'[PluginManager] ⚠️ 版侧状态收敛/释放失败（不影响本次启动）: {e}')
 
             # ── 加载本版可见插件的 locale 翻译 ─────────────────
             try:
@@ -756,7 +784,13 @@ class PluginManager:
             try:
                 self._save_to_db(info)
                 released.append(pid)
-                print(f'[PluginManager] 🔓 {pid}: 运行时白名单已关闭，注册表状态由 disabled 放回 installed')
+                # 措辞须与真实原因一致：本地触发原因有两种 ——
+                #   ① 该版确实关掉了 runtime_whitelist（include 退化为仅发包裁剪）；
+                #   ② 当前版本的 hidden 集合不含该插件（历史收口来自**另一条版本路径**，
+                #      如 research/omni 排除 stock_analysis，切回金融版后它已在 include 内）。
+                # 旧文案一律写「运行时白名单已关闭」，在 ② 场景下把人误导到版配置文件。
+                print(f'[PluginManager] 🔓 {pid}: 版侧收口已不适用（本版不排除该插件）'
+                      f'→ 注册表状态由 disabled 放回 installed，交由自动启用流程')
             except Exception as e:
                 print(f'[PluginManager] ⚠️ {pid}: 释放 disabled 失败: {e}')
         return released
@@ -1041,7 +1075,7 @@ class PluginManager:
         #   变更回 true → include 现兼任发包裁剪与运行期白名单两职（见
         #   deploy/editions/finance-desktop.yaml:37,52；台账
         #   plugin_manager/tests/test_registry_manifest_sync.py::EditionGatingLedgerTest
-        #   同步钉住该清单，2026-10-14 已补到 16 项）。
+        #   同步钉住该清单，2026-10-26 已补到 17 项业务插件）。
         #   动机：运行时白名单会让"新发布的适用插件只要漏写 include 就静默不显示"，
         #   而漏写的后果本应由打包环节暴露（不写进 include 本就不会进包 = 显式发版决策），
         #   不该由运行时再静默隐藏一层。

@@ -16,7 +16,8 @@ if _auth_dir not in sys.path:
 
 from flask import Blueprint, request, jsonify
 
-from .models import get_im_db
+from .models import get_im_db, load_channel_config
+from .secure_config import encrypt_fields, SecureConfigUnavailable
 from .adapters import get_adapter, list_channels
 
 im_bp = Blueprint('im_gateway', __name__, url_prefix='/admin/channels')
@@ -58,7 +59,7 @@ def list_channels_route():
         ).fetchall()
     result = []
     for r in rows:
-        cfg = json.loads(r['config_json'] or '{}')
+        cfg = load_channel_config(r['channel'])
         result.append({
             'id': r['id'],
             'channel': r['channel'],
@@ -91,7 +92,7 @@ def get_channel(channel):
             'is_enabled': 0,
             'from_env': env_fallback,
         }})
-    cfg = json.loads(row['config_json'] or '{}')
+    cfg = load_channel_config(channel)
     return jsonify({'success': True, 'data': {
         'channel': row['channel'],
         'config': _mask_config(cfg),
@@ -113,16 +114,18 @@ def update_channel(channel):
     is_enabled = 1 if data.get('is_enabled', False) else 0
 
     with get_im_db() as conn:
-        existing = conn.execute(
-            'SELECT config_json FROM channel_configs WHERE channel=%s', (channel,)
-        ).fetchone()
-        old_cfg = json.loads(existing['config_json']) if existing else {}
+        old_cfg = load_channel_config(channel)
 
         merged = dict(old_cfg)
         for k, v in config.items():
             if isinstance(v, str) and '●' in v:
                 continue  # 掩码值，不覆盖
             merged[k] = v
+
+        try:
+            stored = encrypt_fields(channel, merged)
+        except SecureConfigUnavailable as e:
+            return jsonify({'success': False, 'error': str(e)}), 503
 
         conn.execute(
             """INSERT INTO channel_configs (channel, config_json, is_enabled)
@@ -131,7 +134,7 @@ def update_channel(channel):
                    config_json=EXCLUDED.config_json,
                    is_enabled=EXCLUDED.is_enabled,
                    updated_at=NOW()""",
-            (channel, json.dumps(merged, ensure_ascii=False), is_enabled)
+            (channel, json.dumps(stored, ensure_ascii=False), is_enabled)
         )
         conn.commit()
     _log(admin['user_id'], 'update', 'channel_config', channel, _('Channel configuration updated'))

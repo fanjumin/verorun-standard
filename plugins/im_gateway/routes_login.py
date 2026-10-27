@@ -10,6 +10,7 @@ from flask import Blueprint, jsonify, request
 
 from .login import list_login_providers, get_login_provider_class
 from .models import get_im_db
+from .secure_config import encrypt_secret, SecureConfigUnavailable
 
 logger = logging.getLogger(__name__)
 
@@ -31,12 +32,9 @@ def _mask_secret(secret: str) -> str:
 
 
 def _load_configs() -> dict:
-    with get_im_db() as conn:
-        rows = conn.execute(
-            'SELECT provider, display_name, client_id, client_secret, scopes, '
-            'redirect_uri, is_enabled FROM login_providers'
-        ).fetchall()
-    return {r['provider']: dict(r) for r in rows}
+    """读取全部提供方配置（client_secret 经统一入口解密后再供掩码/使用）"""
+    from .models import load_login_providers
+    return {r['provider']: r for r in load_login_providers()}
 
 
 @login_bp.route('/providers', methods=['GET'])
@@ -82,11 +80,17 @@ def save_provider():
         ).fetchone()
         if exists:
             if not client_secret:
+                # 留空保留原值（库内已是密文，原样保留，不重复加密）
                 cur = conn.execute(
                     'SELECT client_secret FROM login_providers WHERE provider=%s',
                     (provider,),
                 ).fetchone()
                 client_secret = cur['client_secret'] or ''
+            else:
+                try:
+                    client_secret = encrypt_secret(client_secret)
+                except SecureConfigUnavailable as e:
+                    return jsonify({'success': False, 'error': str(e)}), 503
             conn.execute(
                 'UPDATE login_providers SET display_name=%s, client_id=%s, '
                 'client_secret=%s, scopes=%s, redirect_uri=%s, is_enabled=%s, '
@@ -100,6 +104,11 @@ def save_provider():
                  provider),
             )
         else:
+            if client_secret:
+                try:
+                    client_secret = encrypt_secret(client_secret)
+                except SecureConfigUnavailable as e:
+                    return jsonify({'success': False, 'error': str(e)}), 503
             conn.execute(
                 'INSERT INTO login_providers (provider, display_name, client_id, '
                 'client_secret, scopes, redirect_uri, is_enabled) '

@@ -7,14 +7,14 @@ import os
 APP_NAME = "verorun"
 
 # 版本号策略：CLI 是 VeroRun 系统的配套客户端，**复用系统主版本号**（仓库根
-# `VERSION` 文件，由 version.py 统一管理，当前 0.59.5），避免用户看到系统
-# 0.59.5 却看到 CLI 独立的 0.2.0 而产生"割裂/过期"误解。
+# `VERSION` 文件，由 version.py 统一管理，当前 0.65.0），避免用户看到系统
+# 0.65.0 却看到 CLI 独立的 0.2.0 而产生"割裂/过期"误解。
 #
 # 读取方式：从本包位置向上两级定位仓库根 `VERSION`（sdks/cli -> sdks -> 根）。
 # 这是**只读**文件访问，不 import 任何核心模块、不引入核心依赖，满足"零入侵"约束。
 # 若 CLI 被单独打包发布（脱离仓库树），则回退到下方 PACKAGED_VERSION 常量
 # （由构建流程在 sdist/wheel 阶段注入，保持与系统发版一致）。
-_PACKAGED_VERSION = "0.59.6"
+_PACKAGED_VERSION = "0.65.0"
 
 
 def _resolve_version() -> str:

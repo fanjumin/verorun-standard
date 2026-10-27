@@ -134,6 +134,35 @@ def session_terminate(sid):
 
 
 # =============================================
+# POST /session/logout-all — 退出所有设备
+# =============================================
+@session_bp.route('/logout-all', methods=['POST'])
+def session_logout_all():
+    """吊销当前 token + 用户级吊销 + 全部登录会话失效。"""
+    payload, err = _require_auth()
+    if err:
+        return err
+    uid = payload['user_id']
+    from services.jwt_service import revoke_token, revoke_all_user_tokens
+    auth = request.headers.get('Authorization', '')
+    token = auth.replace('Bearer ', '') if auth.startswith('Bearer ') else auth
+    if token:
+        try:
+            revoke_token(token)
+        except Exception:
+            pass
+    revoke_all_user_tokens(uid)
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE user_sessions SET expired_at=NOW(), is_current=0 "
+            "WHERE user_id=%s AND (expired_at IS NULL OR expired_at > NOW())",
+            (uid,)
+        )
+        conn.commit()
+    return jsonify({'success': True, 'message': _('Logged out from all devices')})
+
+
+# =============================================
 # 会话缓存上行（桌面本地缓存 → 服务器）
 # =============================================
 # 落库为桌面端独有需求，内核既有表无等价物：user_sessions 是**登录会话**

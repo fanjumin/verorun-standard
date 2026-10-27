@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Auto-generated split from admin.py"""
-from .admin import admin_bp, _require_admin, _log, _cached_get
+from .admin import admin_bp, _require_admin, _log
 from i18n import _
 from datetime import datetime, timedelta
 from flask import Response, jsonify, request
@@ -9,7 +9,6 @@ import os
 import json
 
 @admin_bp.route('/posts', methods=['GET'])
-@_cached_get(ttl=3)
 def post_list():
     admin, err = _require_admin()
     if err:
@@ -47,7 +46,6 @@ def review_post(pid):
 
 
 @admin_bp.route('/contacts', methods=['GET'])
-@_cached_get(ttl=3)
 def contact_list():
     admin, err = _require_admin()
     if err:
@@ -378,7 +376,6 @@ def public_interests():
     return jsonify({'success': True, 'data': grouped})
 
 @admin_bp.route('/downloads', methods=['GET'])
-@_cached_get(ttl=3)
 def admin_downloads_list():
     admin, err = _require_admin()
     if err:

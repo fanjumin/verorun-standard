@@ -873,7 +873,7 @@ class UnifiedLLM:
 
     def chat(self, messages, provider_model_id=None, provider=None, model=None,
              temperature=0.7, max_tokens=8192, module='unknown',
-             raw_response=False, **kwargs):
+             raw_response=False, trace_id=None, session_id=None, **kwargs):
         """统一 chat 接口
         实例模式：自动使用 self 配置
         单例模式：必须传入 provider_model_id 或 provider+model
@@ -945,6 +945,7 @@ class UnifiedLLM:
                 usage.completion_tokens or 0,
                 usage.total_tokens or 0,
                 'chat', module, elapsed_ms=int(elapsed * 1000),
+                trace_id=trace_id, session_id=session_id,
             )
 
         result = resp.choices[0].message.content
@@ -997,7 +998,8 @@ class UnifiedLLM:
                                 _retry_resp.usage.completion_tokens or 0,
                                 _retry_resp.usage.total_tokens or 0,
                                 'chat_sb_bug_5_retry', module,
-                                elapsed_ms=int(_time.time() - start_time) * 1000)
+                                elapsed_ms=int(_time.time() - start_time) * 1000,
+                                trace_id=trace_id, session_id=session_id)
                         logger.info(
                             '[UnifiedLLM] SB-BUG-5 RETRY OK module=%s content_len=%d',
                             module, len(result or ''))
@@ -1024,7 +1026,8 @@ class UnifiedLLM:
         return result
 
     def chat_stream(self, messages, provider_model_id=None, provider=None,
-                    model=None, module='unknown', **kwargs):
+                    model=None, module='unknown', trace_id=None,
+                    session_id=None, **kwargs):
         """流式 chat 接口，返回生成器（自动记录 token 用量）"""
         # 兜底：未显式传参时回退构造器/实例配置（兼容"构造即配置"的调用方，
         # 如 plugins/chatbot/service.py、agent_matrix/intent.py）。与 chat() 一致。
@@ -1084,7 +1087,8 @@ class UnifiedLLM:
                         final_usage.completion_tokens,
                         final_usage.total_tokens,
                         call_type='chat_stream', module=module,
-                        elapsed_ms=int((_time.time() - start_time) * 1000)
+                        elapsed_ms=int((_time.time() - start_time) * 1000),
+                        trace_id=trace_id, session_id=session_id,
                     )
         return _tracked_stream()
 
@@ -1257,14 +1261,16 @@ class UnifiedLLM:
 
     # ── 便利方法（AIEngine 兼容） ──
 
-    def ask(self, user_query, temperature=0.7):
+    def ask(self, user_query, temperature=0.7, trace_id=None, session_id=None):
         messages = [
             {"role": "system", "content": self._system_prompt},
             {"role": "user", "content": user_query}
         ]
-        return self.chat(messages, temperature=temperature, module='ask')
+        return self.chat(messages, temperature=temperature, module='ask',
+                         trace_id=trace_id, session_id=session_id)
 
-    def ask_with_history(self, history, user_query, temperature=0.7):
+    def ask_with_history(self, history, user_query, temperature=0.7,
+                         trace_id=None, session_id=None):
         messages = [{"role": "system", "content": self._system_prompt}]
         ALLOWED_ROLES = ('user', 'assistant', 'system', 'tool')
         for h in history:
@@ -1282,21 +1288,27 @@ class UnifiedLLM:
         # 与 agent_runner 路径的窗口感知结果不一致（挂长窗口模型时会被过度压缩）。
         return self.chat(_fit(messages, model={'provider': self._provider,
                                                'model': self._model}),
-                         temperature=temperature, module='ask_history')
+                         temperature=temperature, module='ask_history',
+                         trace_id=trace_id, session_id=session_id)
 
-    def chat_with_tools(self, messages, tools, temperature=0.7, max_tokens=8192):
+    def chat_with_tools(self, messages, tools, temperature=0.7, max_tokens=8192,
+                        trace_id=None, session_id=None):
         return self.chat(messages, temperature=temperature, max_tokens=max_tokens,
                          module='tool_call', raw_response=True, tools=tools,
-                         tool_choice="auto")
+                         tool_choice="auto", trace_id=trace_id,
+                         session_id=session_id)
 
-    def ask_stream(self, user_query, temperature=0.7):
+    def ask_stream(self, user_query, temperature=0.7, trace_id=None,
+                   session_id=None):
         messages = [
             {"role": "system", "content": self._system_prompt},
             {"role": "user", "content": user_query}
         ]
-        yield from self.chat_stream(messages, temperature=temperature, module='ask')
+        yield from self.chat_stream(messages, temperature=temperature, module='ask',
+                                    trace_id=trace_id, session_id=session_id)
 
-    def ask_with_history_stream(self, history, user_query, temperature=0.7):
+    def ask_with_history_stream(self, history, user_query, temperature=0.7,
+                                trace_id=None, session_id=None):
         messages = [{"role": "system", "content": self._system_prompt}]
         ALLOWED_ROLES = ('user', 'assistant', 'system', 'tool')
         for h in history:
@@ -1313,7 +1325,8 @@ class UnifiedLLM:
         yield from self.chat_stream(
             _fit(messages, model={'provider': self._provider,
                                   'model': self._model}),
-            temperature=temperature, module='ask_history')
+            temperature=temperature, module='ask_history',
+            trace_id=trace_id, session_id=session_id)
 
     def is_ready(self):
         """P2-F17: 检查 AI 引擎是否就绪（provider 存在且能解析出 API key）。
@@ -1461,14 +1474,15 @@ class UnifiedLLM:
     def _log_usage(self, model_id, model_name, provider,
                    prompt_tokens, completion_tokens, total_tokens,
                    call_type='chat', module='unknown', dimension='text',
-                   elapsed_ms=0):
+                   elapsed_ms=0, trace_id=None, session_id=None):
         try:
             agent_id = self._agent_id or model_id
             agent_name = self._agent_name or f'gateway:{module}'
             _LOG_EXECUTOR.submit(_write_usage_logs,
                 agent_id, agent_name, model_name, provider,
                 prompt_tokens, completion_tokens, total_tokens,
-                call_type, dimension, module, elapsed_ms)
+                call_type, dimension, module, elapsed_ms,
+                trace_id, session_id)
         except Exception as e:
             logger.error(f"[UnifiedLLM] Failed to submit log task: {e}")
 
@@ -1476,8 +1490,12 @@ class UnifiedLLM:
 def _write_usage_logs(agent_id, agent_name, model_name, provider,
                       prompt_tokens, completion_tokens, total_tokens,
                       call_type='chat', dimension='text', module='unknown',
-                      elapsed_ms=0):
-    """写入 agent_token_logs + agent_token_daily。"""
+                      elapsed_ms=0, trace_id=None, session_id=None):
+    """写入 agent_token_logs + agent_token_daily。
+
+    trace_id/session_id（v1.2.0）：Agent 链路写 task_id；客服链路写
+    'chat:<thread_id>'；未关联时为 NULL（与历史行的 '' 在采集侧等价）。
+    """
     try:
         from models import get_db as _get_db
         with _get_db() as conn:
@@ -1485,11 +1503,11 @@ def _write_usage_logs(agent_id, agent_name, model_name, provider,
                 INSERT INTO agent_token_logs
                 (agent_id, agent_name, model_name, provider,
                  prompt_tokens, completion_tokens, total_tokens,
-                 call_type, dimension, module, created_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+                 call_type, dimension, module, task_id, session_id, created_at)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
             """, (agent_id, agent_name, model_name, provider,
                   prompt_tokens, completion_tokens, total_tokens,
-                  call_type, dimension, module))
+                  call_type, dimension, module, trace_id, session_id))
             conn.execute("""
                 INSERT INTO agent_token_daily
                 (agent_id, agent_name, stat_date,

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """auth-center: Unified Database Manager - PostgreSQL edition."""
-import os, logging, re
+import os, json, logging, re
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from datetime import datetime
@@ -35,6 +35,16 @@ PG_CONFIG = {
     'connect_timeout': 10,  # 建连最多等 10 秒，避免低配机器上无限挂死
 }
 
+# F-15：PG-only 硬约束 —— 本项目为 PostgreSQL（pgvector）单栈，无 SQLite 分支。
+# 若环境变量显式指向 SQLite，直接拒绝启动，避免误以为存在双库兼容而静默降级。
+_backend = (os.environ.get('DB_TYPE') or os.environ.get('DB_BACKEND') or '').strip().lower()
+_db_url = (os.environ.get('DATABASE_URL') or '').strip().lower()
+if _backend in ('sqlite', 'sqlite3') or _db_url.startswith('sqlite'):
+    raise RuntimeError(
+        'VeroRun auth-center is PostgreSQL-only; SQLite backend is not supported. '
+        'Unset DB_TYPE / DB_BACKEND / DATABASE_URL(sqlite:...) or point them to PostgreSQL.'
+    )
+
 # ── 数据库连接 ──
 
 # P2-F08: 连接池 — 避免高并发下耗尽 PG 连接
@@ -67,6 +77,24 @@ def _connect():
 # 否则插件混用 get_db() 时 `?` 原样进 psycopg2 → SyntaxError，
 # 且常被调用方 except 静默吞成"默认值恒生效"类故障。
 _PLACEHOLDER_RE = re.compile(r"'(''|[^'])*'|\?")
+
+
+# ── 区划数据（D-04b/D-05）─────────────────────────────────────────────
+# 随包数据文件：省/市/区三级，口径为 GB/T 2260（国家统计局），[code,name,level,parent,full_name]。
+_REGION_DATASET = os.path.join(BASE_DIR, '..', 'data', 'regions_cn.json')
+
+
+def _load_region_dataset():
+    """读取区划数据文件；缺失或损坏时返回空列表，绝不阻断服务启动。"""
+    if not os.path.isfile(_REGION_DATASET):
+        return []
+    try:
+        with open(_REGION_DATASET, encoding='utf-8') as f:
+            rows = json.load(f)
+        return [(int(r[0]), str(r[1]), int(r[2]), int(r[3]), str(r[4])) for r in rows]
+    except Exception as exc:
+        logger.warning(f'[Migration] regions dataset unreadable: {exc}')
+        return []
 
 
 def _replace_placeholders(sql: str) -> str:
@@ -1097,6 +1125,24 @@ def init_db():
         m.commit()
         logger.info('[Migration] Real-name verification v2: is_real_name_verified + real_name_verified_at added, id_number_encrypted cleared')
 
+    # ── F-12 / F-13：账号注销冷静期 + 同意留痕（可空新增，回滚不影响存量数据）──
+    with get_db() as m:
+        cols = get_table_columns(m, 'users')
+        for col_name, col_def in [
+            ('consent_at', 'TIMESTAMP'),
+            ('consent_version', "VARCHAR(32) DEFAULT ''"),
+            ('consent_ip', "VARCHAR(64) DEFAULT ''"),
+            ('deleted_at', 'TIMESTAMP'),
+            ('deletion_requested_at', 'TIMESTAMP'),
+        ]:
+            if col_name not in cols:
+                try:
+                    m.execute(f'ALTER TABLE users ADD COLUMN {col_name} {col_def}')
+                except Exception:
+                    pass
+        m.commit()
+        logger.info('[Migration] F-12/F-13 account lifecycle + consent columns ready')
+
     # ── Verification provider config seeds (admin fills in credentials later) ──
     with get_db() as m:
         provider_seeds = [
@@ -1773,8 +1819,7 @@ def init_db():
         # 检查是否需要 seed（仅空表时写入基础层级）
         empty = m.execute("SELECT count(*) FROM regions").fetchone()['count']
         if empty == 0:
-            # 省/自治区/直辖市 level-1（简化 seed，仅基础数据）
-            import json
+            # 省/自治区/直辖市 level-1（基础兜底，含港澳台）
             base_regions = [
                 (110000, '北京市', 1, 100000, '中国/北京市'),
                 (120000, '天津市', 1, 100000, '中国/天津市'),
@@ -1816,7 +1861,31 @@ def init_db():
             m.commit()
             logger.info(f'[Migration] regions: {len(base_regions)} level-1 regions seeded')
         else:
-            logger.info(f'[Migration] regions: {empty} rows already exist, skipping seed')
+            logger.info(f'[Migration] regions: {empty} rows already exist, skipping base seed')
+
+        # D-04b/D-05：补齐省/市/区三级区划。原来只有 34 条 level-1，
+        # 真实省市区（110000/110100/110101）创建地址会被判 400，级联也永远 0 子节点。
+        # 这里按随包数据文件增量导入：仅当现有行数少于数据文件时才执行，
+        # ON CONFLICT (code) DO NOTHING 保证幂等，可安全重复运行。
+        ds_rows = _load_region_dataset()
+        if ds_rows:
+            have = m.execute("SELECT count(*) FROM regions").fetchone()['count']
+            if have < len(ds_rows):
+                chunk_size = 200
+                for i in range(0, len(ds_rows), chunk_size):
+                    chunk = ds_rows[i:i + chunk_size]
+                    placeholders = ','.join(['(%s,%s,%s,%s,%s)'] * len(chunk))
+                    params = [v for row in chunk for v in row]
+                    m.execute(
+                        'INSERT INTO regions (code, name, level, parent_code, full_name) '
+                        f'VALUES {placeholders} ON CONFLICT (code) DO NOTHING', params)
+                m.commit()
+                logger.info(f'[Migration] regions: dataset import done '
+                            f'(file={len(ds_rows)} rows, before={have})')
+            else:
+                logger.info(f'[Migration] regions: dataset already applied ({have} rows)')
+        else:
+            logger.warning('[Migration] regions: dataset file missing, city/district level unavailable')
 
     # ── Seed default interest tags ──
     with get_db() as m:

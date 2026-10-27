@@ -21,8 +21,9 @@ _BLACKLIST_CLEANUP_INTERVAL = 3600  # 1h cleanup
 
 # D1：jti"未吊销"结果的负缓存。吊销只发生在主动登出/强制下线，秒级延迟可接受；
 # 而没有负缓存时，每个已鉴权请求（SSE 建立、轮询、流式）都要为"未吊销"这个
-# 答案穿透一次 DB。TTL 30s，容量兜底清理，且 _revoke_jti() 会立即作废对应条目。
-_JTI_NEG_TTL = 30
+# 答案穿透一次 DB。TTL 1s（F-03：30s 会让其他 worker 的登出延迟最多 30 秒生效），
+# 容量兜底清理，且 _revoke_jti() 会立即作废对应条目。
+_JTI_NEG_TTL = 1
 _JTI_NEG_MAX = 10000
 _jti_neg_cache = {}  # jti -> 该结论的失效时刻
 _neg_lock = threading.Lock()
@@ -143,7 +144,10 @@ def create_token(user_id, phone=None, app_name='main', is_admin=False,
     permissions: list of permission strings (e.g. ['stock.read', 'stock.write'])"""
     import secrets
     jti = secrets.token_urlsafe(16)
-    now = int(time.time())
+    # B-09：签到时间同时落秒级 iat（JWT 标准）与毫秒级 iat_ms（用户级吊销比对用）。
+    # 两者必须同源，避免跨毫秒边界时 iat_ms 与 iat 不自洽。
+    now_ms = int(time.time() * 1000)
+    now = now_ms // 1000
     exp_hours = JWT_EXPIRY_HOURS if token_type == 'access' else JWT_REFRESH_EXPIRY_HOURS
     payload = {
         'jti': jti,
@@ -155,6 +159,7 @@ def create_token(user_id, phone=None, app_name='main', is_admin=False,
         'permissions': permissions or [],
         'token_type': token_type,
         'iat': now,
+        'iat_ms': now_ms,
         'exp': now + exp_hours * 3600,
     }
     return pyjwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGO)
@@ -175,14 +180,14 @@ def revoke_all_user_tokens(user_id):
     Since we can't enumerate all jtis for a user, we use a user-level
     revocation timestamp stored in the token payload.
     This is a simplified approach; for production use Redis sets."""
-    # Mark user's tokens as revoked by storing a revocation timestamp
-    # New tokens created after this point will have a newer iat
+    # B-09：时间戳改为毫秒级。秒级粒度下"同一秒内改密"的旧 token 与改密后新签发
+    # 的 token iat 完全相同，无法区分 → 旧 token 会残留到下一秒。
     from models import get_db
-    now = int(time.time())
+    now_ms = int(time.time() * 1000)
     with get_db() as conn:
         conn.execute(
             "INSERT INTO system_config (key, value) VALUES (%s, %s) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value",
-            (f'user_token_revoked_at_{user_id}', str(now))
+            (f'user_token_revoked_at_{user_id}', str(now_ms))
         )
         conn.commit()
 
@@ -198,9 +203,34 @@ def _decode_token(token, verify_exp=True):
         return None
 
 
-def validate_token(token):
+# B-09：用户级吊销时间戳存在两种精度。历史记录为秒级（< 10^11），
+# 新写入为毫秒级（>= 10^11）。毫秒值用 `<=` 精确到签发时刻，
+# 秒级历史值沿用 ` < ` 以免把同一秒内新签发的 token 也误杀。
+_MS_EPOCH_FLOOR = 10 ** 11
+
+
+def _is_revoked_by_user(payload, raw_revoked_at):
+    """True 表示该 token 落在用户级吊销范围内。
+
+    raw_revoked_at 无法解析为整数时抛 ValueError，由调用方按 fail-closed 处理。
+    """
+    revoked = int(raw_revoked_at)
+    if revoked >= _MS_EPOCH_FLOOR:
+        iat_ms = payload.get('iat_ms')
+        if not isinstance(iat_ms, int):
+            # 本功能上线前签发的 token 没有 iat_ms，用秒级 iat 折算
+            iat_ms = int(payload.get('iat', 0)) * 1000
+        return iat_ms <= revoked
+    return int(payload.get('iat', 0)) < revoked
+
+
+def validate_token(token, allow_apps=None):
     """Returns decoded payload or None.
-    Checks jti blacklist and per-user revocation."""
+    Checks jti blacklist and per-user revocation.
+
+    allow_apps: F-10 —— 允许的签发面（app_name）白名单。为空则不限制；
+    传入后 token 的 app_name 不在白名单内即视为无效（拒绝跨面使用）。
+    """
     payload = _decode_token(token)
     if not payload:
         return None
@@ -208,6 +238,8 @@ def validate_token(token):
     # 主站 app_name 统一：历史遗留 trademind/platform 归一为 main（兼容存量 JWT）
     if payload.get('app_name') in ('trademind', 'platform'):
         payload['app_name'] = 'main'
+    if allow_apps and payload.get('app_name') not in allow_apps:
+        return None
 
     # Check jti blacklist
     jti = payload.get('jti')
@@ -237,7 +269,7 @@ def validate_token(token):
             return None  # 账号不存在或已冻结
         if row['revoked_at']:
             try:
-                if payload.get('iat', 0) < int(row['revoked_at']):
+                if _is_revoked_by_user(payload, row['revoked_at']):
                     return None  # Token issued before user was force-logged-out
             except (TypeError, ValueError):
                 logger.error(f"Malformed user_token_revoked_at for user={user_id}: "

@@ -36,7 +36,7 @@ from .constants import (
     JWT_LEEWAY,
     TOKEN_FILE,
 )
-from .exceptions import AuthError
+from .exceptions import APIError, AuthError
 from .output import warn
 from .secure_file import describe_protection, write_secret
 
@@ -54,9 +54,22 @@ class AuthManager:
         body: Dict[str, Any] = {"username": username, "password": password}
         if captcha_id:
             body["captcha_id"] = captcha_id
-        resp = self.client.request_json(
-            "POST", "/user/password/login", json=body, auth_required=False
-        )
+        try:
+            resp = self.client.request_json(
+                "POST", "/user/password/login", json=body, auth_required=False
+            )
+        except APIError as exc:
+            # 服务端频控（auth-center/routes/user.py:494-497）：15 分钟内同一账号失败
+            # ≥5 次或同一 IP 失败 ≥10 次后强制要求图形验证码。CLI 无内置验证码能力，
+            # 若原样抛服务端英文原文，用户只会看到 "Please complete the CAPTCHA
+            # challenge" 而不知道要等多久、怎么解，故翻译为可操作的指引。
+            if exc.status == 400 and "CAPTCHA" in str(exc.message):
+                raise AuthError(
+                    "登录被服务端频控拦截：15 分钟内同一账号失败 ≥5 次或同一 IP 失败 ≥10 次后，"
+                    "必须提供图形验证码。请在管理后台完成一次验证码后，用 `--captcha <token>` 重试，"
+                    "或等待 15 分钟后再次登录；也可改用 `--api-key` 登录。"
+                ) from exc
+            raise
         self._save_token(self._extract_token(resp))
         return resp
 

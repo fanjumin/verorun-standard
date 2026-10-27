@@ -247,7 +247,7 @@ def import_from_github(raw_url: str) -> Tuple[Optional[dict], List[str]]:
     # 命中优先级：中文命名 > 英文默认；双平台回退；失败静默（readme_cache 留空，不影响导入）
     readme_url = (manifest.get('readme_url') or '').strip()
     readme_cache = ''
-    readme_names = ('README.cn.md', 'README_CN.md', 'README.zh-CN.md', 'README.md')
+    readme_names = ('README_CN.md', 'README.cn.md', 'README.zh-CN.md', 'README.md')
     if dir_path:
         readme_names = tuple(f'{dir_path}/{n}' for n in readme_names)
     for h in ('gitee', 'github'):

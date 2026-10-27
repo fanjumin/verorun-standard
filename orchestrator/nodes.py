@@ -692,8 +692,10 @@ def make_sub_workflow_handler(engine):
 
         child_inst_id = engine.run_workflow(
             child_id,
-            trigger_type='sub_workflow',
-            trigger_config={'parent_instance_id': input_data.get('_instance_id', 0)},
+            # 'dependency'：父实例依赖触发的子流程（workflow_instances 的 CHECK 无 'sub_workflow'）
+            trigger_type='dependency',
+            trigger_config={'parent_instance_id': input_data.get('_instance_id', 0),
+                            'source': 'sub_workflow'},
             initial_context=ctx
         )
 

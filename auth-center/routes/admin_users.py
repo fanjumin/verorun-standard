@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """Auto-generated split from admin.py"""
-from .admin import admin_bp, _require_admin, _log, _cached_get
+from .admin import admin_bp, _require_admin, _log, _enforce_admin_perm
 from i18n import _
 from datetime import datetime, timedelta
 from flask import Response, jsonify, request
@@ -8,8 +8,31 @@ from models import get_db, now_iso
 import os
 import json
 
+
+def _mask_phone(v):
+    """F-14：手机号掩码（保留前 3 后 4），空值原样返回。"""
+    s = (v or '')
+    if len(s) < 8:
+        return s
+    return s[:3] + '****' + s[-4:]
+
+
+def _mask_email(v):
+    """F-14：邮箱掩码（本地部分只留首字符）。"""
+    s = (v or '')
+    if '@' not in s:
+        return s
+    local, domain = s.split('@', 1)
+    if len(local) <= 1:
+        return '*' + '@' + domain
+    return local[0] + '***@' + domain
+
+
+def _can_view_pii(admin_id):
+    """F-14：具备 users 模块权限才可见明文 PII。"""
+    return _enforce_admin_perm(admin_id, 'users') is None
+
 @admin_bp.route('/users', methods=['GET'])
-@_cached_get(ttl=3)
 def user_list():
     admin, err = _require_admin()
     if err:
@@ -62,9 +85,20 @@ def user_list():
             rows = conn.execute(sql, params + [limit, offset]).fetchall()
     except Exception as e:
         return jsonify({"success": False, "error": _("Failed to query user list: ") + str(e)}), 500
+    users = [dict(r) for r in rows]
+    # F-14：无 users 权限时返回掩码 PII；并记录读审计（只记筛选条件，不记 PII）
+    if not _can_view_pii(admin['user_id']):
+        for u in users:
+            u['phone'] = _mask_phone(u.get('phone'))
+            u['email'] = _mask_email(u.get('email'))
+    try:
+        _log(admin['user_id'], 'user_list_view', 'users', '',
+             'page=%s limit=%s search=%s' % (page, limit, 'y' if search else 'n'))
+    except Exception:
+        pass
     return jsonify({"success": True, "data": {
         'total': total['c'], 'page': page, 'limit': limit,
-        'users': [dict(r) for r in rows],
+        'users': users,
     }})
 
 
@@ -85,7 +119,16 @@ def user_detail(uid):
                 return jsonify({'success': False, 'error': chr(29992)+chr(25143)+chr(19981)+chr(23384)+chr(22312)}), 404
             auths = conn.execute('SELECT app_name, tier, tier_expire_at, calls_today, calls_total FROM app_authorizations WHERE user_id=%s', (uid,)).fetchall()
             orders = conn.execute('SELECT id, order_no, amount, item_type, item_desc, status, created_at FROM billing_orders WHERE user_id=%s ORDER BY created_at DESC LIMIT 10', (uid,)).fetchall()
-        return jsonify({'success': True, 'data': {'user': dict(user), 'authorizations': [dict(a) for a in auths], 'orders': [dict(o) for o in orders]}})
+        u = dict(user)
+        # F-14：详情同样按权限掩码 PII，并记录读审计
+        if not _can_view_pii(admin['user_id']):
+            u['phone'] = _mask_phone(u.get('phone'))
+            u['email'] = _mask_email(u.get('email'))
+        try:
+            _log(admin['user_id'], 'user_detail_view', 'users', str(uid), '')
+        except Exception:
+            pass
+        return jsonify({'success': True, 'data': {'user': u, 'authorizations': [dict(a) for a in auths], 'orders': [dict(o) for o in orders]}})
     except Exception as e:
         return jsonify({'success': False, 'error': _('Query failed')}), 500
 
@@ -202,7 +245,6 @@ def user_profile_admin(uid):
 
 # GET /admin/users/export — 脱敏导出用户列表
 @admin_bp.route('/agents', methods=['GET'])
-@_cached_get(ttl=3)
 def agent_list():
     """Legacy endpoint — delegates to new user_agents query (2026-05-10)"""
     admin, err = _require_admin()

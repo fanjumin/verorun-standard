@@ -161,9 +161,10 @@ def _parse_edition_plugin_lists(text):
 def edition_plugin_lists() -> dict:
     """当前 edition 的插件 include/exclude 白名单。
 
-    standard/enterprise/official（未设 VR_EDITION 的老部署）语义与官方版一致，
-    经 edition_artifact_stem() 解析到同一份 official.yaml —— 原函数体内手工归一的
-    'standard' → 'official' 已收敛进桥接表，禁止再出现第二处。
+    enterprise/official（official 为 enterprise 的历史别名，同一 canonical ID）经
+    edition_artifact_stem() 解析到 official.yaml；standard 在桥接表里是**独立**一项，
+    解析到 standard.yaml —— 二者**不共用**产物。原函数体内手工归一的
+    'standard' → 'official' 已删除，禁止再出现第二处。
     yaml 缺失 / 无 plugins 段 → 空列表（不排除任何插件）。
     """
     path = _edition_yaml_path()
@@ -189,8 +190,9 @@ def edition_plugin_excludes() -> list:
 def edition_plugin_includes() -> list:
     """当前 edition 的插件白名单（**发包裁剪**清单）。
 
-    ⚠️ 返回空列表 = 该发行版**未启用白名单语义**（standard/未设版本键的老部署，
-    或 yaml 缺 plugins 段）→ 调用方绝不能据此过滤，否则会把所有插件判为"本版不提供"。
+    ⚠️ 返回空列表 = 该发行版**未启用白名单语义**（未设版本键的老部署，或 yaml 缺
+    plugins 段）→ 调用方绝不能据此过滤，否则会把所有插件判为"本版不提供"。
+    注：standard 自 standard.yaml 引入 include 后**不再**属于此例。
     服务器版由 sync-to-pro.yml 按 include 物理拷贝（空 include 直接 fail），
     故打包侧遵守 include 即为与该产物口径对齐。
 
@@ -1374,7 +1376,8 @@ def create_agent(data):
             data.get('is_active', 1)
         )).fetchone()
         conn.commit()
-        return row[0]
+        # RealDictCursor 返回 dict 行：旧实现 row[0] 必抛 KeyError: 0（新建成 500 且写库已成功）。
+        return row['id']
 
 
 def register_capability_to_role(domain, name, capabilities, description='', system_prompt=''):

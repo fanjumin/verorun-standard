@@ -1,5 +1,40 @@
 # Changelog
 
+## v3.2.0 — 2026-10-27（security：凭据字段级加密）
+
+### Security（破坏性变更）
+
+- **频道凭据由明文落库改为 Fernet 字段级加密（P0-03）**：新增 `secure_config.py`，
+  复用系统主密钥 `ENCRYPTION_KEY`（`base64.urlsafe_b64encode(sha256(key))` → Fernet），
+  对 `channel_configs.config_json` 与 `login_providers.client_secret` 的凭据字段加密，
+  密文带 `enc:v1:` 前缀。
+  - **写路径 fail-closed**：无可用 `ENCRYPTION_KEY` 或加密失败一律抛
+    `SecureConfigUnavailable`，`PUT /admin/channels/<channel>` 返回 **503**，绝不落明文。
+  - **读路径向后兼容**：只解带前缀者；历史明文原样返回并记 WARNING（由
+    `tools/migrate_im_credentials.py` 收敛）；带前缀但解不开 → 抛异常，绝不把密文当明文用。
+  - 敏感字段按各 adapter `get_config_fields()` 的 `type='password'` 字段校准，
+    并纳入 webhook 入站验签实际读取的凭据（`telegram.secret_token`、`slack.signing_secret`、
+    `discord.application_public_key`、`qq.bot_secret`、`feishu.verification_token/encrypt_key`、
+    `wecom.token/encoding_aes_key`）。
+- **单一读取入口**：`models.load_channel_config(channel, enabled_only)` /
+  `load_login_providers()` 收敛全部读取点（8 个 adapter + `webhook_signing` +
+  `routes*` + `models.migrate_from_main_db`），避免逐处打补丁漏解。
+- **掩码回显**：`routes_overview` / `routes_login` 的 `client_secret` 掩码改为
+  **先解密再掩码**，前端仍看到掩码而非 `enc:v1:` 前缀串。
+
+### Added
+
+- `tools/migrate_im_credentials.py`：历史明文凭据收敛脚本（默认 dry-run，`--apply` 写库；
+  无 `ENCRYPTION_KEY` 拒绝写库）。
+- `tests/test_secure_config.py`（13 例）：无明文子串、前缀正确、读回原文、明文读兼容并
+  记 WARNING、无密钥写抛异常、密文损坏读抛异常等。
+
+### 影响范围（消费方已同步收敛）
+
+- `plugins/chatbot/channels/router.py`、`plugins/omni_service/channels/__init__.py`
+  原先直读 `config_json`，加密后会拿到密文当 token 用；已改为调用
+  `im_gateway.models.load_channel_config` 解密。
+
 ## v3.1.2 — 2026-10-20
 
 ### Fixed

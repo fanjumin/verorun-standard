@@ -8,6 +8,10 @@ domain: general
 managed_modules:
   - veroscholar
   - memory_engine
+  # 2026-10-26 用户裁决：project_workspace 重新入科研版，归科研 lane 认领。
+  # agent_role=content 不在本版角色集，按惯例由角色侧 managed_modules 显式认领；
+  # kb_sync 双向通道（论文入库 upsert / 问答挂项目知识）随之对 veroscholar 生效。
+  - project_workspace
 capabilities:
   - lit.qa
   - lit.summarize

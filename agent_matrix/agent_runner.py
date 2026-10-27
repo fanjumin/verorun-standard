@@ -78,6 +78,9 @@ class AgentRunner:
         self._engine = None
         self._engine_ready = False
         self.models = db_models
+        # v1.2.0：可观测关联键（单实例单任务，串行路径无并发覆盖风险）
+        self._trace_id = ''
+        self._session_id = ''
 
     def _get_engine(self):
         if not self._engine:
@@ -119,6 +122,9 @@ class AgentRunner:
         """
         logs = []
         task_id = task.get('task_id', 'unknown')
+        # v1.2.0：把 task_id 作为 LLM 用量日志的关联键（NeuralFlow 归因主键）
+        self._trace_id = task_id if task_id and task_id != 'unknown' else ''
+        self._session_id = task.get('session_id') or ''
         # WP-8：预算与子代理深度经实例属性透传到 _execute_batch 的 context，
         # 供 spawn_subagent 工具使用（单实例单任务，串行路径无并发覆盖风险）
         self._current_token_budget = task.get('token_budget', 0)
@@ -159,9 +165,13 @@ class AgentRunner:
                                                     task_phase=task.get('phase', ''),
                                                     gates=self._build_gates(task, task_id))
                 elif history:
-                    response = engine.ask_with_history(history, user_query)
+                    response = engine.ask_with_history(
+                        history, user_query,
+                        trace_id=self._trace_id, session_id=self._session_id)
                 else:
-                    response = engine.ask(user_query)
+                    response = engine.ask(
+                        user_query, trace_id=self._trace_id,
+                        session_id=self._session_id)
             except Exception as e:
                 import traceback
                 tb = traceback.format_exc()
@@ -235,9 +245,13 @@ class AgentRunner:
                                                 task_phase=task.get('phase', ''),
                                                 gates=self._build_gates(task, task_id))
             elif history:
-                response = engine.ask_with_history(history, retry_query)
+                response = engine.ask_with_history(
+                    history, retry_query,
+                    trace_id=self._trace_id, session_id=self._session_id)
             else:
-                response = engine.ask(retry_query)
+                response = engine.ask(
+                    retry_query, trace_id=self._trace_id,
+                    session_id=self._session_id)
             if not isinstance(response, str):        # A3.2：None 兜底
                 response = '' if response is None else str(response)
             if response.startswith('Error:'):
@@ -391,7 +405,8 @@ class AgentRunner:
                     'points. Reply in the same language as the content. Preserve '
                     'facts, numbers, file paths, and decisions. Output bullets '
                     'only, no preamble.\n\n' + blob,
-                    temperature=0.2)
+                    temperature=0.2, trace_id=self._trace_id,
+                    session_id=self._session_id)
                 if isinstance(raw, str) and raw and not raw.startswith('Error:'):
                     return raw.strip()[:2000]
             except Exception as e:
@@ -638,13 +653,16 @@ class AgentRunner:
             try:
                 if stream:
                     chunk_iter = engine.chat_stream(
-                        messages, tools=tools, tool_choice='auto', module='tool_call')
+                        messages, tools=tools, tool_choice='auto', module='tool_call',
+                        trace_id=self._trace_id, session_id=self._session_id)
                     msg = aggregate_stream_message(chunk_iter)
                     if isinstance(msg, str):      # Error: 前缀错误帧
                         raise RuntimeError(msg)
                     if msg is None:
                         logs.append(f'[ReAct #{round_i}] 工具调用返回空，退回普通对话')
-                        fallback = engine.ask(user_query)
+                        fallback = engine.ask(user_query,
+                                              trace_id=self._trace_id,
+                                              session_id=self._session_id)
                         self._save_checkpoint(run_id, messages, round_i - 1, last_text,
                                               _ck_user_query, _ck_history, max_rounds,
                                               task_phase, status='completed')
@@ -664,10 +682,14 @@ class AgentRunner:
                     tool_calls = [_as_tool_call_obj(tc) for tc in tc_dicts]
                     assistant_msg = msg
                 else:
-                    resp = engine.chat_with_tools(messages, tools)
+                    resp = engine.chat_with_tools(
+                        messages, tools, trace_id=self._trace_id,
+                        session_id=self._session_id)
                     if resp is None:
                         logs.append(f'[ReAct #{round_i}] 工具调用返回空，退回普通对话')
-                        fallback = engine.ask(user_query)
+                        fallback = engine.ask(user_query,
+                                              trace_id=self._trace_id,
+                                              session_id=self._session_id)
                         self._save_checkpoint(run_id, messages, round_i - 1, last_text,
                                               _ck_user_query, _ck_history, max_rounds,
                                               task_phase, status='completed')
@@ -791,7 +813,9 @@ class AgentRunner:
 
         # 达到轮次上限，做最后一次无工具收尾
         logs.append(f'[ReAct] Reached maximum rounds {max_rounds}, forced termination')
-        final = engine.chat_with_tools(messages, tools)
+        final = engine.chat_with_tools(messages, tools,
+                                       trace_id=self._trace_id,
+                                       session_id=self._session_id)
         if final is not None:
             final_choice = final.choices[0].message
             if final_choice.content:
@@ -898,7 +922,8 @@ class AgentRunner:
             f"[OUTPUT]\n{response[:2000]}"
         )
         try:
-            raw = engine.ask(critique_prompt, temperature=0.2)
+            raw = engine.ask(critique_prompt, temperature=0.2,
+                             trace_id=self._trace_id, session_id=self._session_id)
             if not raw or raw.startswith('Error:'):
                 return None
             import re as _re

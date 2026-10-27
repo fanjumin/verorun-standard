@@ -310,6 +310,53 @@ def inject_globals():
                 deploy=deploy, edition=os.environ.get('VR_EDITION', ''))
 
 
+# ══ F-09：CSRF / Origin 守卫 ══
+# 仅针对「无 Bearer + 依赖 Cookie 会话 + 状态变更方法」的请求；回调路径按前缀放行，
+# 无 Origin/Referer 的服务端到服务端回调保持放行（由业务签名校验负责）。
+_CSRF_SAFE_METHODS = {'GET', 'HEAD', 'OPTIONS'}
+_CSRF_CALLBACK_PREFIXES = (
+    '/payment/', '/pay/', '/api/payment', '/api/pay',
+    '/callback', '/oauth', '/sso/', '/api/captcha',
+    '/api/v1/wechat', '/api/v1/alipay', '/webhook',
+)
+
+
+def _csrf_origin_allowed(origin_value):
+    """Origin/Referer 是否属于本站（当前 Host 或 DEPLOY_DOMAIN 及其子域）。"""
+    try:
+        from urllib.parse import urlparse
+        host = (urlparse(origin_value).hostname or '').lower()
+    except Exception:
+        return False
+    if not host:
+        return False
+    req_host = (request.host or '').split(':')[0].lower()
+    allowed = {req_host}
+    dom = (os.environ.get('DEPLOY_DOMAIN') or '').strip().lower()
+    if dom:
+        allowed.add(dom)
+    if host in allowed:
+        return True
+    return any(host.endswith('.' + d) for d in allowed if d)
+
+
+@app.before_request
+def _csrf_origin_guard():
+    if request.method in _CSRF_SAFE_METHODS:
+        return None
+    if (request.headers.get('Authorization') or '').startswith('Bearer '):
+        return None
+    path = request.path or '/'
+    if any(path.startswith(p) for p in _CSRF_CALLBACK_PREFIXES):
+        return None
+    candidate = request.headers.get('Origin') or request.headers.get('Referer') or ''
+    if not candidate:
+        return None
+    if _csrf_origin_allowed(candidate):
+        return None
+    return jsonify({'success': False, 'error': 'Cross-site request blocked'}), 403
+
+
 # ══ i18n 语言协商 + 语言切换（i18n-standard §5）══
 @app.before_request
 def _i18n_resolve_locale():

@@ -680,9 +680,13 @@ def chat_stream():
             # 协议消费，于是把对象 repr 当 token 下发（实测单次 170KB 调试垃圾）。
             # 统一走内核归一化：对象解包 delta.content，字符串与 Error: 帧原样透传。
             from agent_matrix.llm_text import iter_stream_text
+            # v1.2.0：客服会话关联键（无 session_id 时留空 → 回落 module 口径）
+            _chat_session = str(data.get('session_id') or '')
             for token in iter_stream_text(
-                    engine.chat_stream(chat_messages, temperature=temperature,
-                                       max_tokens=max_tokens)):
+                    engine.chat_stream(
+                        chat_messages, temperature=temperature, max_tokens=max_tokens,
+                        trace_id=(f'chat:{_chat_session}' if _chat_session else None),
+                        session_id=(_chat_session or None))):
                 if token.startswith("Error:"):
                     yield _sse_event('error', content=token)
                     return

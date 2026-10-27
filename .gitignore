@@ -97,6 +97,10 @@ plugins/*/*.db-wal
 # Health check runtime discovery data (regenerated at startup, never commit)
 plugins/health_check/data/
 
+# Project workspace uploaded documents (runtime files under plugins/<name>/data
+# convention so vault _add_plugin_data picks them up; never commit user uploads)
+plugins/project_workspace/data/
+
 # License server runtime DB (created at runtime, must not be committed)
 plugin_manager/license_server/data/*.db
 plugin_manager/license_server/data/*.db-shm
@@ -141,10 +145,12 @@ node_modules/
 tools/
 !veroguard/tools/
 !plugins/hr_recruit/tools/
+!plugins/im_gateway/tools/
 !plugins/bayes_engine/tools/
 !plugins/chaos_engine/tools/
 !plugins/survey/tools/
 !plugins/search_hub/tools/
+!plugins/stock_analysis/tools/
 site/
 deploy/caddy/
 docs/*
@@ -152,6 +158,7 @@ docs/*
 !docs/plugin-manifest.schema.json
 !docs/plugin-standard-v1.8.md
 !docs/stock-desktop-integration-contract.md
+!docs/glossary.md
 
 # Local deploy diagnostics (not tracked — health scripts are tracked separately)
 deploy/check*.sh

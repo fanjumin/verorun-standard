@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 
 <html lang="{{ lang }}">
 <head>
@@ -276,6 +276,12 @@
     <div class="rf-username-hint" id="emailUsernameHint">{{ _('4-20 characters, letters, numbers and underscores allowed') }}</div>
     <div class="rf-msg" id="regEmailUsernameMsg"></div>
   </div>
+  <div class="rf" style="display:flex;align-items:flex-start;gap:8px">
+    <input id="emailConsent" type="checkbox" style="margin-top:3px"/>
+    <label for="emailConsent" style="font-size:12px;color:var(--text-muted);line-height:1.6">
+      {{ _('I have read and agree to the Terms of Service and Privacy Policy') }}
+    </label>
+  </div>
   <div class="reg-actions" style="justify-content:center">
     <button class="rf-btn-primary" id="emailRegSubmitBtn" onclick="submitEmailRegistration()" type="button">
       <span class="rf-btn-text">{{ _('Sign Up') }}</span><div class="rf-spinner"></div>
@@ -440,6 +446,10 @@
 </div>
 <div class="rf-msg" id="regDisplayNameMsg"></div>
 </div>
+<div class="rf" style="display:flex;align-items:flex-start;gap:8px">
+<input id="smsConsent" type="checkbox" style="margin-top:3px"/>
+<label for="smsConsent" style="font-size:12px;color:var(--text-muted);line-height:1.6">{{ _('I have read and agree to the Terms of Service and Privacy Policy') }}</label>
+</div>
 <div class="reg-actions">
 <button class="rf-btn-back" onclick="goStep('step2',2)" type="button">{{ _('Back') }}</button>
 <button class="rf-btn-primary" id="regSubmitBtn" onclick="submitRegistration()" type="button">
@@ -592,7 +602,7 @@ function evalEmailPwdStrength(pw) {
   const checklist = document.getElementById('emailPwdChecklist');
   if (!fill) return;
   let level = 0;
-  if (pw && pw.length >= 8) level++;
+  if (pw && pw.length >= 10) level++;
   if (pw && /[A-Z]/.test(pw)) level++;
   if (pw && /[a-z]/.test(pw)) level++;
   if (pw && /\d/.test(pw)) level++;
@@ -602,12 +612,12 @@ function evalEmailPwdStrength(pw) {
   const cls = ['', 's-weak', 's-weak', 's-fair', 's-good', 's-strong'];
   score.textContent = labels[level];
   score.className = 'rs-score ' + cls[level];
-  tips.textContent = level >= 5 ? '{{ _("All requirements met") }}' : '{{ _("At least 8 characters") }}';
+  tips.textContent = level >= 5 ? '{{ _("All requirements met") }}' : '{{ _("At least 10 characters") }}';
   if (checklist) {
     checklist.querySelectorAll('.rc-item').forEach(item => {
       const c = item.dataset.check;
       let met = false;
-      if (c === 'len') met = pw && pw.length >= 8;
+      if (c === 'len') met = pw && pw.length >= 10;
       else if (c === 'upper') met = pw && /[A-Z]/.test(pw);
       else if (c === 'lower') met = pw && /[a-z]/.test(pw);
       else if (c === 'digit') met = pw && /\d/.test(pw);
@@ -665,10 +675,14 @@ async function submitEmailRegistration() {
     return;
   }
   if (!code) { showToast('error', _('Please enter verification code')); return; }
-  if (!pw || pw.length < 8) { showToast('error', _('Please set a valid password')); return; }
+  if (!pw || pw.length < 10) { showToast('error', _('Please set a valid password')); return; }
   if (!username) { showToast('error', _('Please enter username')); return; }
   if (!emailUsernameAvailable) {
     showToast('error', _('Please confirm username availability'));
+    return;
+  }
+  if (!document.getElementById('emailConsent').checked) {
+    showToast('error', _('Please agree to the Terms of Service and Privacy Policy'));
     return;
   }
 
@@ -678,7 +692,7 @@ async function submitEmailRegistration() {
     const r = await fetch('/auth/email/register', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({email, code, password: pw, username})
+      body: JSON.stringify({email, code, password: pw, username, consent: true, consent_version: 'v1.0'})
     });
     const d = await r.json();
     if (d.success) {
@@ -927,7 +941,7 @@ function evalPwdStrength(pw) {
   if (!checks.lower) missing.push(_('Needs lowercase'));
   if (!checks.upper) missing.push(_('Needs uppercase'));
   if (!checks.digit) missing.push(_('Needs digit'));
-  if (!checks.special && pw.length >= 8) missing.push(_('Needs special char'));
+  if (!checks.special && pw.length >= 10) missing.push(_('Needs special char'));
   tipsEl.textContent = missing.length ? missing.join(' · ') : _('✓ Strength OK');
 
   updateChecklist(pw);
@@ -935,7 +949,7 @@ function evalPwdStrength(pw) {
 
 function updateChecklist(pw) {
   const items = {
-    length: pw && pw.length >= 8,
+    length: pw && pw.length >= 10,
     lower: /[a-z]/.test(pw || ''),
     upper: /[A-Z]/.test(pw || ''),
     digit: /[0-9]/.test(pw || ''),
@@ -949,12 +963,14 @@ function updateChecklist(pw) {
 }
 
 function validatePwdStrength(pw) {
-  if (!pw || pw.length < 8) return false;
-  if (!/[a-z]/.test(pw)) return false;
-  if (!/[A-Z]/.test(pw)) return false;
-  if (!/[0-9]/.test(pw)) return false;
-  if (!/[!@#$%^&*(),.?":{}|<>_+\-=\[\]~`\/;\\]/.test(pw)) return false;
-  return true;
+  // F-16：与后端 password_validator 保持一致 —— ≥10 位且 4 类中至少 3 类
+  if (!pw || pw.length < 10) return false;
+  let n = 0;
+  if (/[a-z]/.test(pw)) n++;
+  if (/[A-Z]/.test(pw)) n++;
+  if (/[0-9]/.test(pw)) n++;
+  if (/[!@#$%^&*(),.?":{}|<>_+\-=\[\]~`\/;\\]/.test(pw)) n++;
+  return n >= 3;
 }
 
 function checkPwdMatch() {
@@ -1102,6 +1118,10 @@ async function submitRegistration() {
     document.getElementById('regDisplayName').focus();
     return;
   }
+  if (!document.getElementById('smsConsent').checked) {
+    showMsg('regDisplayNameMsg', _('Please agree to the Terms of Service and Privacy Policy'), 'error');
+    return;
+  }
 
   const btn = document.getElementById('regSubmitBtn');
   btn.disabled = true;
@@ -1116,7 +1136,9 @@ async function submitRegistration() {
         code: code,
         password: password,
         username: username,
-        display_name: displayName
+        display_name: displayName,
+        consent: true,
+        consent_version: 'v1.0'
       })
     });
     const d = await r.json();

@@ -345,7 +345,21 @@ def create_agent():
         agent_id = _m().create_agent(data)
         return _success({'id': agent_id}, _('Agent has been created'))
     except Exception as e:
-        return _error(str(e), 500)
+        # 旧实现直接 _error(str(e), 500)：唯一约束冲突时回吐约束名 + DETAIL（信息泄露），
+        # KeyError 时 body 只有一个 "0"。这里按语义分流，且不再回显 DB 原始错误文本。
+        # 注意 PG 的报错文案随 lc_messages 本地化（实测为「重复键违反唯一约束」），
+        # 因此优先用 SQLSTATE 23505 判定，文案匹配仅作兜底。
+        detail = str(e)
+        is_duplicate = (
+            getattr(e, 'pgcode', None) == '23505'
+            or '重复键违反唯一约束' in detail
+            or 'duplicate key value violates unique constraint' in detail
+            or 'UNIQUE constraint failed' in detail
+        )
+        if is_duplicate:
+            return _error(_('An agent with the same name and role already exists'), 409)
+        logger.exception('create_agent failed')
+        return _error(_('Failed to create agent'), 500)
 
 
 @agent_matrix_bp.route('/agents/<int:aid>', methods=['GET'])

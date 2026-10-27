@@ -68,7 +68,8 @@ def _run_login_precheck(scenario, user_id, phone, app_name, is_admin, role,
     """执行通用登录预检 filter。
 
     插件注册的 filter 返回 {'blocked': True, ...} 时抛出 TwoFactorRequired；
-    其余异常一律 fail-open（记录日志、原样继续签发），绝不停在登录。
+    其余异常：已绑定 2FA 的账号 fail-closed（抛出 TwoFactorRequired），未绑定的
+    账号 fail-open（记录日志、原样继续签发），避免插件故障拖死全站登录。
     """
     try:
         from plugin_manager.hooks import get_hook_registry
@@ -85,13 +86,28 @@ def _run_login_precheck(scenario, user_id, phone, app_name, is_admin, role,
         raise
     except Exception:
         current_app.logger.exception(
-            'auth.before_issue_session filter failed; fallback issue session')
-        # F5：这是可用性优先的取舍（插件故障不应该把登录挡死），保留 fail-open
-        # 行为；但原来只有一行 exception 日志，"第二因子被静默绕过"这件事在日志
-        # 里检索不到。补一条可 grep 的显式告警，便于事后审计与告警接入。
+            'auth.before_issue_session filter failed')
+        # F-08：已绑定 2FA 的账号必须 fail-closed（插件故障不能等于第二因子被静默
+        # 绕过）；未绑定 2FA 的账号维持 fail-open，避免插件故障拖死全站登录。
+        bound = True
+        try:
+            from models import get_db
+            with get_db() as conn:
+                row = conn.execute(
+                    'SELECT totp_enabled FROM users WHERE id=%s', (user_id,)
+                ).fetchone()
+            bound = bool(row and int(row['totp_enabled'] or 0))
+        except Exception:
+            current_app.logger.exception(
+                'SECURITY: cannot determine 2FA binding; failing closed')
+        if bound:
+            current_app.logger.error(
+                'SECURITY: login pre-check failed closed — refusing to issue '
+                'session for 2FA-bound user_id=%s', user_id)
+            raise TwoFactorRequired(challenge_token=None, redirect='/')
         current_app.logger.warning(
-            'SECURITY: login pre-check failed open — a session is being issued '
-            'without the second factor (two_factor_auth unavailable)')
+            'SECURITY: login pre-check failed open — no 2FA bound for user_id=%s',
+            user_id)
 
 
 def _write_user_session(user_id, token, device_name, device_type):

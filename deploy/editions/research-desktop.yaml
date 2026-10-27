@@ -1,5 +1,5 @@
 # VeroRun 科研桌面版发行配置（单一事实源：插件白名单 + 角色集 + 核心文件）
-# 由 sync-to-research.yml 消费（打包 + Release 上传）；verify-edition-payload.sh 校验产物一致性。
+# 由 .github/workflows/publish-editions.yml 消费（打包 + Release 上传）；verify-edition-payload.sh 校验产物一致性。
 edition: research-desktop
 label: 科研桌面版
 # 服务启用与禁用（edition 门控，deploy/editions/*.yaml 单一事实源）
@@ -10,7 +10,8 @@ services:
   main_site: false
 plugins:
   # 【2026-09-07 用户拍板】认知进化后端采用 memory_engine（服务端全量版），
-  # 不使用 cogevolution_substrate；project_workspace 移出科研版；vault 保留。
+  # 不使用 cogevolution_substrate；vault 保留。
+  # （project_workspace 当时移出科研版，2026-10-26 用户裁决重新启用，见下方 include）
   # 【2026-09-08 用户拍板】content_factory / site_domains 对科研版毫无价值，移入 exclude。
   include:
     - _base
@@ -22,6 +23,26 @@ plugins:
     #   认领；③ compatible_editions=[] 全版本可见；④ 零运行时依赖（pure python，无 numpy），
     #   3 表 5 测试文件，min_app_version 0.63.0 与本版 kernel baseline 一致。
     - bayes_engine
+    # 2026-10-22 用户裁决：补 chaos_engine + search_hub（与金融版对齐，符合官方
+    #   compatible_editions 声明——二者均含 research）。业务依据：chaos_engine 非线性
+    #   动力学/相空间/李雅普诺夫/分形/熵属科研方法论原语（method_architect 认领）；
+    #   search_hub 通用检索→EvidenceBundle 为 lit_scout 文献检索补证据层（ops 认领）。
+    #   运行时依赖 numpy 已在 prepare-runtime 全插件扫描闭包内（不按 edition 收敛），无需额外处理。
+    - chaos_engine
+    - search_hub
+    # 2026-10-26 用户裁决：project_workspace 重新启用，定位「课题文档工作台」。
+    #   依据：① 补位而非重叠——veroscholar 论文库只吃"检索回来的论文"（元数据+全文），
+    #   不吃用户本地 docx/pptx/xlsx（数据表/组会 Slides/初稿），本插件填这一环；
+    #   ② 零新开发——veroscholar kb_sync 双向通道代码早已建好，被 project_workspace_enabled()
+    #   门控休眠，插件一启用即自动激活（论文入库/笔记/综述成稿 upsert 进 documents，
+    #   论文问答经 hook project_workspace/search 挂项目知识）；
+    #   ③ 归属显式——agent_role=content 不在本版角色集，改由 veroscholar 角色
+    #   managed_modules 认领（科研 lane，同文件 roles 段 + 角色 yaml 同步登记）；
+    #   ④ 备份闭环——存储目录改置 plugins/project_workspace/data/，vault 既有
+    #   _add_plugin_data 约定（全量备份/按插件选择性备份/还原）自动覆盖，无 vault 代码改动；
+    #   ⑤ 降级已设计——捆绑 PG 无 pgvector 时探测式建列，检索退关键词 tier；
+    #   嵌入模型不可用同样退关键词（插件内建）。
+    - project_workspace
     - captcha_embedded
     - email
     - memory_engine
@@ -29,7 +50,6 @@ plugins:
     - veroscholar
   exclude:
     - cogevolution_substrate
-    - project_workspace
     - content_factory
     - site_domains
     - shop

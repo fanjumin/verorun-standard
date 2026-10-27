@@ -339,8 +339,23 @@ def _declared_endpoint(conn, provider_slug):
     return ((row['endpoint_url'] if row and row['endpoint_url'] else '') or '').strip().rstrip('/')
 
 
+class CredentialDecryptError(Exception):
+    """A provider key row exists but cannot be decrypted.
+
+    Raised when the stored ciphertext does not match any available master key
+    (typically ENCRYPTION_KEY vs DEV_ACCOUNTS_ENCRYPTION_KEY mismatch).  Kept
+    distinct from "no key configured" because reporting a key-mismatch as an
+    unconfigured key sends admins hunting for a missing key that is in fact
+    present in provider_api_keys.
+    """
+
+
 def get_api_key_for_provider(provider_slug):
-    """Return the first active Fernet key for a provider, or None."""
+    """Return the first active decrypted key for a provider, or None.
+
+    None means "no key row configured".  A row that exists but fails to
+    decrypt raises CredentialDecryptError instead of being folded into None.
+    """
     with get_db() as conn:
         row = conn.execute(
             "SELECT key_value_enc FROM provider_api_keys "
@@ -352,12 +367,25 @@ def get_api_key_for_provider(provider_slug):
         return None
     try:
         return decrypt(row['key_value_enc'])
-    except Exception as e:  # pragma: no cover - defensive
-        logger.warning('[ModelSync] decrypt failed for %s: %s', provider_slug, e)
-        return None
+    except Exception as e:
+        logger.error('[ModelSync] decrypt failed for %s: stored key exists but no '
+                     'available master key can decrypt it (ENCRYPTION_KEY vs '
+                     'DEV_ACCOUNTS_ENCRYPTION_KEY mismatch?): %s', provider_slug, e)
+        raise CredentialDecryptError(provider_slug) from e
 
 
 # ── Fetchers ─────────────────────────────────────────────────────────────────
+
+# 部分 OpenAI 兼容网关（火山方舟 ark / Azure 风格网关 / vLLM）在 /models 里
+# 用 `status` 标记模型生命周期：Shutdown、Retiring 表示已下线或即将下线。
+# 这类条目一旦入库，前端就会多出一个永远 404 / ModelNotOpen 的死模型，用户
+# 选中即失败。在 fetch 阶段直接丢弃，比入库后再靠探测置灰更准确也更省事。
+# 其余厂商（DeepSeek / Moonshot / 智谱 / 硅基流动）的 /models 不返回这个字段，
+# 因此该过滤对它们没有任何副作用。
+_DEPRECATED_STATUS = frozenset({
+    'shutdown', 'retiring', 'retired', 'deprecated', 'offline', 'disabled', 'inactive',
+})
+
 
 def _fetch_openai_compat(base_url, api_key):
     url = f"{base_url}/models"
@@ -370,6 +398,8 @@ def _fetch_openai_compat(base_url, api_key):
     out = []
     for m in data:
         if not m.get('id'):
+            continue
+        if str(m.get('status') or '').strip().lower() in _DEPRECATED_STATUS:
             continue
         # Vendors that follow the DeepSeek flavour of /models ship a human
         # readable `name` ("DeepSeek-V4.1-Flash") next to the short API id
@@ -514,7 +544,10 @@ def fetch_provider(conn, provider_slug):
 
     api_key = None
     if spec['needs_key']:
-        api_key = get_api_key_for_provider(provider_slug)
+        try:
+            api_key = get_api_key_for_provider(provider_slug)
+        except CredentialDecryptError:
+            return None, _('Provider {provider} skipped: the stored API key cannot be decrypted with any available master key', provider=provider_slug)
         if not api_key:
             return None, _('Provider {provider} skipped: no active API key configured', provider=provider_slug)
 
@@ -1090,7 +1123,13 @@ def probe_provider_models(provider_slug=None, sample_limit=_PROBE_DEFAULT_SAMPLE
             spec = FETCH_SPECS.get(slug)
             if spec is None:
                 continue
-            api_key = get_api_key_for_provider(slug)
+            try:
+                api_key = get_api_key_for_provider(slug)
+            except CredentialDecryptError:
+                report['providers'][slug] = {'status': 'skipped',
+                                             'reason': _('Provider {provider} skipped: the stored API key cannot be decrypted with any available master key', provider=slug)}
+                report['summary']['skipped'] += 1
+                continue
             # Inference endpoints reject anonymous calls even when the model
             # LIST is public (OpenRouter: list 200, chat 401). Without a key
             # every probe would fail and auto-gray the whole channel.

@@ -120,7 +120,7 @@ status:              active
 
 **6.1 插件白名单**（`runtime_whitelist: true`，include 兼任运行期白名单——包外插件不可见、不可启用）：
 
-`_base` + 17 项业务插件：`stock_analysis`、`multi_asset`、`im_gateway`、`email`、`memory_engine`、`bayes_engine`、`butterfly_engine`、`chaos_engine`、`vault`、`net_proxy`、`project_workspace`、`neural_flow`、`content_factory`、`hr_recruit`、`visitor_profile`、`coupons`、`search_hub`
+`_base` + 17 项业务插件：`stock_analysis`、`multi_asset`、`im_gateway`、`email`、`memory_engine`、`bayes_engine`、`butterfly_engine`、`chaos_engine`、`vault`、`net_proxy`、`project_workspace`、`content_factory`、`hr_recruit`、`visitor_profile`、`coupons`、`search_hub`、`neural_flow`
 
 显式排除：`veroscholar`、`cogevolution_substrate`
 

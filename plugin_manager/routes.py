@@ -928,7 +928,7 @@ def _sync_local_usage_guides(mgr) -> list:
     plugins_dir = getattr(mgr, 'plugins_dir', '')
     if not plugins_dir or not os.path.isdir(plugins_dir):
         return []
-    usage_names = ('USAGE.cn.md', 'USAGE_CN.md', 'USAGE.zh-CN.md', 'USAGE.md')
+    usage_names = ('USAGE_CN.md', 'USAGE.cn.md', 'USAGE.zh-CN.md', 'USAGE.md')
     synced = []
     for entry in sorted(os.listdir(plugins_dir)):
         plugin_dir = os.path.join(plugins_dir, entry)
@@ -1456,7 +1456,7 @@ def store_detail(identifier: str):
 def store_readme_proxy(identifier: str):
     """服务端 README 代理（问题2 方案A）：优先读本地缓存，空则现场抓 readme_url。
 
-    多命名兼容（README.cn.md / README_CN.md / README.zh-CN.md）由导入期多命名抓取落库
+    多命名兼容（README_CN.md / README.cn.md / README.zh-CN.md）由导入期多命名抓取落库
     （store_importer），无缓存时按 readme_url 现场抓取（timeout 8s），失败返回空串。
     """
     err = _require_admin()

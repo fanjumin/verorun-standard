@@ -7,7 +7,7 @@ VeroRun AI 的**命令行客户端**。这是一个**薄客户端**：只调用 
 > 代码全部位于 `sdks/cli/`，与 `agent_matrix` / `auth-center` / `orchestrator` /
 > `plugin_manager` 等核心模块零耦合。
 
-当前版本：**与 VeroRun 系统主版本号保持一致**（复用仓库根 `VERSION` 文件，当前 `0.59.5`）。
+当前版本：**与 VeroRun 系统主版本号保持一致**（复用仓库根 `VERSION` 文件，当前 `0.65.0`）。
 CLI 作为系统的配套客户端，不再使用独立的 `0.2.0` 之类小版本号，避免与系统版本割裂、让用户误判过期。
 实际版本号由 `verorun version` 读取，详见 `CHANGELOG.md`。
 

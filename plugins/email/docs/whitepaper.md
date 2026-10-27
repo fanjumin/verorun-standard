@@ -111,3 +111,32 @@ Blueprint prefix: `/email`.
 ## 8. Dashboard
 
 - `total_sent`, `total_contacts`.
+
+---
+
+## 9. Workflow DAG node (`send_email`)
+
+Email sending is a first-class workflow step. `EmailPlugin.register_dag_nodes()`
+returns `{"send_email": handle_send_email}` from `dag_nodes.py` and hands it to
+`BasePlugin.register_dag_nodes()`, which the platform injects into
+`WorkflowEngine`; the kernel does not know the mail business exists. The
+handler signature follows the engine contract `handler(node_def, input_data)`,
+with `self.manager` partial-bound as `pm` (WP-E2) because workflow nodes run in
+a bare thread without a Flask app context.
+
+| Aspect | Behavior |
+|---|---|
+| Node type | `send_email` (also listed by `GET /admin/workflows/node-types`) |
+| Required `config` | `to`, `subject`, and at least one of `body` / `body_html` |
+| Optional `config` | `cc`, `bcc`, `reply_to`, `attachments` (`[{"filename", "data" (base64), "content_type"}]`) |
+| Recipients | List, or a string split on `,` `;` `，` `；` |
+| Templating | `{{ key }}` / `{{ a.b }}` resolved from `input_data.context`, recursively for str / list / dict |
+| Idempotency key | `sha1(instance_id \| node_id \| sorted lowercase recipients)` |
+| Duplicate run | Returns `{"success": true, "skipped": true, "reason": "duplicate"}` without sending |
+| Failure | Writes `email_sent(status='failed')`, then raises so the engine marks the node failed |
+| Config source | `services.send_email(..., pm=manager)` → `pm.get_config('email')` |
+| Governance | `send_email` is in `DANGEROUS_NODE_TYPES`; authoring needs `workflow.script.author` and an upstream `approval` node |
+
+The dedup key is only stored on successful `email_sent` rows (partial unique
+index), so a failed execution can be retried; a successful one is skipped by
+the pre-check and never sends a second time.

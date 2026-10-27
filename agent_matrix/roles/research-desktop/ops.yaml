@@ -14,6 +14,10 @@ managed_modules:
   # 提供系统运维 lane。captcha_embedded 仍归 athena 认领，不重复认领。
   - email
   - vault
+  # 2026-10-22（同金融版 ops 认领 search_hub 惯例）：search_hub 的 plugin.json 保持
+  #   agent_role=content 不改，在本版由本角色 managed_modules 认领（② 通道，与
+  #   email/vault 同一运维 lane）。通用检索接入层为 lit_scout 文献检索补证据层。
+  - search_hub
 provider_model_id: 401638
 provider: deepseek
 model_name: deepseek-v4-flash

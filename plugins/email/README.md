@@ -54,6 +54,29 @@
 ### 6. Hooks
 - Provided: `email/send`, `email/send_contact`, `email/get_config`.
 
+### 7. Workflow DAG node (`send_email`)
+- Registered by `EmailPlugin.register_dag_nodes()` through
+  `BasePlugin.register_dag_nodes()`; the engine only sees a node type, the
+  mail business stays inside this plugin.
+- Node type id: **`send_email`** (`dag_nodes.py`), also returned by
+  `GET /admin/workflows/node-types`. Handler signature is
+  `handler(node_def, input_data)`; `self.manager` is bound as `pm` so SMTP
+  settings are read without a Flask app context.
+- Required `config`: `to`, `subject`, and at least one of `body` /
+  `body_html`. Optional: `cc`, `bcc`, `reply_to`, `attachments`
+  (`[{"filename", "data" (base64), "content_type"}]`). Recipients accept a
+  list or a comma/semicolon separated string.
+- Placeholders `{{ key }}` / `{{ a.b }}` in any config value are rendered
+  from `input_data.context` (recursive for str / list / dict).
+- Idempotency: `dedup_key = sha1(instance_id | node_id | sorted recipients)`;
+  if a `status='sent'` record already exists the node returns
+  `{"success": true, "skipped": true, "reason": "duplicate"}` and does not
+  send again. Failed records carry no key so they can be retried.
+- On failure the node writes `email_sent(status='failed')` and then raises,
+  because the engine only marks `failed` on exceptions.
+- Governance: `send_email` is a dangerous node type — authoring requires the
+  `workflow.script.author` permission and an `approval` node upstream.
+
 ---
 
 ## At a glance
@@ -71,6 +94,7 @@
 | Capabilities | `email.send`, `email.template` |
 | Hooks provided | `email/send`, `email/send_contact`, `email/get_config` |
 | Hooks listened | `stock.alert.triggered`, `stock.morning_brief.ready` |
+| Workflow node | `send_email` (config: `to`, `subject`, `body`/`body_html`) |
 | Dashboard | `total_sent`, `total_contacts` |
 
 ### 2 tables

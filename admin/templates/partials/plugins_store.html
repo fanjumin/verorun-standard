@@ -1161,12 +1161,12 @@ function deleteStorePlugin(identifier){
   }).catch(function(){showToast("{{ _('Network error') }}","error")});
 }
 
-/* ★ 插件商店改造：异步加载 README 内容（按系统语言动态选择，英文默认 README.md，中文 README.cn.md） */
+/* ★ 插件商店改造：异步加载 README 内容（按系统语言动态选择，英文默认 README.md，中文 README_CN.md） */
 function _uiLang(){return (document.documentElement.getAttribute('lang')||'en').toLowerCase();}
 function _localizedReadmeUrl(readmeUrl){
   var lg=_uiLang();
   if(lg==='cn'||lg.indexOf('zh')===0){
-    return readmeUrl.replace(/README\.md$/, 'README.cn.md');
+    return readmeUrl.replace(/README\.md$/, 'README_CN.md');
   }
   return readmeUrl;
 }

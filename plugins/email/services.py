@@ -483,33 +483,41 @@ def _decode_mime_header(val):
     return "".join(result)
 
 
-def _decode_body(payload, encoding=None):
-    if encoding:
+def _decode_body(payload, charset=None):
+    """把 part 的 payload 解成文本。
+
+    ★ payload 必须来自 part.get_payload(decode=True) —— 该调用已按
+      Content-Transfer-Encoding 解过 base64 / quoted-printable，此处**不得再解一次**。
+
+    2026-10-25 修复：此前这里会拿 `encoding` 对已解码的字节再做一次
+    base64.b64decode。当字节数恰好满足 base64 长度条件时（如腾讯云 HTML 通知邮件），
+    第二次解码产出垃圾字节，utf-8/gbk 全部失败后由 latin-1 兜底"成功"，
+    正文就成了 `Ù¥æëZÛiz...` 这类乱码；纯文本部分因长度不满足，第二次解码抛错
+    被 except 吞掉，所以一直显示正常 —— 表现为「同一封信里纯文本正常、HTML 乱码」。
+    """
+    if not isinstance(payload, bytes):
+        return payload
+    candidates = [charset] if charset else []
+    # gb18030 是 gbk/gb2312 的超集，big5 覆盖繁体来源；最后 errors='replace' 兜底
+    candidates += ["utf-8", "gb18030", "big5"]
+    seen = set()
+    for cs in candidates:
+        key = (cs or "").lower().strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
         try:
-            if encoding.lower() in ("base64", "b"):
-                payload = base64.b64decode(payload)
-            elif encoding.lower() in ("quoted-printable", "q"):
-                payload = quopri.decodestring(payload)
-        except:
-            pass
-    if isinstance(payload, bytes):
-        for cs in ("utf-8", "gbk", "gb2312", "latin-1"):
-            try:
-                return payload.decode(cs)
-            except:
-                continue
-        return payload.decode("utf-8", errors="replace")
-    return payload
+            return payload.decode(cs)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return payload.decode("utf-8", errors="replace")
 
 
 def _get_text_from_part(part):
     ct = part.get_content_type()
-    encoding = part.get("Content-Transfer-Encoding", "")
     payload = part.get_payload(decode=True)
-    if ct == "text/plain":
-        return _decode_body(payload, encoding)
-    elif ct == "text/html":
-        return _decode_body(payload, encoding)
+    if ct in ("text/plain", "text/html"):
+        return _decode_body(payload, part.get_content_charset())
     return None
 
 
@@ -521,22 +529,20 @@ def _get_email_body(msg):
             ct = part.get_content_type()
             if part.is_multipart():
                 continue
-            encoding = part.get("Content-Transfer-Encoding", "")
             payload = part.get_payload(decode=True)
             if not payload:
                 continue
             if ct == "text/plain":
-                plain_text = _decode_body(payload, encoding)
+                plain_text = _decode_body(payload, part.get_content_charset())
             elif ct == "text/html":
-                html_text = _decode_body(payload, encoding)
+                html_text = _decode_body(payload, part.get_content_charset())
     else:
         ct = msg.get_content_type()
-        encoding = msg.get("Content-Transfer-Encoding", "")
         payload = msg.get_payload(decode=True)
         if ct == "text/plain":
-            plain_text = _decode_body(payload, encoding)
+            plain_text = _decode_body(payload, msg.get_content_charset())
         elif ct == "text/html":
-            html_text = _decode_body(payload, encoding)
+            html_text = _decode_body(payload, msg.get_content_charset())
     return plain_text or _("(无文本内容)"), html_text
 
 

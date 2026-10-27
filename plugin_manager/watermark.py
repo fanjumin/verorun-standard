@@ -33,17 +33,23 @@ import hashlib
 import hmac
 from typing import Any, Dict
 
-# ── 官方插件白名单（36 个已上线官方插件 identifier）────────────────
+# ── 官方插件白名单（50 个已上线官方插件 identifier）────────────────
+# 单一事实源：必须与 plugins/ 下全部 plugin.json 的 identifier 一致，
+# 由 plugin_manager/tests/test_upload_reserved_identifier.py 逐项锁定。
+# 漏登记会同时让「水印白名单兜底 / 商店 is_official 归一化 / 官方权限门豁免」失效。
 OFFICIAL_PLUGIN_IDS = {
-    'ads', 'ali_api', 'analytics', 'captcha_embedded', 'chatbot',
-    'cogevolution_substrate', 'content_factory', 'coupons',
+    'ads', 'ai_relay', 'ali_api', 'analytics', 'assessment', 'bayes_engine',
+    'blender_bridge', 'butterfly_engine', 'captcha_embedded', 'chaos_engine',
+    'chatbot', 'cogevolution_substrate', 'content_factory', 'coupons',
     'currency_converter', 'email', 'enterprise_verify', 'health_check',
-    'im_gateway', 'logistics', 'memory_engine', 'mini_app_builder',
-    'net_proxy',
-    'oauth_config', 'order_notify', 'payment', 'project_workspace',
-    'reviews', 'risk_control', 'shop', 'site_builder', 'site_domains', 'sms',
-    'social_push', 'stock_analysis', 'subscription', 'two_factor_auth',
-    'vault', 'verification', 'veroscholar', 'visitor_profile', 'wishlist',
+    'hr_recruit', 'im_gateway', 'iot_hub', 'logistics', 'memory_engine',
+    'mini_app_builder', 'multi_asset', 'net_proxy', 'neural_flow',
+    'oauth_config', 'omni_service', 'order_notify', 'payment',
+    'project_workspace', 'reviews', 'risk_control', 'ros_bridge',
+    'search_hub', 'shop', 'site_builder', 'site_domains', 'sms',
+    'social_push', 'stock_analysis', 'subscription', 'survey',
+    'two_factor_auth', 'vault', 'verification', 'veroscholar',
+    'visitor_profile', 'wishlist',
 }
 
 # 官方作者标识（plugin.json author 字段兜底匹配）

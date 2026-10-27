@@ -25,8 +25,11 @@ def register(group: Any) -> None:
     @click.option("--phone", help="手机号（短信登录）")
     @click.option("--code", help="短信验证码")
     @click.option("--api-key", help="agent API Key（ek-...）")
+    @click.option("--captcha", "captcha_id",
+                  help="图形验证码 token（连续登录失败被服务端频控拦截时使用）")
     @click.pass_context
-    def login(ctx, username, password, password_stdin, phone, code, api_key):
+    def login(ctx, username, password, password_stdin, phone, code, api_key,
+              captcha_id):
         """登录 VeroRun（管理员密码 / 短信 / API Key）
 
         密码来源优先级：--password-stdin > --password > 交互式隐藏输入。
@@ -64,7 +67,7 @@ def register(group: Any) -> None:
         else:
             password = click.prompt("密码", hide_input=True)
 
-        auth.login_password(username, password)
+        auth.login_password(username, password, captcha_id=captcha_id)
         state = auth.token_state()
         if state.get("expires_at_text"):
             click.echo(f"登录成功，token 有效期至 {state['expires_at_text']}。")

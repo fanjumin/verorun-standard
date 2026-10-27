@@ -28,7 +28,11 @@ embedding 路径（``plugins/_base/embeddings.py``）仅承载论文/画像/简�
 """
 from __future__ import annotations
 
-__all__ = ["VENDOR_SOURCES", "vendor_of", "license_ids_for"]
+import logging
+
+logger = logging.getLogger(__name__)
+
+__all__ = ["VENDOR_SOURCES", "FREE_SOURCES", "vendor_of", "license_ids_for"]
 
 # 商业源的治理标签（许可继承 / GB/T 42775-2023）：
 # 入站永不放松提供方许可，scope 默认最严（ma_license.allow_* 默认 0）。
@@ -37,10 +41,26 @@ VENDOR_SOURCES = {
                 "origin": "vendor"},
 }
 
+# 法定披露 / 政府公开数据：明确免费，不打许可标（不是漏登）。
+FREE_SOURCES = {
+    "cninfo",      # 巨潮资讯：交易所指定披露平台
+    "sse", "szse", # 交易所官网
+    "sec_edgar",   # SEC EDGAR：美国政府公开数据
+    "nbs",         # 国家统计局：政府公开数据
+    "gdelt",       # GDELT：公开事件数据库
+}
+
 
 def vendor_of(source):
     """把 provider 名映射为治理标签；免费源返回 None（行不打标 == NULL 列）。"""
-    return VENDOR_SOURCES.get(str(source or "").strip().lower())
+    key = str(source or "").strip().lower()
+    vendor = VENDOR_SOURCES.get(key)
+    if vendor:
+        return vendor
+    if key and key not in FREE_SOURCES:
+        # 未登记且非白名单 → 按现状视为免费源，但留下告警供审计排查
+        logger.warning("egress: unregistered source '%s' treated as free", key)
+    return None
 
 
 def license_ids_for(sources) -> list:

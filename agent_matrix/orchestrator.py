@@ -1338,7 +1338,14 @@ Notes:
             'skip_critique': True,
         }, history=[])
 
-        return result.get('response', '') if result.get('status') == 'completed' else ''
+        # 失败不得静默：AgentRunner._fail() 把真实原因放在 response 里，旧实现直接
+        # 返回 ''，导致 5 轮全空 → 决策 JSON 解析失败 → needs_approval，现象是
+        # 「五阶段跑完但没有内容」。这里显式抛出，由 /chat/discuss 的 SSE 层转成
+        # error 帧，保留原始失败原因供排查。
+        if result.get('status') != 'completed':
+            detail = result.get('response') or result.get('error') or 'unknown error'
+            raise RuntimeError(f'discussion round failed: {detail}')
+        return result.get('response', '') or ''
 
     # ============================================================
     # Timeout wrapper for single agent round
@@ -1539,15 +1546,27 @@ Notes:
     def _trigger_dag_from_plan(self, exec_plan, user_id):
         """Submit the parsed execution plan to the DAG workflow engine.
 
-        Prefers the workflow_id specified by the Decider agent.
-        Falls back to DISCUSS_DEFAULT_WORKFLOW_ID env var.
-        Uses workflow_id=1 as last resort with a warning.
+        Resolution order for the workflow definition:
+          1. ``workflow_id`` from the Decider's decision JSON
+          2. ``DISCUSS_DEFAULT_WORKFLOW_ID`` env var
+          3. the first active row in ``workflow_definitions``
+        If none resolves, the plan is **not** executed and is kept as the
+        discussion result instead. 旧实现硬兜底 ``workflow_id=1``：全新/本地库里
+        ``workflow_definitions`` 是 0 行，于是每一轮讨论都在执行阶段抛
+        「工作流 #1 不存在」，表现为五阶段跑完却没有产出。
         """
         import os as _os
+        from orchestrator import models as wf_models
         from orchestrator.workflow_engine import WorkflowEngine
 
         engine = WorkflowEngine()
         workflow_id = exec_plan.get('workflow_id')
+
+        if workflow_id is not None:
+            try:
+                workflow_id = int(workflow_id)
+            except (ValueError, TypeError):
+                workflow_id = None
 
         if workflow_id is None:
             workflow_id = _os.environ.get('DISCUSS_DEFAULT_WORKFLOW_ID')
@@ -1558,17 +1577,34 @@ Notes:
                     workflow_id = None
 
         if workflow_id is None:
-            workflow_id = 1
+            try:
+                candidates = wf_models.list_workflows(active_only=True, limit=1)['workflows']
+                if candidates:
+                    workflow_id = int(candidates[0]['id'])
+                    logger.info('No workflow_id in plan; using active workflow #%s', workflow_id)
+            except Exception as e:
+                logger.warning('Lookup of available workflow definitions failed: %s', e)
+
+        if workflow_id is None:
             logger.warning(
-                'No workflow_id specified and DISCUSS_DEFAULT_WORKFLOW_ID not set. '
-                'Falling back to workflow_id=1.'
+                'No workflow definition available (workflow_definitions is empty) and '
+                'DISCUSS_DEFAULT_WORKFLOW_ID is not set. Plan kept as discussion result.'
+            )
+            return (
+                'No workflow configured — plan kept as the discussion result. '
+                f'Steps: {len(exec_plan.get("steps", []) or [])}. '
+                'Create a workflow in the Workflow Editor or set '
+                'DISCUSS_DEFAULT_WORKFLOW_ID to enable automatic execution.'
             )
 
         try:
             instance_id = engine.run_workflow(
                 workflow_id=workflow_id,
-                trigger_type='agent_discussion',
-                trigger_config={'user_id': user_id},
+                # trigger_type 必须落在 workflow_instances 的 CHECK 枚举内
+                # （'cron','manual','webhook','event','dependency'）；真正语义放在 trigger_config，
+                # 否则实例 INSERT 阶段就违反约束，讨论触发工作流必然失败。
+                trigger_type='event',
+                trigger_config={'user_id': user_id, 'source': 'agent_discussion'},
                 initial_context={
                     'steps': exec_plan.get('steps', []),
                     'confidence': exec_plan.get('confidence', 0),
@@ -1758,6 +1794,10 @@ Notes:
                                 'Cannot start discussion. Please configure at least one '
                                 'sub-agent in Admin → Agent Management.'
                             ))
+            # 终态帧：任何终止分支都必须以 done 收尾（status 标明实际终态），
+            # 否则客户端只能靠 TCP 关闭/[DONE] 哨兵判断结束。
+            yield _emit('done', agent='System', role='Orchestrator',
+                        status='fast_mode', content='Discussion finished (fast mode).')
             return
 
         # ── Round 1: Planner (Agent A) produces initial plan ──
@@ -1977,6 +2017,8 @@ Notes:
                             'Please review the raw output above and either: '
                             '(1) approve with manually entered steps, or (2) reject and re-discuss.'
                         ))
+            yield _emit('done', agent='System', role='Orchestrator',
+                        status='needs_approval', content='Discussion paused: approval required.')
             return
 
         if not exec_plan.get('approved', False):
@@ -1986,6 +2028,8 @@ Notes:
                             'Plan not approved. '
                             f'Reason: {exec_plan.get("reason", "Unknown")}'
                         ))
+            yield _emit('done', agent='System', role='Orchestrator',
+                        status='rejected', content='Discussion complete: plan rejected.')
             return
 
         # Normal path: trigger DAG
@@ -1993,6 +2037,8 @@ Notes:
             result = self._trigger_dag_from_plan(exec_plan, user_id)
         except Exception as e:
             yield _emit('error', content=f'Execution failed: {e}')
+            yield _emit('done', agent='System', role='Orchestrator',
+                        status='error', content=f'Discussion aborted: {e}')
             return
 
         yield _emit('message', agent='System', role='Execution Engine',
@@ -2000,7 +2046,7 @@ Notes:
 
         # ── Done ──
         yield _emit('done', agent='System', role='Orchestrator',
-                    content='Discussion complete.')
+                    status='completed', content='Discussion complete.')
 
 
 # ============================================================

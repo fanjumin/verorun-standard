@@ -571,6 +571,23 @@ class ModulePolicyEngine:
         state, _err = self._get_module_state_ex(user_id, module_key)
         return state
 
+    @staticmethod
+    def _is_missing_table_error(err: Exception) -> bool:
+        """判断异常是否为「订阅状态表不存在」。
+
+        module_policy 是内核能力，但 subscription.user_subscriptions 由业务插件
+        subscription 创建。未安装该插件的发行形态（omni-service 及后续各类桌面薄壳）
+        必然没有这张表 —— 这不是故障，而是「本版没有计费域」：按无订阅记录处理，
+        否则 fail-closed 会把工作流等所有门禁功能一起锁死。
+        连接失败 / 权限 / 超时等其它异常仍 fail-closed（2026-10-23 用户批准 K1）。
+        """
+        code = getattr(err, 'pgcode', None) or getattr(getattr(err, 'diag', None), 'sqlstate', None)
+        if code == '42P01':  # PG: undefined_table
+            return True
+        msg = str(err).lower()
+        return ('no such table' in msg or 'undefinedtable' in msg
+                or ('relation' in msg and 'does not exist' in msg))
+
     def _get_module_state_ex(self, user_id: int, module_key: str):
         """读取模块状态，并区分"首次使用"与"查询失败"。
 
@@ -596,6 +613,11 @@ class ModulePolicyEngine:
                 states = json.loads(row['module_states'] or '{}')
                 return states.get(module_key), None
         except Exception as e:
+            if self._is_missing_table_error(e):
+                # 本版未安装 subscription 插件 → 无计费域，按首次使用处理
+                logger.info(f"[ModulePolicy] subscription state table absent, "
+                            f"treat as no record (user={user_id}, module={module_key})")
+                return None, None
             logger.warning(f"[ModulePolicy] _get_module_state failed: {e}")
             return None, str(e)
 
@@ -632,6 +654,9 @@ class ModulePolicyEngine:
                 )
                 conn.commit()
         except Exception as e:
+            if self._is_missing_table_error(e):
+                # 无计费域的版本：状态无处落盘，静默跳过（试用语义由读侧放行兜底）
+                return
             logger.warning(f"[ModulePolicy] _save_module_state failed: {e}")
 
     def _apply_expire_action(self, user_id: int, module_key: str, action: str):

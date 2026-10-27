@@ -47,13 +47,9 @@ def _callback_uri(provider: str) -> str:
 
 
 def _read_config(provider: str) -> dict:
-    """读取该平台第三方登录凭据。"""
-    with get_im_db() as conn:
-        row = conn.execute(
-            'SELECT client_id, client_secret, scopes, redirect_uri, is_enabled '
-            'FROM login_providers WHERE provider=%s', (provider,)
-        ).fetchone()
-    return dict(row) if row else {}
+    """读取该平台第三方登录凭据（client_secret 经统一入口解密后返回）。"""
+    from .models import load_login_provider
+    return load_login_provider(provider)
 
 
 def _save_state(state: str, provider: str):

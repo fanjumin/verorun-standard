@@ -9,7 +9,6 @@ GET /admin/channels/overview → 两类结构化数据：
 开发者 API Key / 小程序开发者账户迁至 mini_app_builder 自有端点。
 纯读聚合：不新建表、不改既有路由、不写任何凭据。
 """
-import json
 import logging
 import os
 import sys
@@ -19,6 +18,8 @@ if _auth_dir not in sys.path:
     sys.path.insert(0, _auth_dir)
 
 from flask import Blueprint, jsonify  # noqa: E402
+
+from .secure_config import SecureConfigUnavailable
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ def _mask(cfg):
 def _im_section() -> list:
     """即时通讯：adapters 注册表 + channel_configs（掩码配置 / env 兜底 / 字段声明）"""
     from .adapters import list_channels as im_list, get_adapter
-    from .models import get_im_db
+    from .models import get_im_db, load_channel_config
     with get_im_db() as conn:
         rows = conn.execute(
             'SELECT channel, config_json, is_enabled FROM channel_configs'
@@ -55,7 +56,7 @@ def _im_section() -> list:
     for ch in im_list():
         adapter = get_adapter(ch)
         row = configs.get(ch)
-        cfg = json.loads(row['config_json']) if row else {}
+        cfg = load_channel_config(ch) if row else {}
         result.append({
             'channel': ch,
             'enabled': int(row['is_enabled']) if row else 0,
@@ -83,12 +84,8 @@ def _login_section() -> list:
     """
     try:
         from .login import list_login_providers
-        from .models import get_im_db
-        with get_im_db() as conn:
-            rows = conn.execute(
-                'SELECT provider, display_name, client_id, client_secret, scopes, '
-                'redirect_uri, is_enabled FROM login_providers ORDER BY id'
-            ).fetchall()
+        from .models import load_login_providers
+        rows = load_login_providers()
         configs = {r['provider']: r for r in rows}
         result = []
         for p in list_login_providers():
@@ -105,6 +102,9 @@ def _login_section() -> list:
                 'default_scopes': p['default_scopes'],
             })
         return result
+    except SecureConfigUnavailable:
+        # 解密失败必须可观测，不得静默降级为空列表
+        raise
     except Exception:
         logger.debug('[Overview] login_providers not ready; return empty')
         return []

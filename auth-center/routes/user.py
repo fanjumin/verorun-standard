@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """User Routes — profile, API keys, usage stats"""
-import sys, os, secrets, hashlib, hmac, base64, json
+import sys, os, re, secrets, hashlib, hmac, base64, json
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from flask import Blueprint, request, jsonify, make_response
 from i18n import _
@@ -29,10 +29,15 @@ def _get_token_from_request():
         return auth[7:]
     return request.cookies.get('sso_token') or request.cookies.get('tm_token') or None
 
-def _require_auth():
-    """Extract and validate JWT from Authorization header OR cookie"""
+def _require_auth(allow_apps=('main',)):
+    """Extract and validate JWT from Authorization header OR cookie
+
+    F-10：默认只接受主站签发面（app_name='main'）的 token，管理端 token 不得
+    越面调用用户中心接口。管理后台设置页复用 /user/config*，故这几个端点
+    显式传 allow_apps=('main','admin')（见各端点调用处）。
+    """
     token = _get_token_from_request()
-    payload = validate_token(token) if token else None
+    payload = validate_token(token, allow_apps=allow_apps) if token else None
     if not payload:
         return None, (jsonify({'success': False, 'error': 'Not logged in or token expired'}), 401)
     return payload, None
@@ -65,6 +70,73 @@ def _verify_sms_code(phone, code, purpose, error_msg='Invalid or expired verific
         conn.execute('UPDATE sms_codes SET used=1 WHERE id=%s', (row['id'],))
         conn.commit()
     return True, ''
+
+
+# ── F-12：账号注销冷静期（24h 内登录自动恢复，超过则惰性匿名化）──
+_DELETION_GRACE_HOURS = 24
+
+
+def _check_password(stored, password):
+    """校验密码（兼容 pbkdf2 自有格式与旧 werkzeug 哈希）。"""
+    import hashlib as _h, hmac as _hm
+    if not stored or not password:
+        return False
+    parts = stored.split(':')
+    if len(parts) == 5 and parts[0] == 'pbkdf2' and parts[1] == 'sha256':
+        try:
+            check = _h.pbkdf2_hmac('sha256', password.encode(), parts[3].encode(), int(parts[2])).hex()
+            return _hm.compare_digest(parts[4], check)
+        except Exception:
+            return False
+    try:
+        from werkzeug.security import check_password_hash
+        return bool(check_password_hash(stored, password))
+    except Exception:
+        return False
+
+
+def _account_login_state(user):
+    """F-12：返回注销账号的登录状态。
+
+    'active'   未注销；
+    'restored' 冷静期内 —— 已自动恢复（active=1, deleted_at=NULL）；
+    'purged'   超过冷静期 —— 已惰性匿名化，必须拒绝登录。
+    无法解析注销时间时按已过期处理（更安全）。
+    """
+    deleted_at = user.get('deleted_at') if isinstance(user, dict) else None
+    if not deleted_at:
+        return 'active'
+    from datetime import datetime as _dt, timedelta as _td
+    try:
+        ts = deleted_at
+        if isinstance(ts, str):
+            ts = _dt.fromisoformat(ts.replace('Z', '+00:00'))
+        if getattr(ts, 'tzinfo', None) is not None:
+            ts = ts.replace(tzinfo=None)
+        age = _dt.now() - ts
+    except Exception:
+        age = _td(days=1)
+    if age <= _td(hours=_DELETION_GRACE_HOURS):
+        with get_db() as conn:
+            conn.execute(
+                'UPDATE users SET active=1, deleted_at=NULL, deletion_requested_at=NULL WHERE id=%s',
+                (user['id'],))
+            conn.execute(
+                'INSERT INTO user_activity (user_id, type, title, content) VALUES (%s,%s,%s,%s)',
+                (user['id'], 'account', 'Account restored', 'within grace period'))
+            conn.commit()
+        return 'restored'
+    # 超过冷静期：惰性匿名化（保留行与统计，清空可识别字段，释放唯一键）
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE users SET active=0, phone=NULL, email=NULL, username=NULL, "
+            "display_name='Deactivated User', password_hash=NULL, avatar_url='', "
+            "wechat_openid=NULL, wechat_unionid=NULL, wechat_nickname='', "
+            "douyin_open_id=NULL, douyin_nickname='', douyin_avatar='', "
+            "agent_id=NULL, agent_nickname='' WHERE id=%s",
+            (user['id'],))
+        conn.commit()
+    return 'purged'
 
 
 def _get_user_app(payload):
@@ -254,9 +326,41 @@ def upload_avatar():
     if len(data) > 2 * 1024 * 1024:
         return jsonify({'success': False, 'error': 'Image size must not exceed 2MB'}), 400
 
+    # F-07：校验真实图片内容并重编码，剥离元数据与伪装文件（不信任扩展名）
+    try:
+        from PIL import Image
+    except ImportError:
+        Image = None
+    if Image is not None:
+        try:
+            import io
+            probe = Image.open(io.BytesIO(data))
+            probe.verify()
+            img = Image.open(io.BytesIO(data))
+            img.load()
+            if img.mode not in ('RGB', 'RGBA'):
+                img = img.convert('RGBA')
+            buf = io.BytesIO()
+            img.save(buf, format='PNG')
+            data = buf.getvalue()
+            ext = 'png'
+        except Exception:
+            return jsonify({'success': False, 'error': 'Invalid image file'}), 400
+    else:
+        # Pillow 不可用时退化为魔数校验（至少挡住扩展名伪装的非图片内容）
+        sig = data[:12]
+        is_image = (sig.startswith(b'\x89PNG') or sig.startswith(b'\xff\xd8\xff')
+                    or sig.startswith(b'GIF8')
+                    or (sig.startswith(b'RIFF') and sig[8:12] == b'WEBP'))
+        if not is_image:
+            return jsonify({'success': False, 'error': 'Invalid image file'}), 400
+
     # Save to disk
+    # R-01：原来写 platform/static/avatars，但没有任何服务挂载 platform/static，
+    # 导致上传 200 而 GET /static/avatars/... 恒 404。改落 admin/static/avatars：
+    # 8084 原生服务该目录，8081/8083 的静态路由也有 admin/static 回退。
     filename = f'avatar_{user_id}_{secrets.token_hex(8)}.{ext}'
-    upload_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'platform', 'static', 'avatars')
+    upload_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'admin', 'static', 'avatars')
     os.makedirs(upload_dir, exist_ok=True)
     filepath = os.path.join(upload_dir, filename)
     with open(filepath, 'wb') as fout:
@@ -320,10 +424,18 @@ def generate_key():
     key_prefix = raw_key[:12] + '...' + raw_key[-4:]
     now = now_iso()
     with get_db() as conn:
-        conn.execute(
+        key_row = conn.execute(
             'INSERT INTO api_keys (user_id, app_name, key_hash, key_prefix, name, created_at) '
-            'VALUES (%s,%s,%s,%s,%s,%s)',
-            (user_id, app_name, key_hash, key_prefix, name, now))
+            'VALUES (%s,%s,%s,%s,%s,%s) RETURNING id',
+            (user_id, app_name, key_hash, key_prefix, name, now)).fetchone()
+        # F-11：API Key 生成留痕（只记 id 与前缀，不记明文/哈希）
+        # F-05：用户中心 Key 的审计口径 = user_activity(type='api_key')。
+        # api_key_audit 仅服务于 unified_api_keys（其 key_id 有 FK 指向该表），
+        # 不能双写，否则违反外键约束。
+        conn.execute(
+            'INSERT INTO user_activity (user_id, type, title, content) VALUES (%s,%s,%s,%s)',
+            (user_id, 'api_key', 'API key created',
+             'key_id=%s app=%s prefix=%s' % (key_row['id'], app_name, key_prefix)))
         conn.commit()
     return jsonify({
         'success': True,
@@ -346,8 +458,15 @@ def revoke_key(key_id):
     if err:
         return err
     with get_db() as conn:
-        conn.execute('UPDATE api_keys SET active=0 WHERE id=%s AND user_id=%s',
-                     (key_id, payload['user_id']))
+        # F-11：撤销必须校验影响行数，避免越权/不存在 id 也返回 success（假成功）
+        row = conn.execute(
+            'UPDATE api_keys SET active=0 WHERE id=%s AND user_id=%s RETURNING id',
+            (key_id, payload['user_id'])).fetchone()
+        if not row:
+            return jsonify({'success': False, 'error': 'API key not found'}), 404
+        conn.execute(
+            'INSERT INTO user_activity (user_id, type, title, content) VALUES (%s,%s,%s,%s)',
+            (payload['user_id'], 'api_key', 'API key revoked', 'key_id=%s' % key_id))
         conn.commit()
     return jsonify({'success': True})
 
@@ -511,10 +630,17 @@ def password_login():
     # VR-AUTH-001：验证码通过后不再无条件 429（验证码校验本身即爆破防护）
     with get_db() as conn:
         # VR-AUTH-007：冻结账号（active=0）禁止登录
-        user = conn.execute('SELECT * FROM users WHERE active=1 AND (username=%s OR email=%s OR phone=%s)', (login_field, login_field, login_field)).fetchone()
+        user = conn.execute('SELECT * FROM users WHERE username=%s OR email=%s OR phone=%s', (login_field, login_field, login_field)).fetchone()
         if not user:
             # VR-AUTH-003：统一错误消息，消除账号存在性枚举
             return jsonify({'success': False, 'error': 'Invalid account or password'}), 400
+        # F-12：注销账号按冷静期恢复登录，或超期化工并拒绝
+        acct_state = _account_login_state(user)
+        if acct_state == 'purged':
+            return jsonify({'success': False, 'error': 'Account has been deactivated'}), 403
+        if acct_state == 'active' and int(user.get('active', 1) or 0) != 1:
+            # VR-AUTH-007：冻结账号（active=0）禁止登录
+            return jsonify({'success': False, 'error': 'Account is disabled'}), 403
         stored = user['password_hash']
         if not stored:
             return jsonify({'success': False, 'error': 'Invalid account or password'}), 400
@@ -568,6 +694,109 @@ def password_login():
         'user': result['user'],
     }}))
     set_sso_cookie(resp, token)
+    return resp
+
+
+# =============================================
+# POST /user/account/delete — 注销账号（密码 + 短信确认，24h 冷静期）
+# =============================================
+@user_bp.route('/account/delete', methods=['POST'])
+def delete_account():
+    """F-12：注销为软删（active=0 + deleted_at），24h 内登录可自动恢复。"""
+    payload, err = _require_auth()
+    if err:
+        return err
+    user_id = payload['user_id']
+    data = request.get_json(silent=True) or {}
+    password = (data.get('password') or '').strip()
+    code = (data.get('code') or '').strip()
+    if not password or not code:
+        return jsonify({'success': False, 'error': 'Password and verification code are required'}), 400
+    with get_db() as conn:
+        user = conn.execute('SELECT * FROM users WHERE id=%s', (user_id,)).fetchone()
+    if not user:
+        return jsonify({'success': False, 'error': 'User not found'}), 404
+    user = dict(user)
+    if not _check_password(user.get('password_hash'), password):
+        return jsonify({'success': False, 'error': 'Invalid password'}), 400
+    phone = user.get('phone') or ''
+    if not phone:
+        return jsonify({'success': False, 'error': 'No phone bound; please contact support'}), 400
+    ok, msg = _verify_sms_code(phone, code, 'delete_account')
+    if not ok:
+        return jsonify({'success': False, 'error': msg}), 400
+    with get_db() as conn:
+        conn.execute(
+            'UPDATE users SET active=0, deleted_at=NOW(), deletion_requested_at=NOW() WHERE id=%s',
+            (user_id,))
+        conn.execute(
+            "UPDATE user_sessions SET expired_at=NOW(), is_current=0 "
+            "WHERE user_id=%s AND (expired_at IS NULL OR expired_at > NOW())", (user_id,))
+        conn.execute(
+            'INSERT INTO user_activity (user_id, type, title, content) VALUES (%s,%s,%s,%s)',
+            (user_id, 'account', 'Account deletion requested',
+             'grace_hours=%d' % _DELETION_GRACE_HOURS))
+        conn.commit()
+    from services.jwt_service import revoke_token, revoke_all_user_tokens
+    token = _get_token_from_request()
+    if token:
+        try:
+            revoke_token(token)
+        except Exception:
+            pass
+    revoke_all_user_tokens(user_id)
+    resp = make_response(jsonify({
+        'success': True,
+        'message': 'Account deletion requested',
+        'grace_hours': _DELETION_GRACE_HOURS,
+    }))
+    for name in ('sso_token', 'tm_token'):
+        resp.delete_cookie(name, path='/')
+    return resp
+
+
+# =============================================
+# GET /user/account/export — 导出本人数据（同步 JSON，限大小）
+# =============================================
+@user_bp.route('/account/export', methods=['GET'])
+def export_account():
+    """F-12：同步导出本人数据，单次上限 5MB。"""
+    payload, err = _require_auth()
+    if err:
+        return err
+    uid = payload['user_id']
+
+    def _rows(conn, sql, params):
+        return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+    with get_db() as conn:
+        user = conn.execute(
+            'SELECT id, username, phone, email, display_name, avatar_url, created_at, '
+            'last_login, active, is_admin FROM users WHERE id=%s', (uid,)).fetchone()
+        prof = conn.execute('SELECT * FROM user_profiles WHERE user_id=%s', (uid,)).fetchone()
+        data = {
+            'exported_at': now_iso(),
+            'user': dict(user) if user else {},
+            'profile': dict(prof) if prof else {},
+            'api_keys': _rows(conn, 'SELECT id, app_name, key_prefix, name, calls_today, calls_total, '
+                                    'created_at, expire_at, last_used, active FROM api_keys '
+                                    'WHERE user_id=%s LIMIT 200', (uid,)),
+            'addresses': _rows(conn, 'SELECT * FROM user_addresses WHERE user_id=%s LIMIT 200', (uid,)),
+            'orders': _rows(conn, 'SELECT id, order_no, amount, item_type, item_desc, status, created_at '
+                                  'FROM billing_orders WHERE user_id=%s ORDER BY created_at DESC LIMIT 500', (uid,)),
+            'tickets': _rows(conn, 'SELECT id, type, category, title, content, status, admin_reply, created_at '
+                                   'FROM user_tickets WHERE user_id=%s ORDER BY created_at DESC LIMIT 200', (uid,)),
+            'notifications': _rows(conn, 'SELECT id, type, title, content, is_read, created_at '
+                                         'FROM user_notifications WHERE user_id=%s ORDER BY created_at DESC LIMIT 200', (uid,)),
+            'activity': _rows(conn, 'SELECT id, type, title, content, created_at FROM user_activity '
+                                    'WHERE user_id=%s ORDER BY created_at DESC LIMIT 200', (uid,)),
+        }
+    body = json.dumps(data, ensure_ascii=False, default=str)
+    if len(body.encode('utf-8')) > 5 * 1024 * 1024:
+        return jsonify({'success': False, 'error': 'Export too large, please contact support'}), 413
+    resp = make_response(body)
+    resp.headers['Content-Type'] = 'application/json; charset=utf-8'
+    resp.headers['Content-Disposition'] = 'attachment; filename="verorun-account-%s.json"' % uid
     return resp
 
 
@@ -656,16 +885,26 @@ def _mask_value(key, value):
     return value[:6] + '****' + value[-4:]
 
 
-@user_bp.route('/config', methods=['GET'])
-def get_configs():
-    payload, err = _require_auth()
-    if err:
-        return err
+def _require_config_admin(payload):
+    """系统配置守卫：需 is_admin 且具备 system 权限（与 admin RBAC 对齐）。"""
     user_id = payload['user_id']
     with get_db() as conn:
         user = conn.execute('SELECT is_admin FROM users WHERE id=%s', (user_id,)).fetchone()
     if not user or not user['is_admin']:
-        return jsonify({'success': False, 'error': chr(20165)+chr(31649)+chr(29702)+chr(21592)+chr(21487)+chr(20316)+chr(20316)}), 403
+        return None, (jsonify({'success': False, 'error': 'Admin only'}), 403)
+    from .admin import _enforce_admin_perm
+    return None, _enforce_admin_perm(user_id, 'system')
+
+
+@user_bp.route('/config', methods=['GET'])
+def get_configs():
+    payload, err = _require_auth(('main', 'admin'))
+    if err:
+        return err
+    user_id = payload['user_id']
+    _, cfg_err = _require_config_admin(payload)
+    if cfg_err:
+        return cfg_err
     with get_db() as conn:
         rows = conn.execute('SELECT key, value, description FROM system_config ORDER BY key').fetchall()
     configs = [dict(r) for r in rows]
@@ -679,29 +918,38 @@ def get_configs():
         c['label'] = meta.get('label', key)
         c['placeholder'] = meta.get('placeholder', '')
         c['masked_value'] = _mask_value(key, c['value']) if meta.get('sensitive') else c['value']
+        if c['sensitive']:
+            c.pop('value', None)
         result.append(c)
     return jsonify({'success': True, 'data': result, 'categories': CONFIG_CATEGORIES, 'schema': CONFIG_SCHEMA})
 
 
 @user_bp.route('/config', methods=['PUT'])
 def update_config():
-    payload, err = _require_auth()
+    payload, err = _require_auth(('main', 'admin'))
     if err:
         return err
     user_id = payload['user_id']
-    with get_db() as conn:
-        user = conn.execute('SELECT is_admin FROM users WHERE id=%s', (user_id,)).fetchone()
-    if not user or not user['is_admin']:
-        return jsonify({'success': False, 'error': chr(20165)+chr(31649)+chr(29702)+chr(21592)+chr(21487)+chr(20316)+chr(20316)}), 403
+    _, cfg_err = _require_config_admin(payload)
+    if cfg_err:
+        return cfg_err
     data = request.get_json(force=True)
     key = data.get('key', '').strip()
     value = data.get('value', '').strip()
     if not key:
         return jsonify({'success': False, 'error': 'key ' + chr(19981)+chr(33021)+chr(20026)+chr(31354)}), 400
+    if len(value) > 4096:
+        return jsonify({'success': False, 'error': 'value too long'}), 400
+    with get_db() as conn:
+        exists = conn.execute('SELECT 1 FROM system_config WHERE key=%s', (key,)).fetchone()
+    if key not in CONFIG_SCHEMA and not exists:
+        return jsonify({'success': False, 'error': 'Unknown config key'}), 400
     sql = "INSERT INTO system_config (key, value, updated_at, updated_by) VALUES (%s, %s, NOW(), %s) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at, updated_by=excluded.updated_by"
     with get_db() as conn:
         conn.execute(sql, (key, value, user_id))
         conn.commit()
+    from .admin import _log
+    _log(user_id, 'config_update', 'system_config', key, '')
     return jsonify({'success': True, 'message': chr(37197)+chr(32622)+chr(24050)+chr(26356)+chr(26032)})
 
 
@@ -709,14 +957,13 @@ def update_config():
 def upload_config_csv():
     """Upload AccessKey.csv to seed SMS/email config from Aliyun CSV."""
     import csv, io
-    payload, err = _require_auth()
+    payload, err = _require_auth(('main', 'admin'))
     if err:
         return err
     user_id = payload['user_id']
-    with get_db() as conn:
-        user = conn.execute('SELECT is_admin FROM users WHERE id=%s', (user_id,)).fetchone()
-    if not user or not user['is_admin']:
-        return jsonify({'success': False, 'error': 'Admin only'}), 403
+    _, cfg_err = _require_config_admin(payload)
+    if cfg_err:
+        return cfg_err
     if 'file' not in request.files:
         return jsonify({'success': False, 'error': 'Please upload a file'}), 400
     f = request.files['file']
@@ -740,6 +987,11 @@ def upload_config_csv():
                 ('aliyun_sms_secret', access_secret, _('Aliyun SMS AccessKey Secret'), user_id)
             )
             conn.commit()
+        try:
+            from .admin import _log
+            _log(user_id, 'config_upload', 'system_config', 'aliyun_sms_access_key', access_key[:8]+'...')
+        except Exception:
+            pass
         return jsonify({'success': True, 'message': 'AccessKey configuration imported', 'access_key_prefix': access_key[:8]+'...'})
     except Exception as e:
         return jsonify({'success': False, 'error': f'Import failed: {e}'}), 500
@@ -748,14 +1000,13 @@ def upload_config_csv():
 @user_bp.route('/config/seed', methods=['POST'])
 def seed_config_defaults():
     """Initialize default email/SMS config keys in system_config if missing."""
-    payload, err = _require_auth()
+    payload, err = _require_auth(('main', 'admin'))
     if err:
         return err
     user_id = payload['user_id']
-    with get_db() as conn:
-        user = conn.execute('SELECT is_admin FROM users WHERE id=%s', (user_id,)).fetchone()
-    if not user or not user['is_admin']:
-        return jsonify({'success': False, 'error': 'Admin only'}), 403
+    _, cfg_err = _require_config_admin(payload)
+    if cfg_err:
+        return cfg_err
     created = []
     with get_db() as conn:
         for key, meta in CONFIG_SCHEMA.items():
@@ -768,6 +1019,8 @@ def seed_config_defaults():
                 )
                 created.append(key)
         conn.commit()
+    from .admin import _log
+    _log(user_id, 'config_seed', 'system_config', '', 'created=%d' % len(created))
     return jsonify({'success': True, 'message': f'Initialized {len(created)} configuration items', 'keys': created})
 
 
@@ -837,7 +1090,12 @@ def delete_notification(nid):
         return err
     user_id = payload['user_id']
     with get_db() as conn:
-        conn.execute('DELETE FROM user_notifications WHERE user_id=%s AND id=%s', (user_id, nid))
+        # F-11：删除必须校验影响行数，避免非本人/不存在 id 也返回 success
+        row = conn.execute(
+            'DELETE FROM user_notifications WHERE user_id=%s AND id=%s RETURNING id',
+            (user_id, nid)).fetchone()
+        if not row:
+            return jsonify({'success': False, 'error': 'Notification not found'}), 404
         conn.commit()
     return jsonify({'success': True})
 
@@ -870,11 +1128,19 @@ def create_ticket():
     if err: return err
     user_id = payload['user_id']
     data = request.get_json(force=True) or {}
-    title = (data.get('title') or '').strip()
-    content = (data.get('content') or '').strip()
+    # F-17：用户提交内容入库前做白名单清洗（纯文本，剥离全部标签），防存储型 XSS
+    def _clean_text(v, limit):
+        try:
+            import bleach
+            v = bleach.clean(v, tags=[], attributes={}, strip=True)
+        except ImportError:
+            v = re.sub(r'<[^>]*>', '', v)
+        return v[:limit]
+    title = _clean_text((data.get('title') or '').strip(), 200)
+    content = _clean_text((data.get('content') or '').strip(), 5000)
     ttype = (data.get('type') or 'aftersale').strip()
     category = (data.get('category') or '').strip()
-    contact = (data.get('contact') or '').strip()
+    contact = _clean_text((data.get('contact') or '').strip(), 200)
     priority = 'high' if ttype == 'complaint' else (data.get('priority') or 'normal').strip()
     if not title: return jsonify({'success': False, 'error': 'Title cannot be empty'}), 400
     if not content: return jsonify({'success': False, 'error': 'Content cannot be empty'}), 400
@@ -1218,6 +1484,13 @@ def list_career_options():
 @user_bp.route('/regions', methods=['GET'])
 def regions_cascade():
     parent_code = request.args.get('parent_code', '').strip()
+    if parent_code:
+        try:
+            parent_code = int(parent_code)
+        except (TypeError, ValueError):
+            return jsonify({'success': False, 'error': 'Invalid parent_code'}), 400
+        if parent_code <= 0:
+            return jsonify({'success': False, 'error': 'Invalid parent_code'}), 400
     with get_db() as conn:
         if not parent_code:
             # Return level 0 (中国) + level 1 (省)

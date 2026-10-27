@@ -15,6 +15,12 @@ managed_modules:
   # 贝叶斯因子→信念修正」属方法学与可复现域。不认领则本角色调用 bayes.* 构成
   # NT-03 越权。认领注释格式惯例见 roles/finance-desktop/ops.yaml 内联注释。
   - bayes_engine
+  # 2026-10-22 用户裁决：chaos_engine 无 agent_role 字段（不归任一 ① 兜底角色），
+  #   在本版由本角色 managed_modules 显式认领（② 通道）。依据：chaos_engine 的相空间
+  #   重建/李雅普诺夫/赫斯特/分形维/熵属非线性动力学方法论原语，归 domain=methodology
+  #   的 method_architect 最契合；不认领则本角色调用 chaos.* 构成越权。金融版同构由
+  #   rs_risk 认领（风险 lane），科研版无 rs_risk，统一归方法论 lane。
+  - chaos_engine
 capabilities:
   - exp.hypothesis
   - exp.methodology

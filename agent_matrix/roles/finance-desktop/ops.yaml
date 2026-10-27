@@ -23,15 +23,27 @@ managed_modules:
   - im_gateway
   - vault
   # 2026-10-13（用户裁决：104 测试机需可测全部插件；本版插件/角色清单随业务增减）：
-  # 以下三项的 plugin.json 保持官方版语义的 agent_role（office / business）不改，
+  # 以下项的 plugin.json 保持官方版语义的 agent_role（office / business）不改，
   # 在本版由本角色认领 —— 与上方 email/im_gateway 完全同一通道
   # （agent_matrix/models.py resolve_agent_roles ②），不改插件侧契约、不扩本版角色集。
-  - hr_recruit        # 招聘管理（agent_role=office）
-  - visitor_profile   # 访客画像（agent_role=business）
+  # 2026-10-26（用户裁决）：hr_recruit（招聘）、visitor_profile（访客画像）已从
+  # finance-desktop.yaml 的 include 移除，**此处认领同步删除**。保留认领而不在 include
+  # 里的条目只会让"插件集"与"角色归属"两份清单各说一套，下次排查仍被误导。
   - coupons           # 智能优惠券（agent_role=business；奖励规则页 bridge 依赖）
   # 2026-10-18（今日唯一保留项）：search_hub 的 plugin.json 保持 agent_role=content
   # 不改，在本版由本角色 managed_modules 认领（与 email/im_gateway 同一通道）。
   - search_hub        # 通用检索接入层（agent_role=content）
+  # 2026-10-26：project_workspace（agent_role=content）补认领。
+  #   病灶：它在 deploy/editions/finance-desktop.yaml 的 include 内（2026-10-01 起，
+  #   为 104 测试机可测而放行），但本版核心角色集（athena/ops/rs_*）无 content 域，
+  #   且无任何角色 managed_modules 认领 → resolve_agent_roles ①② 双双不命中
+  #   → discovery 记 last_error=「missing/invalid agent_role: 'content'」→ 状态卡 error
+  #   → admin /health 的 plugins_error ≥ 1 → 恒 503 degraded（前端状态栏报插件错误）。
+  #   处理：按本版既有惯例由 ops 侧认领（不改插件侧 agent_role、不扩本版角色集）。
+  #   备注：金融版无「课题工作台」页面（/research/workspace 仅在 coreEdition==='research'
+  #   注册），故此处只解决状态一致性；若后续裁决「金融版不提供该项目」，正确落点是
+  #   deploy/editions/finance-desktop.yaml 的 include 移除，而非删除插件目录。
+  - project_workspace # 课题文档工作台（agent_role=content，本版无对应 UI）
 provider_model_id: 401638
 provider: deepseek
 model_name: deepseek-v4-flash

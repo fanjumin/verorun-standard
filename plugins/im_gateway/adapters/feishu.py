@@ -124,14 +124,11 @@ class FeishuAdapter(BaseIMAdapter):
     # ── 媒体推送 ──
 
     def _get_config(self):
-        from plugins.im_gateway.models import get_im_db
-        with get_im_db() as conn:
-            row = conn.execute(
-                "SELECT config_json FROM channel_configs WHERE channel='feishu' AND is_enabled=1 LIMIT 1"
-            ).fetchone()
-        if not row or not row['config_json']:
+        from plugins.im_gateway.models import load_channel_config
+        cfg = load_channel_config('feishu', enabled_only=True)
+        if not cfg:
             raise Exception(_("Feishu channel is not configured"))
-        return _json.loads(row['config_json'])
+        return cfg
 
     def push_media(self, file_url, filename, mime):
         cfg = self._get_config()

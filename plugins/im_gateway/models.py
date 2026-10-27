@@ -4,9 +4,11 @@
 独立数据库 im_gateway.db，存放频道配置表 channel_configs。
 从主库迁移而来（feishu/wecom/qq/dingtalk），主库结构保持一致。
 """
+import json
 import os
 import psycopg2
 from plugins._base.db import get_pooled_connection
+from .secure_config import decrypt_fields, encrypt_fields, SecureConfigUnavailable
 
 # 默认频道种子（channel, is_enabled）
 _SEED_CHANNELS = [
@@ -135,6 +137,9 @@ def migrate_from_main_db():
     仅当插件库对应频道 config_json 为空 '{}' 时才覆盖，避免回退用户新改的配置。
     主库无 channel_configs 表或无数据时静默跳过。
     返回迁移的记录数。
+
+    P0-03：写入插件库前统一走字段级加密（无 ENCRYPTION_KEY 时该项不迁移，
+    绝不落明文；启动期 on_install 会记录告警，可配置密钥后重跑）。
     """
     try:
         from models import get_db as get_main_db
@@ -158,8 +163,16 @@ def migrate_from_main_db():
     with get_im_db() as conn:
         for r in rows:
             channel = r['channel']
-            config_json = r['config_json'] or '{}'
             is_enabled = r['is_enabled']
+            try:
+                # 主库可能为历史明文或密文；统一解密后再加密，确保插件库内为密文
+                config_json = json.dumps(
+                    encrypt_fields(channel, decrypt_fields(
+                        channel, json.loads(r['config_json'] or '{}'))),
+                    ensure_ascii=False)
+            except (SecureConfigUnavailable, ValueError, TypeError) as e:
+                print(f'[IMGateway] ⚠️ skip migration for {channel}: {e}')
+                continue
             local = conn.execute(
                 "SELECT config_json FROM channel_configs WHERE channel=%s", (channel,)
             ).fetchone()
@@ -177,3 +190,67 @@ def migrate_from_main_db():
                 migrated += 1
         conn.commit()
     return migrated
+
+
+# ── 凭据读取收敛（P0-03：所有 config_json / client_secret 读取的唯一入口） ──
+
+def load_channel_config(channel, enabled_only=False) -> dict:
+    """读取并解密单个频道配置（内部走 secure_config.decrypt_fields）。
+
+    Args:
+        channel: 频道标识（feishu / wecom / ...）
+        enabled_only: True 时仅返回 is_enabled=1 的配置
+
+    Returns:
+        dict: 已解密配置；无记录或 config_json 为空时返回 {}
+        解密失败抛 SecureConfigUnavailable（不静默降级为密文/明文）。
+    """
+    from .secure_config import decrypt_fields
+    sql = "SELECT config_json FROM channel_configs WHERE channel=%s"
+    params = [channel]
+    if enabled_only:
+        sql += " AND is_enabled=1"
+    sql += " LIMIT 1"
+    with get_im_db() as conn:
+        row = conn.execute(sql, tuple(params)).fetchone()
+    if not row or not row['config_json']:
+        return {}
+    try:
+        raw = json.loads(row['config_json'])
+    except (ValueError, TypeError):
+        return {}
+    return decrypt_fields(channel, raw if isinstance(raw, dict) else {})
+
+
+def load_login_providers() -> list:
+    """读取全部第三方登录提供方配置（client_secret 已解密）。
+
+    解密失败抛 SecureConfigUnavailable（不静默降级）。表未建时抛异常，由调用方兜底。
+    """
+    from .secure_config import decrypt_secret
+    with get_im_db() as conn:
+        rows = conn.execute(
+            'SELECT provider, display_name, client_id, client_secret, scopes, '
+            'redirect_uri, is_enabled FROM login_providers ORDER BY id'
+        ).fetchall()
+    result = []
+    for r in rows:
+        cfg = dict(r)
+        cfg['client_secret'] = decrypt_secret(cfg.get('client_secret') or '')
+        result.append(cfg)
+    return result
+
+
+def load_login_provider(provider) -> dict:
+    """读取单个第三方登录提供方配置（client_secret 已解密）。未配置返回 {}。"""
+    from .secure_config import decrypt_secret
+    with get_im_db() as conn:
+        row = conn.execute(
+            'SELECT client_id, client_secret, scopes, redirect_uri, is_enabled '
+            'FROM login_providers WHERE provider=%s', (provider,)
+        ).fetchone()
+    if not row:
+        return {}
+    cfg = dict(row)
+    cfg['client_secret'] = decrypt_secret(cfg.get('client_secret') or '')
+    return cfg

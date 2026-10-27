@@ -342,7 +342,7 @@ Notes:
 | `/home/verorun/verorun/` | Application code |
 | `/home/verorun/verorun/venv/` | Python virtual environment |
 | `/home/verorun/verorun/.env` | Environment configuration |
-| `/home/verorun/verorun/data/` | SQLite database (if used) |
+| `/home/verorun/verorun/data/` | Runtime data directory (PostgreSQL is the only supported database; no SQLite file) |
 | `/var/log/verorun/` | Service logs |
 | `/run/verorun/` | Runtime status files (update status, health probe) |
 | `/etc/systemd/system/verorun-*.service` | systemd service files |

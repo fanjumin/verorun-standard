@@ -22,32 +22,6 @@ admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 
 # Dashboard 内存缓存（请求合并，5s TTL 让 per-widget 缓存主导刷新策略）
 _dash_cache = {'data': None, 'ts': 0, 'ttl': 5}
-# 通用 GET 请求内存缓存（5 秒 TTL），消除重复点击同一模块的等待感
-_get_cache = {}
-
-def _cached_get(ttl=5):
-    """装饰器：对 GET 请求做内存缓存"""
-    from functools import wraps
-    def deco(fn):
-        @wraps(fn)
-        def wrapper(*a, **kw):
-            if request.method != 'GET':
-                return fn(*a, **kw)
-            key = request.path + '?' + request.query_string.decode()
-            now = time.time()
-            entry = _get_cache.get(key)
-            if entry and (now - entry['ts']) < ttl:
-                from flask import make_response
-                return make_response((entry['body'], entry['status']))
-            resp = fn(*a, **kw)
-            # 提取状态码和 body，重建 Response 缓存
-            if hasattr(resp, 'status_code') and resp.status_code == 200:
-                _get_cache[key] = {'body': resp.get_data(as_text=True), 'status': 200, 'ts': now}
-            elif isinstance(resp, tuple) and len(resp) == 2 and getattr(resp[0], 'status_code', None) == 200:
-                _get_cache[key] = {'body': resp[0].get_data(as_text=True), 'status': 200, 'ts': now}
-            return resp
-        return wrapper
-    return deco
 
 # ═══ RBAC：admin 端点 → 模块权限 映射（D-04 修复） ═══
 # super_admin 自动全通过；admin/operator 需 admin_profiles.permissions 含对应权限。

@@ -1,6 +1,6 @@
 # VeroRun 小程序版发行配置（服务器端 profile · thin flavor 后端）
 # 消费方：
-#   1) .github/workflows/sync-to-minipro.yml（已存在）—— 发布到 verorun-minipro 仓库时读此裁剪
+#   1) .github/workflows/publish-editions.yml —— 打包该 edition 并上传到 verorun-standard Release
 #   2) plugin_manager/distribution.py:resolve_visible_set —— 运行时可见性
 #   3) agent_matrix/models.edition_requires_license() —— license_enforcement 生效
 #

@@ -1,5 +1,5 @@
 # VeroRun 金融桌面版发行配置（单一事实源：插件白名单 + 角色集 + 核心文件）
-# 由 sync-to-finance.yml 消费（打包 + Release 上传）；verify-edition-payload.sh 校验产物一致性。
+# 由 .github/workflows/publish-editions.yml 消费（打包 + Release 上传）；verify-edition-payload.sh 校验产物一致性。
 edition: finance-desktop
 label: 金融桌面版
 # 服务启用与禁用（edition 门控，deploy/editions/*.yaml 单一事实源）
@@ -29,9 +29,14 @@ plugins:
   #      2026-10-13：加入 hr_recruit、visitor_profile、coupons（用户裁决：104 为测试机，
   #      所有插件都应能测到；本版角色与插件清单随业务增减，非固定量）后为
   #      _base + 15 个业务插件。
+  #      2026-10-26：hr_recruit、visitor_profile 移出（用户裁决「金融版不需要这两个
+  #      插件，毫无关系」）→ 发包为 _base + 15 个业务插件（含 coupons/search_hub/
+  #      neural_flow）。只改本清单与 ops.yaml 认领，源码目录不动。
   #      2026-10-14：加入 chaos_engine（描述性混沌/非线性动力学风险原语，非交易信号；
   #      风控官 rs_risk 经 managed_modules 认领，plugin.json compatible_editions=["finance"]）
   #      后为 _base + 16 个业务插件。
+  #      2026-10-26：neural_flow 重新入驻（v1.2.1 重构，UI 已接业务数据，下线根因
+  #      已修复；用户裁决"插件已重构，重新加入金融版"）后为 _base + 17 个业务插件。
   #      2026-09-21：currency_converter（多币种）整插件移出 —— 本版无结算/换算场景，
   #      留着只是"设置页一张卡 + 一个无归属插件"。
   #      2026-10-01：multi_asset（多资产：期货/期权/基金/债券）移入 —— 其
@@ -66,34 +71,51 @@ plugins:
     - vault
     - net_proxy
     - project_workspace
-    - neural_flow
+    # 2026-10-22：neural_flow（神经中枢）整模块下线 —— 事件流仅有心跳、前端页面自承
+    # 未接入业务埋点（用户裁决清理），故从本版 include 移除，为 _base + 16 个业务插件。
     - content_factory
     # 2026-10-13 用户裁决：104 为测试机，「所有插件都应该能测到」；金融版角色与插件
-    # 清单随业务增减、不是固定量。放行以下三项以在 104 管理端可测（归属走下方
+    # 清单随业务增减、不是固定量。放行以下项以在 104 管理端可测（归属走下方
     # roles/finance-desktop/ops.yaml 的 managed_modules 认领通道，与 email /
     # im_gateway / content_factory / project_workspace 同一既有惯例，
     # 见 agent_matrix/models.py resolve_agent_roles ②）：
-    #   hr_recruit      招聘管理（agent_role=office，本版由 ops 认领）
-    #   visitor_profile 访客画像（agent_role=business，本版由 ops 认领）
     #   coupons         智能优惠券（奖励规则页 bridge 依赖，本版由 ops 认领）
-    - hr_recruit
-    - visitor_profile
     - coupons
+    # ★ 2026-10-26 用户裁决：hr_recruit（招聘管理）、visitor_profile（访客画像）
+    #   「金融版不需要这两个插件，毫无关系」→ 从本版 include 移除。
+    #   落点纪律：只改门控层（本文件 include + ops.yaml managed_modules + 配套测试
+    #   期望集），**plugins/hr_recruit、plugins/visitor_profile 源码目录一字不动**，
+    #   它们仍在 omni / minipro 等版本正常提供（omni-desktop/omni-service 的 include
+    #   仍列 visitor_profile）。
+    #   移除后行为：discovery 仍会扫到磁盘目录，但 runtime_whitelist: true 的 include
+    #   即运行期白名单 → 二者进入隐藏集，且 manager.init_app() 的版侧收口
+    #   （_converge_excluded_rows）会把注册表里残留的 error 状态收敛为
+    #   disabled(not_in_edition_include)，不再计入 /health 的 plugins_error；
+    #   hr_recruit 的 "License required: no_license" 与 visitor_profile 的
+    #   "$libdir/vector 缺失" 两条常驻 error 随之消失。
     # 2026-10-18：search_hub 通用检索接入层（agent_role=content，本版由 ops 认领，
     # 走下方 ops.yaml managed_modules 通道）。今日唯一保留项。
     - search_hub
+    # 2026-10-26：neural_flow（神经中枢）重新入驻 —— v1.2.1 重构后 UI 已落地
+    # （执行流 / 实时流 / 领域档案三页签；8084 partial include 与菜单别名早已就位）。
+    # 2026-10-22 下线理由「事件流仅有心跳 + 页面未接业务埋点」已由 v1.2.0 双源采集
+    # （agent_token_logs / agent_tasks）+ 内核 task_id 透传 + obs_* 归并视图解决。
+    # 归属：agent_role=ops 命中本版核心角色集（① 通道），不改角色 YAML。
+    - neural_flow
   # ⚠️ 运行时无效（勿依赖）：agent_matrix.models.edition_plugin_excludes() 已废弃、恒返回
   #   空列表 —— 插件可见性现由各插件 plugin.json 的 compatible_editions 决定。
   #   本段保留仅作"本版明确不提供"的登记与发包侧参考；**实际运行时闸门是上面的 include**。
   #   若将来要恢复黑名单语义，须先改 edition_plugin_excludes()，否则这里写了也不会生效。
   exclude:
     - veroscholar
-    # hr_recruit：2026-10-13 起**移出本排除表、改列入上方 include**（用户在 104 测试机
-    # 上要测到它）。历史留档：其 agent_role=office 在 agent_matrix/roles/09-office.yaml
+    # hr_recruit / visitor_profile：2026-10-13 曾移出本表改列入上方 include（104 测试机
+    # 要测到它们）；**2026-10-26 用户裁决金融版不需要，已从 include 移除**，且不再回填
+    # 本表 —— 本段运行期恒无效（见上方 ⚠️），把它们写在这里只会制造"已登记排除"的
+    # 假安全感；真正的闸门是 include 缺失 → 运行期隐藏集 + 版侧收口置 disabled。
+    # 历史留档：hr_recruit 的 agent_role=office 在 agent_matrix/roles/09-office.yaml
     # 声明 editions:[official]，金融版角色集过滤后 discovery 的「agent_role 须为核心角色」
-    # 校验会失败 —— 现按本版既有惯例由 roles/finance-desktop/ops.yaml 的
-    # managed_modules 认领（resolve_agent_roles ②），**不改插件侧 agent_role**，
-    # 官方版契约保持不变。
+    # 校验会失败，当年靠 roles/finance-desktop/ops.yaml 的 managed_modules 认领
+    # （resolve_agent_roles ②）绕过；2026-10-26 该认领亦已同步删除。
     # cogevolution_substrate：物联网（边缘）场景的认知进化，金融桌面版不适用。
     # 当前核心仓库尚未收录该插件目录，此处先登记 —— 将来它若被同步进仓库，
     # 打包与门控会自动排除，无需再想起来处理（源中不存在时打包断言亦容忍）。

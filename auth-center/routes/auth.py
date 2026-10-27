@@ -156,18 +156,30 @@ def sms_register():
     if not phone or not code or not password or not username:
         return api_err(_('Phone, verification code, password and username are required'))
 
+    # F-13：条款同意留痕（必填，记录版本与来源 IP）
+    consent = data.get('consent')
+    consent_version = (data.get('consent_version') or 'v1.0').strip()[:32]
+    if consent not in (True, 1, '1', 'true', 'True'):
+        return api_err(_('You must agree to the Terms of Service and Privacy Policy'))
+    consent_ip = (request.remote_addr or '')[:64]
+
     # Verify SMS code (purpose='register')
     now = now_iso()
     with get_db() as conn:
+        # F-06：先取最新有效码再比对；错码必须计入 attempts，否则可无限爆破
         row = conn.execute(
-            'SELECT * FROM sms_codes WHERE phone=%s AND code=%s AND purpose=%s AND used=0 AND expires_at>%s ORDER BY id DESC LIMIT 1',
-            (phone, code, 'register', now))
+            'SELECT * FROM sms_codes WHERE phone=%s AND purpose=%s AND used=0 AND expires_at>%s ORDER BY id DESC LIMIT 1',
+            (phone, 'register', now))
         sms_row = row.fetchone()
         if not sms_row:
             return api_err(_('Invalid or expired verification code'))
         sms_row = dict(sms_row)
         if sms_row['attempts'] >= 5:
             return api_err(_('Too many attempts, please request a new code'))
+        if sms_row['code'] != code:
+            conn.execute('UPDATE sms_codes SET attempts=attempts+1 WHERE id=%s', (sms_row['id'],))
+            conn.commit()
+            return api_err(_('Invalid or expired verification code'))
         conn.execute('UPDATE sms_codes SET used=1 WHERE id=%s', (sms_row['id'],))
 
     # Validate display_name (sanitize first)
@@ -210,8 +222,8 @@ def sms_register():
         if existing_phone:
             return api_err(_('This phone is already registered'))
         user_id = conn.execute(
-            'INSERT INTO users (phone, username, display_name, password_hash, phone_verified, email_verified, last_login) VALUES (%s,%s,%s,%s,1,0,%s) RETURNING id',
-            (phone, username, display_name or username, stored, now)).fetchone()['id']
+            'INSERT INTO users (phone, username, display_name, password_hash, phone_verified, email_verified, last_login, consent_at, consent_version, consent_ip) VALUES (%s,%s,%s,%s,1,0,%s,NOW(),%s,%s) RETURNING id',
+            (phone, username, display_name or username, stored, now, consent_version, consent_ip)).fetchone()['id']
         # Auto-create free-tier authorization
         conn.execute(
             'INSERT INTO app_authorizations (user_id, app_name, tier) VALUES (%s,%s,%s) ON CONFLICT (user_id, app_name) DO NOTHING',
@@ -278,8 +290,14 @@ def sms_login():
         user = cur.fetchone()
         if user:
             user = dict(user)
-            # VR-AUTH-007：冻结账号（active=0）禁止登录
-            if user.get('active', 1) != 1:
+            # F-12：注销账号按冷静期恢复/拒绝；其余冻结账号照旧拒绝
+            if user.get('deleted_at'):
+                from routes.user import _account_login_state
+                state = _account_login_state(user)
+                if state == 'purged':
+                    return api_err(_('Account is deactivated, please contact support'), 403)
+                # state == 'restored'：已恢复 active=1，继续走正常流程
+            elif user.get('active', 1) != 1:
                 return api_err(_('Account is disabled'), 403)
             conn.execute('UPDATE users SET last_login=%s WHERE id=%s', (now, user['id']))
         else:
@@ -533,18 +551,30 @@ def email_register():
     if not email or not code or not password or not username:
         return api_err(_('Email, verification code, password and username are required'))
 
+    # F-13：条款同意留痕（必填，记录版本与来源 IP）
+    consent = data.get('consent')
+    consent_version = (data.get('consent_version') or 'v1.0').strip()[:32]
+    if consent not in (True, 1, '1', 'true', 'True'):
+        return api_err(_('You must agree to the Terms of Service and Privacy Policy'))
+    consent_ip = (request.remote_addr or '')[:64]
+
     # Verify email code (purpose='register')
     now = now_iso()
     with get_db() as conn:
+        # F-06：同短信注册，先取码再比对，错码计入 attempts
         row = conn.execute(
-            'SELECT * FROM sms_codes WHERE phone=%s AND code=%s AND purpose=%s AND used=0 AND expires_at>%s ORDER BY id DESC LIMIT 1',
-            (email, code, 'register', now))
+            'SELECT * FROM sms_codes WHERE phone=%s AND purpose=%s AND used=0 AND expires_at>%s ORDER BY id DESC LIMIT 1',
+            (email, 'register', now))
         code_row = row.fetchone()
         if not code_row:
             return api_err(_('Invalid or expired verification code'))
         code_row = dict(code_row)
         if code_row['attempts'] >= 5:
             return api_err(_('Too many attempts, please request a new code'))
+        if code_row['code'] != code:
+            conn.execute('UPDATE sms_codes SET attempts=attempts+1 WHERE id=%s', (code_row['id'],))
+            conn.commit()
+            return api_err(_('Invalid or expired verification code'))
         conn.execute('UPDATE sms_codes SET used=1 WHERE id=%s', (code_row['id'],))
 
     # Validate display_name (sanitize first)
@@ -586,8 +616,8 @@ def email_register():
         if existing:
             return api_err(_('Username already taken'))
         user_id = conn.execute(
-            'INSERT INTO users (email, username, display_name, password_hash, phone_verified, email_verified, last_login) VALUES (%s,%s,%s,%s,0,1,%s) RETURNING id',
-            (email, username, display_name or username, stored, now)).fetchone()['id']
+            'INSERT INTO users (email, username, display_name, password_hash, phone_verified, email_verified, last_login, consent_at, consent_version, consent_ip) VALUES (%s,%s,%s,%s,0,1,%s,NOW(),%s,%s) RETURNING id',
+            (email, username, display_name or username, stored, now, consent_version, consent_ip)).fetchone()['id']
         # Auto-create free-tier authorization
         conn.execute(
             'INSERT INTO app_authorizations (user_id, app_name, tier) VALUES (%s,%s,%s) ON CONFLICT (user_id, app_name) DO NOTHING',
@@ -632,14 +662,19 @@ def email_verify():
         return api_err('Email and verification code are required')
     with get_db() as conn:
         row = conn.execute(
-            'SELECT id, code, expires_at FROM sms_codes WHERE phone=%s AND purpose=%s AND COALESCE(used,0)=0 ORDER BY id DESC LIMIT 1',
+            'SELECT id, code, expires_at, COALESCE(attempts,0) AS attempts FROM sms_codes WHERE phone=%s AND purpose=%s AND COALESCE(used,0)=0 ORDER BY id DESC LIMIT 1',
             (email, 'email_verify')
         ).fetchone()
         if not row:
             return api_err('Please send verification code first')
         if row['expires_at'] < now_iso():
             return api_err('Verification code expired, please resend')
+        if row['attempts'] >= 5:
+            return api_err('Too many attempts, please request a new code')
         if row['code'] != code:
+            # F-06：错码计入 attempts，避免有效期内无限猜码
+            conn.execute('UPDATE sms_codes SET attempts=COALESCE(attempts,0)+1 WHERE id=%s', (row['id'],))
+            conn.commit()
             return api_err('Invalid verification code')
         # Check if email already used by another user
         exist = conn.execute('SELECT id FROM users WHERE email=%s AND id!=%s', (email, payload['user_id'])).fetchone()

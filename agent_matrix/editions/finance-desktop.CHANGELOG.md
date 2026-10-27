@@ -2,8 +2,8 @@
 
 ```yaml
 edition:            finance-desktop
-edition_version:    1.1.0
-kernel_baseline:    0.64.0
+edition_version:    1.2.0
+kernel_baseline:    0.64.1
 governing_yaml:     deploy/editions/finance-desktop.yaml
 constitution:       agent_matrix/kernel.AGENTS.md (L1) + agent_matrix/editions/finance-desktop.AGENTS.md (L2)
 ```
@@ -95,6 +95,24 @@ constitution:       agent_matrix/kernel.AGENTS.md (L1) + agent_matrix/editions/f
 ### Kernel Baseline
 
 - 内核 0.64.0（`VERSION`，对应根 `CHANGELOG.md` 的 `v0.64.0 — 2026-10-20`；本版与内核 0.64.0 同批发布，故基线随之抬升，原 1.0.0 基线 0.63.0 保留于上一节不改）
+
+---
+
+## [1.2.0] — 2026-10-26
+
+### Added
+
+- 插件 `include` 增补 `neural_flow`（v1.2.1，平台级数据流可观测基座）。归属：`plugin.json` 的 `agent_role=ops` 直接命中本版 8 角色集（① 通道），未使用 `managed_modules` 认领。裁决来源：2026-10-26 用户裁决「插件已重构（UI 问题已修复），重新加入金融版」
+- 下线原因（2026-10-22）与修复对照：① 事件流仅有心跳 → v1.2.0 采集器双源（`agent_token_logs` / `agent_tasks`）+ `emit_realtime`；② 页面自承未接业务埋点 → 内核 `task_id` 全链路透传 + `obs_execution_view` / `obs_attribution` 归并视图
+- 插件白名单回到 `_base` + 17 项业务插件（共 18 项）；角色集不变（仍 8 个），L2 §6.2 无需修改
+
+### Changed
+
+- `kernel_baseline` 由 0.64.0 纠正为 0.64.1（`VERSION` 实际值；仅文档修正，不改内核代码）
+
+### Kernel Baseline
+
+- 内核 0.64.1（`VERSION`，对应根 `CHANGELOG.md` 的 `v0.64.1 — 2026-10-24`）
 
 ---
 
