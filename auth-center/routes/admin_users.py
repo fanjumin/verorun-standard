@@ -451,7 +451,7 @@ def admin_create():
     notes = data.get('notes', chr(39)+chr(39)).strip()[:256]
     
     if not phone and not uid:
-        return jsonify({'success': False, 'error': '请提供手机号或用户ID'}), 400
+        return jsonify({'success': False, 'error': _('Please provide a phone number or user ID')}), 400
     
     with get_db() as conn:
         if uid:
@@ -526,7 +526,7 @@ def admin_update(uid):
         # 修改密码：仅短信验证码验证
         if password:
             if not code:
-                return jsonify({'success': False, 'error': '请输入短信验证码'}), 400
+                return jsonify({'success': False, 'error': _('Please enter the SMS verification code')}), 400
             # 验证 SMS 验证码
             row = conn.execute(
                 'SELECT * FROM sms_codes WHERE phone=%s AND code=%s AND purpose=%s AND used=0 AND expires_at>%s ORDER BY id DESC LIMIT 1',
@@ -555,7 +555,7 @@ def admin_delete(uid):
     if err:
         return err
     if uid == admin['user_id']:
-        return jsonify({'success': False, 'error': '不能移除自己，请先转移超管权限'}), 400
+        return jsonify({'success': False, 'error': _('You cannot remove yourself; transfer super admin rights first')}), 400
     with get_db() as conn:
         target = conn.execute('SELECT id, display_name, phone FROM users WHERE id=%s AND is_admin=1', (uid,)).fetchone()
         if not target:
@@ -597,7 +597,7 @@ def admin_me_avatar():
             return jsonify({'success': False, 'error': f'Picture size cannot exceed 800×800 (current {w}×{h})'}), 400
         file.seek(0)
     except Exception:
-        return jsonify({'success': False, 'error': '无法解析图片文件，请上传 JPG/PNG 格式'}), 400
+        return jsonify({'success': False, 'error': _('Unable to parse the image file; please upload JPG/PNG format')}), 400
     
     # 保存文件
     import uuid
@@ -658,7 +658,7 @@ def user_avatar_upload(uid):
             return jsonify({'success': False, 'error': f'Picture size cannot exceed 512×512 (current {w}×{h})'}), 400
         file.seek(0)
     except Exception:
-        return jsonify({'success': False, 'error': '无法解析图片文件，请上传 JPG/PNG/SVG 格式'}), 400
+        return jsonify({'success': False, 'error': _('Unable to parse the image file; please upload JPG/PNG/SVG format')}), 400
 
     # 保存文件
     import uuid
@@ -687,7 +687,7 @@ def user_avatar_default(uid):
     data = request.get_json(force=True) or {}
     default_name = data.get('default', chr(39)+chr(39))
     if not default_name:
-        return jsonify({'success': False, 'error': '请指定默认头像文件名'}), 400
+        return jsonify({'success': False, 'error': _('Please specify a default avatar filename')}), 400
     avatar_url = f'/static/avatars/default/users/{default_name}'
     with get_db() as conn:
         conn.execute('UPDATE users SET avatar_url=%s WHERE id=%s', (avatar_url, uid))
@@ -731,7 +731,7 @@ def user_agent_avatar_upload(uid):
             return jsonify({'success': False, 'error': f'Picture size cannot exceed 512×512 (current {w}×{h})'}), 400
         file.seek(0)
     except Exception:
-        return jsonify({'success': False, 'error': '无法解析图片文件，请上传 JPG/PNG/SVG 格式'}), 400
+        return jsonify({'success': False, 'error': _('Unable to parse the image file; please upload JPG/PNG/SVG format')}), 400
 
     # 保存文件
     import uuid
@@ -760,7 +760,7 @@ def user_agent_avatar_default(uid):
     data = request.get_json(force=True) or {}
     default_name = data.get('default', chr(39)+chr(39))
     if not default_name:
-        return jsonify({'success': False, 'error': '请指定默认头像文件名'}), 400
+        return jsonify({'success': False, 'error': _('Please specify a default avatar filename')}), 400
     agent_avatar_url = f'/static/avatars/default/agents/{default_name}'
     with get_db() as conn:
         conn.execute('UPDATE users SET agent_avatar_url=%s WHERE id=%s', (agent_avatar_url, uid))

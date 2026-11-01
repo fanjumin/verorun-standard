@@ -103,7 +103,7 @@ def _sync_workflow_cron(def_id: str, def_row: dict):
     if cron_expr and cron_expr.lower() != 'off' and engine_id:
         job_data = {
             'name': f'Workflow: {def_row.get("name", def_id)}',
-            'description': 'workflow_defs.cron_expr 同步调度',
+            'description': _('Auto-synced from workflow_defs.cron_expr'),
             'job_type': 'cron',
             'cron_expr': cron_expr,
             'target_type': 'workflow',

@@ -2,7 +2,7 @@ import os
 
 import yaml
 
-from .constants import CONFIG_DIR, CONFIG_FILE, DEFAULT_CONFIG
+from .constants import CONFIG_DIR, CONFIG_FILE, DEFAULT_CONFIG, _
 from .output import warn
 
 
@@ -25,7 +25,8 @@ class Config:
         except Exception as exc:
             # 配置损坏不应让 CLI 崩溃，但需明确告知用户而非静默吞掉，
             # 否则用户会误以为自己改的配置生效了。
-            warn(f"配置文件 {self.path} 解析失败，已回退默认配置：{exc}")
+            warn(_("Failed to parse config file {path}, falling back to defaults: {exc}",
+                   path=self.path, exc=exc))
             return _deep_copy(DEFAULT_CONFIG)
 
     # dotted key 访问，如 "server.base_url"

@@ -132,6 +132,7 @@ FREE_DOMAINS = {
 # 仅收录商店付费订阅插件（price_type=sub）；新增付费插件时在此追加一行即可，
 # 无需改任何逻辑（数据驱动）。
 # ═══════════════════════════════════════════════════════════════
+# i18n:tech:begin — 能力意图关键词匹配表（须与中文用户指令原样匹配），翻译即失效
 CAPABILITY_INDEX = {
     'mini_app_builder': ['小程序', '微信小程序', '抖音小程序', 'mini program', 'taro', 'mini_app_builder'],
     'payment': ['收款', '支付渠道配置', '商户配置', 'payment_gateway'],
@@ -150,6 +151,7 @@ CAPABILITY_INDEX = {
     'verification': ['实名认证', '身份核验', 'verification_plugin'],
     'ali_api': ['阿里云', '1688', '供应链采集', 'ali_api'],
 }
+# i18n:tech:end
 
 
 def detect_capability_plugins(instruction: str) -> list:

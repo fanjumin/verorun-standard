@@ -9,11 +9,12 @@ import json
 
 import click
 
+from ..constants import _
 from ..output import render
 
 
 def register(group):
-    @group.group("config", help="读写本机配置 ~/.verorun/config.yaml")
+    @group.group("config", help=_("Read and write local config ~/.verorun/config.yaml"))
     def config():
         pass
 
@@ -33,7 +34,7 @@ def register(group):
         """设置配置项（自动识别 bool/int/float/str）"""
         parsed = _coerce(value)
         ctx.obj["config"].set(key, parsed)
-        render(f"已设置 {key} = {parsed}")
+        render(_("Set {key} = {value}", key=key, value=parsed))
 
     @config.command("list")
     @click.pass_context

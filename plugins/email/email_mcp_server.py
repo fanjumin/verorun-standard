@@ -26,6 +26,8 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(_HERE))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
+from i18n import _  # noqa: E402 —— 依赖上方 REPO_ROOT 注入；Source-String-as-Key
+
 logging.basicConfig(stream=sys.stderr, level=logging.INFO,
                     format="%(asctime)s %(levelname)s email.mcp %(message)s")
 _log = logging.getLogger("email.mcp")
@@ -43,7 +45,7 @@ def _bridge_call(tool, args):
     url = os.environ.get("EMAIL_MCP_BRIDGE_URL", "")
     token = os.environ.get("EMAIL_MCP_BRIDGE_TOKEN", "")
     if not url or not token:
-        raise RuntimeError("email bridge not configured（主进程未启动凭据桥）")
+        raise RuntimeError(_("email bridge not configured (main-process credential bridge is not running)"))
     payload = json.dumps({"tool": tool, "args": args}, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(
         url, data=payload, method="POST",
@@ -62,19 +64,19 @@ SERVER_INFO = {"name": "email", "version": "1.8.0"}
 TOOLS = [
     {
         "name": "email_send",
-        "description": "发送一封邮件（SMTP）。支持抄送/密送与附件。返回发送结果与服务器消息。",
+        "description": "Send one email via SMTP. Supports CC/BCC and attachments; returns the send result and the server message.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "to": {"type": "string", "description": "收件人邮箱（多个用英文逗号分隔）"},
-                "subject": {"type": "string", "description": "邮件主题"},
-                "body": {"type": "string", "description": "纯文本正文"},
-                "body_html": {"type": "string", "description": "HTML 正文（可选，与 body 至少一个）"},
-                "cc": {"type": "string", "description": "抄送地址，英文逗号分隔（可选）"},
-                "bcc": {"type": "string", "description": "密送地址，英文逗号分隔（可选）"},
+                "to": {"type": "string", "description": "Recipient address (separate multiple addresses with commas)"},
+                "subject": {"type": "string", "description": "Email subject"},
+                "body": {"type": "string", "description": "Plain text body"},
+                "body_html": {"type": "string", "description": "HTML body (optional; at least one of body and body_html is required)"},
+                "cc": {"type": "string", "description": "CC addresses, comma-separated (optional)"},
+                "bcc": {"type": "string", "description": "BCC addresses, comma-separated (optional)"},
                 "attachments": {
                     "type": "array",
-                    "description": "附件列表：[{'filename': 'a.pdf', 'data': '<base64>', 'content_type': 'application/pdf'}]（可选，单附件≤10MB）",
+                    "description": "Attachment list: [{'filename': 'a.pdf', 'data': '<base64>', 'content_type': 'application/pdf'}] (optional, max 10MB per attachment)",
                     "items": {"type": "object"},
                 },
             },
@@ -83,21 +85,21 @@ TOOLS = [
     },
     {
         "name": "email_send_contact",
-        "description": "以联系表单形式给站点管理员发送一封邮件（发送至系统配置的联系邮箱）。",
+        "description": "Send an email to the site administrator as a contact form submission (delivered to the contact address configured in the system).",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "name": {"type": "string", "description": "访客姓名"},
-                "email": {"type": "string", "description": "访客邮箱"},
-                "subject": {"type": "string", "description": "联系主题"},
-                "message": {"type": "string", "description": "留言内容"},
+                "name": {"type": "string", "description": "Visitor name"},
+                "email": {"type": "string", "description": "Visitor email"},
+                "subject": {"type": "string", "description": "Contact subject"},
+                "message": {"type": "string", "description": "Message content"},
             },
             "required": ["name", "email", "subject", "message"],
         },
     },
     {
         "name": "email_get_config",
-        "description": "获取当前邮件服务配置摘要（SMTP/IMAP 主机、端口、账号、发件人；密码脱敏为 ********）。",
+        "description": "Get a summary of the current email service configuration (SMTP/IMAP host, port, account, sender; the password is masked as ********).",
         "inputSchema": {
             "type": "object",
             "properties": {},
@@ -120,6 +122,20 @@ def _text_result(message, error=False):
     return {"content": [{"type": "text", "text": message}], "isError": error}
 
 
+def _localize(payload):
+    """递归翻译 description 字段；工具名与 schema 类型名等标识符保持原样。
+
+    TOOLS 是模块级常量（英文源串），翻译只在 tools/list 返回时求值，
+    避免 import 时把语言定死。
+    """
+    if isinstance(payload, dict):
+        return {k: (_(v) if k == "description" and isinstance(v, str) else _localize(v))
+                for k, v in payload.items()}
+    if isinstance(payload, list):
+        return [_localize(item) for item in payload]
+    return payload
+
+
 # ── 工具实现 ──────────────────────────────────────────────────────────
 def _tool_email_send(args):
     to = str(args.get("to", "") or "").strip()
@@ -130,16 +146,16 @@ def _tool_email_send(args):
     bcc = args.get("bcc") or None
     attachments = args.get("attachments") or None
     if not to or not subject or (not body and not body_html):
-        return _text_result("收件人、主题、内容均不能为空", error=True)
+        return _text_result(_("Recipient, subject and body are required"), error=True)
     try:
         ok, msg = _bridge_call("email_send", {
             "to": to, "subject": subject, "body": body, "body_html": body_html,
             "cc": cc, "bcc": bcc, "attachments": attachments})
         if not ok:
-            return _text_result(f"发送失败: {msg}", error=True)
-        return _text_result(f"发送成功: {msg}")
+            return _text_result(_("Failed to send: {msg}", msg=msg), error=True)
+        return _text_result(_("Sent successfully: {msg}", msg=msg))
     except Exception as e:
-        return _text_result(f"发送异常: {e}", error=True)
+        return _text_result(_("Send error: {error}", error=e), error=True)
 
 
 def _tool_email_send_contact(args):
@@ -148,15 +164,15 @@ def _tool_email_send_contact(args):
     subject = str(args.get("subject", "") or "").strip()
     message = str(args.get("message", "") or "")
     if not name or not email_addr or not subject or not message:
-        return _text_result("姓名、邮箱、主题、留言均不能为空", error=True)
+        return _text_result(_("Name, email, subject and message are required"), error=True)
     try:
         ok, msg = _bridge_call("email_send_contact", {
             "name": name, "email": email_addr, "subject": subject, "message": message})
         if not ok:
-            return _text_result(f"发送失败: {msg}", error=True)
-        return _text_result(f"发送成功: {msg}")
+            return _text_result(_("Failed to send: {msg}", msg=msg), error=True)
+        return _text_result(_("Sent successfully: {msg}", msg=msg))
     except Exception as e:
-        return _text_result(f"发送异常: {e}", error=True)
+        return _text_result(_("Send error: {error}", error=e), error=True)
 
 
 def _tool_email_get_config(args):
@@ -167,7 +183,7 @@ def _tool_email_get_config(args):
             safe['smtp_pass'] = '********'
         return _text_result(json.dumps(safe, ensure_ascii=False))
     except Exception as e:
-        return _text_result(f"读取配置异常: {e}", error=True)
+        return _text_result(_("Failed to read configuration: {error}", error=e), error=True)
 
 
 TOOL_HANDLERS = {
@@ -203,7 +219,7 @@ def handle_request(req):
     elif method in ("notifications/initialized", "notifications/cancelled"):
         pass
     elif method == "tools/list":
-        _success(req_id, {"tools": TOOLS})
+        _success(req_id, _localize({"tools": TOOLS}))
     elif method == "tools/call":
         tool_name = params.get("name", "")
         tool_args = params.get("arguments") or {}

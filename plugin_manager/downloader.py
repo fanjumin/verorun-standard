@@ -24,6 +24,8 @@ from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
 from urllib.parse import urlparse
 
+from i18n import _
+
 logger = logging.getLogger(__name__)
 
 # Max download size: 200 MB
@@ -48,17 +50,19 @@ def _validate_public_url(url: str) -> None:
     """
     parsed = urlparse(url)
     if parsed.scheme not in ('http', 'https'):
-        raise ValueError(f'仅允许 http/https 协议，当前: {parsed.scheme!r}')
+        raise ValueError(_('Only http/https protocol is allowed, got: {scheme!r}',
+                           scheme=parsed.scheme))
     host = parsed.hostname
     if not host:
-        raise ValueError(f'无效 URL（缺少主机名）: {url}')
+        raise ValueError(_('Invalid URL (missing host name): {url}', url=url))
     try:
         ip = ipaddress.ip_address(socket.gethostbyname(host))
     except (socket.gaierror, ValueError) as e:
-        raise ValueError(f'无法解析插件下载主机: {host}') from e
+        raise ValueError(_('Cannot resolve plugin download host: {host}', host=host)) from e
     if (ip.is_private or ip.is_loopback or ip.is_link_local
             or ip.is_reserved or ip.is_multicast):
-        raise ValueError(f'拒绝下载: 目标为内网/保留地址 {host} ({ip})')
+        raise ValueError(_('Download refused: target is a private/reserved address {host} ({ip})',
+                           host=host, ip=ip))
 
 
 def download_plugin(download_url: str, dest_dir: str,

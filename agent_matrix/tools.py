@@ -380,7 +380,7 @@ def _tool_get_system_health(args):
             lines.append("All checks passed.")
         return '\n'.join(lines)
     except Exception as e:
-        logger.warning(f"[tool:get_system_health] 执行失败: {e}")
+        logger.warning(f"[tool:get_system_health] 执行失败: {e}")  # i18n:tech — 运维日志
         return f"Failed to Get Health Status: {e}"
 
 
@@ -400,7 +400,7 @@ def _tool_query_stats(args):
         report = generate_report(days=days)
         return generate_insight_text(report)
     except Exception as e:
-        logger.warning(f"[tool:query_stats] 执行失败: {e}")
+        logger.warning(f"[tool:query_stats] 执行失败: {e}")  # i18n:tech — 运维日志
         return f"Failed to Query Data Statistics: {e}"
 
 
@@ -424,7 +424,7 @@ def _tool_search_knowledge(args):
             return f"No content related to 「{keyword}」 found in the knowledge base."
         return '\n---\n'.join(hits[:5])[:2000]
     except Exception as e:
-        logger.warning(f"[tool:search_knowledge] 执行失败: {e}")
+        logger.warning(f"[tool:search_knowledge] 执行失败: {e}")  # i18n:tech — 运维日志
         return f"Failed to retrieve knowledge base: {e}"
 
 
@@ -454,7 +454,7 @@ def _tool_ads_list(args):
             )
         return '\n'.join(lines)
     except Exception as e:
-        logger.warning(f"[tool:ads_list] 执行失败: {e}")
+        logger.warning(f"[tool:ads_list] 执行失败: {e}")  # i18n:tech — 运维日志
         return f"Failed to Get Ad List: {e}"
 
 
@@ -470,7 +470,7 @@ def _tool_ads_create(args):
             return f"✅ Ad created, ID: {res['data']['id']}"
         return f"❌ Creation Failed: {res.get('error')}"
     except Exception as e:
-        logger.warning(f"[tool:ads_create] 执行失败: {e}")
+        logger.warning(f"[tool:ads_create] 执行失败: {e}")  # i18n:tech — 运维日志
         return f"Ad creation failed: {e}"
 
 
@@ -488,7 +488,7 @@ def _tool_ads_update(args):
             return f"✅ Ad {ad_id} updated"
         return f"❌ Update Failed: {res.get('error')}"
     except Exception as e:
-        logger.warning(f"[tool:ads_update] 执行失败: {e}")
+        logger.warning(f"[tool:ads_update] 执行失败: {e}")  # i18n:tech — 运维日志
         return f"Failed to update ad: {e}"
 
 
@@ -504,7 +504,7 @@ def _tool_ads_delete(args):
             return f"✅ Ad {args.get('ad_id')} deleted"
         return f"❌ Deletion Failed: {res.get('error')}"
     except Exception as e:
-        logger.warning(f"[tool:ads_delete] 执行失败: {e}")
+        logger.warning(f"[tool:ads_delete] 执行失败: {e}")  # i18n:tech — 运维日志
         return f"Failed to Delete Ad: {e}"
 
 
@@ -537,7 +537,7 @@ def _tool_ads_get_stats(args):
                 lines.append(f"  {r['stat_date']}: Impressions {r.get('impressions',0)} Clicks {r.get('clicks',0)}")
         return '\n'.join(lines)
     except Exception as e:
-        logger.warning(f"[tool:ads_get_stats] 执行失败: {e}")
+        logger.warning(f"[tool:ads_get_stats] 执行失败: {e}")  # i18n:tech — 运维日志
         return f"Failed to Query Ad Statistics: {e}"
 
 
@@ -553,7 +553,7 @@ def _tool_ads_analyze(args):
             return res['data']
         return f"Analysis failed: {res.get('error')}"
     except Exception as e:
-        logger.warning(f"[tool:ads_analyze] 执行失败: {e}")
+        logger.warning(f"[tool:ads_analyze] 执行失败: {e}")  # i18n:tech — 运维日志
         return f"Advertisement analysis failed: {e}"
 
 
@@ -574,7 +574,7 @@ def _tool_ads_render_snippet(args):
             return "Add the following snippet to the template to render the ad zone:\n```jinja2\n" + res['data'] + "\n```"
         return f"Failed to generate code: {res.get('error')}"
     except Exception as e:
-        logger.warning(f"[tool:ads_render_snippet] 执行失败: {e}")
+        logger.warning(f"[tool:ads_render_snippet] 执行失败: {e}")  # i18n:tech — 运维日志
         return f"Failed to generate ad rendering code: {e}"
 
 
@@ -688,7 +688,7 @@ def _tool_generate_ppt(args):
             return f'✅ PPT generated: "{topic}" ({pages} pages)\nDownload link: /admin/agent-matrix/media/download/{filename}'
         return '❌ PPT generation failed, check the backend logs'
     except Exception as e:
-        logger.warning(f"[tool:generate_ppt] 执行失败: {e}")
+        logger.warning(f"[tool:generate_ppt] 执行失败: {e}")  # i18n:tech — 运维日志
         return f'❌ PPT Generation Error: {e}'
 
 
@@ -758,7 +758,7 @@ def _tool_generate_image(args):
         return '\n'.join(lines)
 
     except Exception as e:
-        logger.warning(f"[tool:generate_image] 执行失败: {e}")
+        logger.warning(f"[tool:generate_image] 执行失败: {e}")  # i18n:tech — 运维日志
         return f'❌ Image Generation Error: {e}'
 
 
@@ -815,7 +815,7 @@ def _tool_generate_markdown(args):
         return f'✅ Document generated: "{topic}"\nPreview: {preview}...\nFile: {fn}\nPreview link: {preview_url}\nDownload link: {download_url}'
 
     except Exception as e:
-        logger.warning(f"[tool:generate_markdown] 执行失败: {e}")
+        logger.warning(f"[tool:generate_markdown] 执行失败: {e}")  # i18n:tech — 运维日志
         return f'❌ Markdown Generation Error: {e}'
 
 
@@ -900,7 +900,7 @@ def _tool_generate_docx(args):
         return f'✅ Word document generated: "{topic}" ({sections} sections)\nFile: {fn}\nDownload link: {download_url}'
 
     except Exception as e:
-        logger.warning(f"[tool:generate_docx] 执行失败: {e}")
+        logger.warning(f"[tool:generate_docx] 执行失败: {e}")  # i18n:tech — 运维日志
         return f'❌ Word Document Generation Error: {e}'
 
 
@@ -1110,7 +1110,7 @@ def _execute_mcp_tool(name, args, context=None):
         from plugin_manager.mcp import call_mcp_tool
         return call_mcp_tool(name, args, context)
     except Exception as e:
-        logger.warning(f'[tool:{name}] MCP 调用失败: {e}')
+        logger.warning(f'[tool:{name}] MCP 调用失败: {e}')  # i18n:tech — 运维日志
         return f'Tool {name} execution error: {e}'
 
 
@@ -1148,7 +1148,7 @@ def execute_tool(name, args, allowed_tools=None, context=None):
         gate = {'allowed': True}
     if not gate.get('allowed', True):
         reason = gate.get('deny_reason') or 'Permission denied by approval gate'
-        logger.warning(f'[tool:{name}] 被审批门拦截: {reason}')
+        logger.warning(f'[tool:{name}] 被审批门拦截: {reason}')  # i18n:tech — 运维日志
         return reason
 
     # WP-5：planning 只读门 —— 任务处于 planning 阶段时拒绝全部写类内置工具。
@@ -1162,10 +1162,10 @@ def execute_tool(name, args, allowed_tools=None, context=None):
     if allowed_tools is not None:
         permitted = set(allowed_tools)
         if name.startswith('mcp__') and not _mcp_authorized(name, permitted):
-            logger.warning(f'[tool:{name}] 拒绝执行：不在 allowed_tools 白名单内')
+            logger.warning(f'[tool:{name}] 拒绝执行：不在 allowed_tools 白名单内')  # i18n:tech — 运维日志
             return f"Permission denied: tool {name} is not in allowed_tools"
         if not name.startswith('mcp__') and name not in permitted:
-            logger.warning(f'[tool:{name}] 拒绝执行：不在 allowed_tools 白名单内')
+            logger.warning(f'[tool:{name}] 拒绝执行：不在 allowed_tools 白名单内')  # i18n:tech — 运维日志
             return f"Permission denied: tool {name} is not in allowed_tools"
     if name.startswith('mcp__'):
         return _execute_mcp_tool(name, args, context)
@@ -1187,7 +1187,7 @@ def execute_tool(name, args, allowed_tools=None, context=None):
             try:
                 return _fut.result(timeout=timeout)
             except _FutTimeout:
-                logger.warning(f'[tool:{name}] 执行超过 {timeout}s，按超时中断处理')
+                logger.warning(f'[tool:{name}] 执行超过 {timeout}s，按超时中断处理')  # i18n:tech — 运维日志
                 return f"Tool {name} timed out after {timeout}s"
             finally:
                 _pool.shutdown(wait=False)
@@ -1197,5 +1197,5 @@ def execute_tool(name, args, allowed_tools=None, context=None):
             return executor(args, context=context)
         return executor(args)
     except Exception as e:
-        logger.warning(f"[tool:{name}] 未捕获异常: {e}")
+        logger.warning(f"[tool:{name}] 未捕获异常: {e}")  # i18n:tech — 运维日志
         return f"Tool {name} execution error: {e}"

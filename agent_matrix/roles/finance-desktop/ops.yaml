@@ -29,7 +29,10 @@ managed_modules:
   # 2026-10-26（用户裁决）：hr_recruit（招聘）、visitor_profile（访客画像）已从
   # finance-desktop.yaml 的 include 移除，**此处认领同步删除**。保留认领而不在 include
   # 里的条目只会让"插件集"与"角色归属"两份清单各说一套，下次排查仍被误导。
-  - coupons           # 智能优惠券（agent_role=business；奖励规则页 bridge 依赖）
+  # 2026-10-29（用户裁决）：coupons（智能优惠券）已从 finance-desktop.yaml 的
+  # include 移除，**此处认领同步删除**。理由与 2026-10-26 移除 hr_recruit /
+  # visitor_profile 同一条纪律：保留认领而插件不在 include 里，只会让「插件集」
+  # 与「角色归属」两份清单各说一套，下次排查仍被误导。
   # 2026-10-18（今日唯一保留项）：search_hub 的 plugin.json 保持 agent_role=content
   # 不改，在本版由本角色 managed_modules 认领（与 email/im_gateway 同一通道）。
   - search_hub        # 通用检索接入层（agent_role=content）

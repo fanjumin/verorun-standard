@@ -170,12 +170,14 @@ def seed_site_domains(db: SeedDB, deploy_domain: str = None, brand: str = None):
     via ON CONFLICT (full_domain) DO NOTHING.
     """
     deploy_domain = deploy_domain or "localhost"
+    # i18n:tech:begin — 种子数据，翻译即失效（display_name 入库后由后台维护）
     brand = brand or "VeroRun 维洛智能"
     defaults = [
         ("www",      f"www.{deploy_domain}",      f"{brand} 官网",      'default', 1, 1),
         ("agent",    f"agent.{deploy_domain}",    f"{brand} 管理后台",  'default', 1, 2),
         ("platform", f"platform.{deploy_domain}", f"{brand} 用户中心",  'default', 1, 3),
     ]
+    # i18n:tech:end
     for sub, full, name, template, pub, sort in defaults:
         db.insert_on_conflict("site_domains", {
             "site_config_id": 1,
@@ -378,7 +380,7 @@ def main():
         sys.exit(1)
 
     deploy_domain = env.get("DEPLOY_DOMAIN") or "localhost"
-    deploy_brand = env.get("DEPLOY_BRAND") or "VeroRun 维洛智能"
+    deploy_brand = env.get("DEPLOY_BRAND") or "VeroRun 维洛智能"  # i18n:tech — 种子数据，翻译即失效
 
     print("[i] Seeding data...")
     seed_base_plan(db)

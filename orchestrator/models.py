@@ -54,7 +54,7 @@ def get_db():
 
 
 def init_orchestrator_tables():
-    """初始化调度器所有表（幂等：IF NOT EXISTS）"""
+    """初始化调度器所有表（幂等：IF NOT EXISTS）"""  # i18n:tech:begin — DDL comments and default agent seed data
     with get_db() as conn:
         conn.execute("""
             -- =====================================================
@@ -441,7 +441,7 @@ def init_orchestrator_tables():
                 expires_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
-        """)
+        """)  # i18n:tech:end
 
 
 # ========== 辅助函数 ==========

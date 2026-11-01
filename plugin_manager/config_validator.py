@@ -9,6 +9,8 @@ Plugin Manager — 配置 JSON Schema 校验
 
 from typing import Dict, Any, List, Tuple, Optional
 
+from i18n import _
+
 try:
     import jsonschema
     HAS_JSONSCHEMA = True
@@ -42,7 +44,7 @@ def validate_config(
                 path = ' → '.join(str(p) for p in error.absolute_path) or '(root)'
                 errors.append(f'{path}: {error.message}')
         except jsonschema.SchemaError as e:
-            errors.append(f'Schema 无效: {e.message}')
+            errors.append(_('Invalid schema: {error}', error=e.message))
         return errors
 
     # ── 无 jsonschema 库 → 基础校验 ──
@@ -63,7 +65,7 @@ def _basic_validate(
     for field in required:
         if field not in config or config[field] is None:
             label = props.get(field, {}).get('title', field)
-            errors.append(f'{label} ({field}): 必填字段缺失')
+            errors.append(_('{label} ({field}): required field is missing', label=label, field=field))
 
     # 检查字段类型
     for field, value in config.items():
@@ -94,7 +96,8 @@ def _check_type(field: str, value: Any, expected: str) -> Optional[str]:
 
     py_type = type_map.get(expected)
     if py_type and not isinstance(value, py_type):
-        return f'{field}: 应为 {expected} 类型，收到 {type(value).__name__}'
+        return _('{field}: expected {expected} type, got {actual}',
+                 field=field, expected=expected, actual=type(value).__name__)
 
     # 针对 number 的特殊处理：整数也可以赋值给 number 字段
     if expected == 'number' and isinstance(value, int):

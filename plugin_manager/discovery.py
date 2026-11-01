@@ -188,8 +188,10 @@ class PluginDiscovery:
         except ImportError:
             _resolved = []
         if not _resolved:
-            info.last_error = (f'missing/invalid agent_role: {meta.get("agent_role", "")!r}'
-                               '（既不属本版核心角色，也无核心角色的 managed_modules 认领）')
+            info.last_error = _(
+                'missing/invalid agent_role: {role!r} (not a core role of this edition, '
+                'and not claimed by any core role via managed_modules)',
+                role=meta.get('agent_role', ''))
         # ★ capabilities 声明→实现 轻量校验（架构评审 §3.4）：
         # 每个 capability 的 namespace（首个点号前）须在插件 .py 实现中出现，
         # 否则视为「假能力」告警（不阻断 enable）。

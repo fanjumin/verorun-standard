@@ -217,21 +217,25 @@ class EmailPlugin(BasePlugin):
         """告警邮件 (subject, body)，文案对齐 im_gateway._format_alert_text。"""
         symbol = ev.get('symbol') or ''
         name = ev.get('name') or symbol
-        subject = '【VeroRun 告警】{} ({})'.format(name, symbol).strip()
-        lines = [subject, '', '标的: {} ({})'.format(name, symbol).strip()]
+        subject = _("[VeroRun Alert] {name} ({symbol})", name=name, symbol=symbol).strip()
+        lines = [subject, '',
+                 _("Symbol: {name} ({symbol})", name=name, symbol=symbol).strip()]
         if ev.get('message'):
-            lines.append('说明: {}'.format(ev['message']))
+            lines.append(_("Note: {message}", message=ev['message']))
         if ev.get('observed') is not None:
-            line = '当前值: {}'.format(ev['observed'])
             if ev.get('threshold') is not None:
-                line += ' / 阈值: {}'.format(ev['threshold'])
+                line = _("Current value: {observed} / Threshold: {threshold}",
+                         observed=ev['observed'], threshold=ev['threshold'])
+            else:
+                line = _("Current value: {observed}", observed=ev['observed'])
             lines.append(line)
         if ev.get('type'):
-            lines.append('规则: {}'.format(ev['type']))
+            lines.append(_("Rule: {rule}", rule=ev['type']))
         if ev.get('at'):
-            lines.append('时间: {}'.format(ev['at']))
+            lines.append(_("Time: {time}", time=ev['at']))
         lines.append('')
-        lines.append('— 本邮件由 VeroRun 告警引擎自动发送，仅供研究参考，不构成投资建议。')
+        lines.append(_("— This email was sent automatically by the VeroRun alert engine. "
+                       "It is for research reference only and does not constitute investment advice."))
         return subject, '\n'.join(lines)
 
     def push_morning_brief(self, ev: dict) -> list:
@@ -261,23 +265,27 @@ class EmailPlugin(BasePlugin):
     def _format_morning_mail(ev: dict):
         """晨报邮件 (subject, body)。"""
         td = ev.get('trade_date') or ''
-        subject = '【VeroRun 晨报】{} 交易日信号汇总'.format(td)
-        lines = [subject, '', '交易日: {}'.format(td),
-                 '信号总数: {}'.format(ev.get('total', 0))]
+        subject = _("[VeroRun Morning Brief] Trading-day signal summary for {date}", date=td)
+        lines = [subject, '',
+                 _("Trading day: {date}", date=td),
+                 _("Total signals: {count}", count=ev.get('total', 0))]
         run = ev.get('run') or {}
         if run:
-            lines.append('批量执行: 成功 {}/{}，失败 {}'.format(
-                run.get('ok', 0), run.get('total', 0), run.get('failed', 0)))
+            lines.append(_("Batch run: {ok}/{total} succeeded, {failed} failed",
+                           ok=run.get('ok', 0), total=run.get('total', 0),
+                           failed=run.get('failed', 0)))
         for sig, items in (ev.get('groups') or {}).items():
             lines.append('')
-            lines.append('■ {}（{} 只）'.format(str(sig).upper(), len(items)))
+            lines.append(_("■ {signal} ({count} symbols)",
+                           signal=str(sig).upper(), count=len(items)))
             for it in items:
                 conf = it.get('confidence')
-                conf_s = ' 置信度 {:.2f}'.format(conf) if conf is not None else ''
+                conf_s = (' ' + _("Confidence {value:.2f}", value=conf)) if conf is not None else ''
                 lines.append('  - {} ({}){}'.format(
                     it.get('name') or it.get('symbol'), it.get('symbol'), conf_s))
         lines.append('')
-        lines.append('— 本邮件由 VeroRun 晨报任务自动发送，仅供研究参考，不构成投资建议。')
+        lines.append(_("— This email was sent automatically by the VeroRun morning brief task. "
+                       "It is for research reference only and does not constitute investment advice."))
         return subject, '\n'.join(lines)
 
     def on_disable(self, registry):

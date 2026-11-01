@@ -112,16 +112,16 @@ class BasePlugin(ABC):
     description: str = ''
     author: str = ''
     dependencies: Dict[str, str] = {}
-    """依赖的其他插件 `{identifier: version_spec}`"""
+    """依赖的其他插件 `{identifier: version_spec}`"""  # i18n:tech — 字段说明字符串
     config_schema: Dict[str, Any] = {}
 
     # ── 运行时引用（由 PluginManager 注入） ──
     plugin_info: Any = None
-    """plugin_manager.models.PluginInfo 引用"""
+    """plugin_manager.models.PluginInfo 引用"""  # i18n:tech — 字段说明字符串
     manager: Any = None
-    """plugin_manager.PluginManager 引用"""
+    """plugin_manager.PluginManager 引用"""  # i18n:tech — 字段说明字符串
     _log: Any = None
-    """独立日志器（logging.Logger），由 PluginManager 注入"""
+    """独立日志器（logging.Logger），由 PluginManager 注入"""  # i18n:tech — 字段说明字符串
 
     def __init__(self):
         self._config = {}

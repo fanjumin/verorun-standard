@@ -37,9 +37,9 @@ def _load_build_manifest(tools_dir: str):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="幂等重签 VeroGuard 完整性清单（发版/CI）"
+        description="幂等重签 VeroGuard 完整性清单（发版/CI）"  # i18n:tech — 运维/构建 CLI 输出
     )
-    parser.add_argument("--project-dir", required=True, help="仓库根目录")
+    parser.add_argument("--project-dir", required=True, help="仓库根目录")  # i18n:tech — 运维/构建 CLI 输出
     args = parser.parse_args()
 
     tools_dir = os.path.dirname(os.path.abspath(__file__))
@@ -47,16 +47,16 @@ def main():
 
     # 幂等前提：无私钥立即失败，禁止覆盖现网有效清单
     if bm.signing_key() is None:
-        print("[FAIL] 未配置 RELEASE_SIGN_KEY / RELEASE_SIGN_KEY_FILE，"
-              "无法重签（禁止覆盖现网有效清单）。")
+        print("[FAIL] 未配置 RELEASE_SIGN_KEY / RELEASE_SIGN_KEY_FILE，"  # i18n:tech — 运维/构建 CLI 输出
+              "无法重签（禁止覆盖现网有效清单）。")  # i18n:tech — 运维/构建 CLI 输出
         sys.exit(1)
 
     out = os.path.join(args.project_dir, "veroguard", "data", "manifest.json")
     manifest = bm.build_manifest(args.project_dir)
     if bm.write_signed_manifest(manifest, out) != "signed":
-        print("[FAIL] 重签失败。")
+        print("[FAIL] 重签失败。")  # i18n:tech — 运维/构建 CLI 输出
         sys.exit(1)
-    print(f"[OK] 重签完成 build_id={manifest.get('build_id')} "
+    print(f"[OK] 重签完成 build_id={manifest.get('build_id')} "  # i18n:tech — 运维/构建 CLI 输出
           f"total_files={manifest.get('total_files')}")
 
     # 自检：用 RELEASE_VERIFY_KEY 对刚写入的清单验签，确保交付物有效
@@ -65,7 +65,7 @@ def main():
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
     pub = Ed25519PublicKey.from_public_bytes(bytes.fromhex(bm.RELEASE_VERIFY_KEY))
     pub.verify(sig_bytes, canonical_bytes)
-    print("[OK] 自检验签通过（manifest.json / manifest.json.sig）")
+    print("[OK] 自检验签通过（manifest.json / manifest.json.sig）")  # i18n:tech — 运维/构建 CLI 输出
 
 
 if __name__ == "__main__":

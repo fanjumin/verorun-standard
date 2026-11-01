@@ -235,7 +235,7 @@ def import_from_github(raw_url: str) -> Tuple[Optional[dict], List[str]]:
             from .distribution import valid_category_keys
             _cat_keys = valid_category_keys()
         except Exception as _e:
-            print(f'[store_importer] ⚠️ 动态分类取数失败，回落内置枚举: {_e}')
+            print(f'[store_importer] ⚠️ 动态分类取数失败，回落内置枚举: {_e}')  # i18n:tech — 运维日志
             _cat_keys = set(CATEGORY_ENUM)
         if cat not in _cat_keys:
             warnings.append(f'category "{cat}" is not in whitelist, cleared, please select from dropdown')

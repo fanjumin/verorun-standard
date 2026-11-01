@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 from typing import Any, Iterator, Optional, Tuple
 
+from .constants import _
 from .exceptions import SSEError
 
 # 内容键的优先级顺序；靠前者优先
@@ -37,11 +38,12 @@ def iter_data_payloads(response: Any, *, strict: bool = True) -> Iterator[str]:
     if strict:
         ctype = (response.headers.get("Content-Type") or "").lower()
         if _SSE_CONTENT_TYPE not in ctype:
-            raise SSEError(
-                "服务端返回的不是 SSE 流"
-                f"（Content-Type={ctype or '未提供'}）；"
-                "可能是许可/订阅门禁重定向、网关错误页或端点不支持流式。"
-            )
+            raise SSEError(_(
+                "Server did not return an SSE stream (Content-Type={ctype}); it may be "
+                "a license/subscription gate redirect, a gateway error page, or an "
+                "endpoint that does not support streaming.",
+                ctype=ctype or _("not provided"),
+            ))
 
     for raw in response.iter_lines(decode_unicode=True):
         if raw is None:

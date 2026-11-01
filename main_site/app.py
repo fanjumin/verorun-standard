@@ -314,7 +314,7 @@ try:
 
     print('[PluginManager] ✅ Platform 服务插件管理器已初始化')
 except Exception as e:
-    print(f'[PluginManager] ⚠️ Platform 服务初始化失败: {e}')
+    print(f'[PluginManager] ⚠️ Platform 服务初始化失败: {e}')  # i18n:tech — 启动诊断
 
 # ── Blueprint 注册 ──
 register_auth(app, exclude_blueprints=['admin', 'cms_admin'])
@@ -610,7 +610,7 @@ def submit_feedback():
 
     if fb_type not in ('complaint', 'suggestion'):
         return jsonify({'success': False, 'error': _('Invalid type')}), 400
-    if category not in ('功能问题', '内容问题', '账号问题', '支付问题', '其他'):
+    if category not in ('功能问题', '内容问题', '账号问题', '支付问题', '其他'):  # i18n:tech — 分类值匹配，翻译即失效
         return jsonify({'success': False, 'error': _('Invalid category')}), 400
     if not title or len(title) > 200:
         return jsonify({'success': False, 'error': _('Title must be 1-200 characters')}), 400
@@ -651,12 +651,17 @@ def static_avatars(filename):
 
 @app.route('/static/<path:filename>')
 def static_files(filename):
-    plat_path = os.path.join(os.path.dirname(__file__), 'static', filename)
-    if os.path.isfile(plat_path):
-        return send_from_directory(os.path.join(os.path.dirname(__file__), 'static'), filename)
+    plat_static = os.path.join(os.path.dirname(__file__), 'static')
+    if os.path.isfile(os.path.join(plat_static, filename)):
+        return send_from_directory(plat_static, filename)
     # 回退查 admin/static（处理 brand/ 等跨服务共享文件）
     admin_static = os.path.join(os.path.dirname(__file__), '..', 'admin', 'static')
-    return send_from_directory(admin_static, filename)
+    if os.path.isfile(os.path.join(admin_static, filename)):
+        return send_from_directory(admin_static, filename)
+    # site_builder 公共站资产唯一来源在插件目录，admin/static 不再保留副本
+    site_builder_static = os.path.join(
+        os.path.dirname(__file__), '..', 'plugins', 'site_builder', 'static')
+    return send_from_directory(site_builder_static, filename)
 
 
 # ══ 主题系统 ══

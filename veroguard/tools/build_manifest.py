@@ -214,7 +214,7 @@ def build_manifest(project_dir: str) -> dict:
     for rel_path in files_to_scan:
         abs_path = os.path.join(project_dir, rel_path)
         if not os.path.exists(abs_path):
-            print(f"  [SKIP] {rel_path} — 文件不存在")
+            print(f"  [SKIP] {rel_path} — 文件不存在")  # i18n:tech — 运维/构建 CLI 输出
             continue
         with open(abs_path, "rb") as f:
             file_hash = hashlib.sha256(f.read()).hexdigest()
@@ -272,7 +272,7 @@ def signing_key():
     try:
         return Ed25519PrivateKey.from_private_bytes(bytes.fromhex(seed))
     except ValueError:
-        print("[WARN] RELEASE_SIGN_KEY 不是合法的 hex 私钥种子，跳过签名")
+        print("[WARN] RELEASE_SIGN_KEY 不是合法的 hex 私钥种子，跳过签名")  # i18n:tech — 运维/构建 CLI 输出
         return None
 
 
@@ -289,20 +289,20 @@ def write_signed_manifest(manifest: dict, output: str) -> str:
     out_path.write_text(canonical + "\n", encoding="utf-8")
     sig = key.sign(canonical.encode("utf-8"))
     Path(str(out_path) + ".sig").write_text(sig.hex() + "\n", encoding="utf-8")
-    print(f"[OK] manifest.json 已签名（build_id={manifest.get('build_id')}，total_files={manifest.get('total_files')}）")
+    print(f"[OK] manifest.json 已签名（build_id={manifest.get('build_id')}，total_files={manifest.get('total_files')}）")  # i18n:tech — 运维/构建 CLI 输出
     return "signed"
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="生成/校验 VeroGuard 完整性基准清单（Ed25519 签名制）"
+        description="生成/校验 VeroGuard 完整性基准清单（Ed25519 签名制）"  # i18n:tech — 运维/构建 CLI 输出
     )
     parser.add_argument("--project-dir", required=True,
-                        help="项目根目录")
+                        help="项目根目录")  # i18n:tech — 运维/构建 CLI 输出
     parser.add_argument("--output",
-                        help="输出 manifest.json 路径（同目录生成 manifest.json.sig）；--verify 模式不需要")
+                        help="输出 manifest.json 路径（同目录生成 manifest.json.sig）；--verify 模式不需要")  # i18n:tech — 运维/构建 CLI 输出
     parser.add_argument("--verify", action="store_true",
-                        help="校验已有 manifest.json/.sig 的 Ed25519 签名（不生成）")
+                        help="校验已有 manifest.json/.sig 的 Ed25519 签名（不生成）")  # i18n:tech — 运维/构建 CLI 输出
     args = parser.parse_args()
 
     if args.verify:
@@ -310,7 +310,7 @@ def main():
         mf = os.path.join(args.project_dir, "veroguard", "data", "manifest.json")
         sig = mf + ".sig"
         if not os.path.exists(mf) or not os.path.exists(sig):
-            print(f"[FAIL] manifest.json/.sig 缺失: {mf}")
+            print(f"[FAIL] manifest.json/.sig 缺失: {mf}")  # i18n:tech — 运维/构建 CLI 输出
             sys.exit(1)
         try:
             pub = Ed25519PublicKey.from_public_bytes(
@@ -319,20 +319,20 @@ def main():
             sig_bytes = bytes.fromhex(open(sig, encoding="utf-8").read().strip())
             pub.verify(sig_bytes, canonical.encode("utf-8"))
         except Exception as e:
-            print(f"[FAIL] manifest 验签失败: {e}")
+            print(f"[FAIL] manifest 验签失败: {e}")  # i18n:tech — 运维/构建 CLI 输出
             sys.exit(1)
-        print(f"[OK] manifest 验签通过（{os.path.basename(mf)}）")
+        print(f"[OK] manifest 验签通过（{os.path.basename(mf)}）")  # i18n:tech — 运维/构建 CLI 输出
         sys.exit(0)
 
     if not args.output:
-        print("[FAIL] --output 必填（生成模式）")
+        print("[FAIL] --output 必填（生成模式）")  # i18n:tech — 运维/构建 CLI 输出
         sys.exit(1)
-    print(f"扫描目录: {args.project_dir}")
+    print(f"扫描目录: {args.project_dir}")  # i18n:tech — 运维/构建 CLI 输出
     manifest = build_manifest(args.project_dir)
-    print(f"共 {manifest['total_files']} 个文件")
+    print(f"共 {manifest['total_files']} 个文件")  # i18n:tech — 运维/构建 CLI 输出
 
     if write_signed_manifest(manifest, args.output) == "unsigned":
-        print("[FAIL] 未配置 RELEASE_SIGN_KEY，无法生成签名清单（发版必须签名）")
+        print("[FAIL] 未配置 RELEASE_SIGN_KEY，无法生成签名清单（发版必须签名）")  # i18n:tech — 运维/构建 CLI 输出
         sys.exit(1)
 
 

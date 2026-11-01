@@ -321,11 +321,11 @@ class PromptResolver:
             file_path = os.path.join(BASE_DIR, prompt_source)
             real_path = os.path.realpath(file_path)
             if not real_path.startswith(os.path.realpath(BASE_DIR)):
-                logger.warning(f'Prompt 路径遍历尝试被拦截: {file_path}')
+                logger.warning(f'Prompt 路径遍历尝试被拦截: {file_path}')  # i18n:tech — 运维日志
                 return ''
             if os.path.exists(real_path):
                 with open(real_path, 'r', encoding='utf-8') as f:
                     return f.read()
-            logger.warning(f'Prompt 文件不存在: {file_path}')
+            logger.warning(f'Prompt 文件不存在: {file_path}')  # i18n:tech — 运维日志
             return ''
         return prompt_source

@@ -3,6 +3,7 @@
 
 import logging, json, requests, base64
 from models import get_db
+from i18n import _
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ def publish_weibo(text, image_url=None):
     cfg = _get_config()
     access_token = cfg.get('weibo_access_token', '')
     if not access_token:
-        raise ValueError('微博 Access Token 未配置')
+        raise ValueError(_('Weibo Access Token is not configured'))
 
     if image_url:
         # Step 1: Upload image via URL (need to download first, then upload to Weibo)
@@ -74,9 +75,9 @@ def publish_weibo(text, image_url=None):
         result = resp.json()
 
     if 'id' not in result and 'error' in result:
-        raise ValueError(f'微博发布失败: {result.get("error", str(result))}')
+        raise ValueError(_('Weibo publish failed: {error}', error=result.get('error', str(result))))
     if 'id' not in result and 'created_at' not in result:
-        raise ValueError(f'微博发布返回异常: {result}')
+        raise ValueError(_('Unexpected response from Weibo publish: {result}', result=result))
 
     weibo_id = result.get('id', '')
     logger.info(f'Weibo published: id={weibo_id}')

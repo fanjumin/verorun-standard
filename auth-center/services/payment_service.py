@@ -14,6 +14,8 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
+from i18n import _
+
 
 def _resolve_notify_base():
     """获取通知域名：环境变量 → deploy 配置"""
@@ -27,7 +29,7 @@ def _resolve_notify_base():
         return ''
 
 
-def create_shop_payment(order_id: str, total_amount: float, subject: str = '商城订单') -> dict:
+def create_shop_payment(order_id: str, total_amount: float, subject: str = None) -> dict:
     """
     为商城订单创建支付宝扫码支付，委托 plugins/subscription/gateways/alipay.py
 
@@ -35,6 +37,7 @@ def create_shop_payment(order_id: str, total_amount: float, subject: str = '商�
         {'success': bool, 'qr_code': str, 'order_id': str, 'amount': str, ...}
         未配置时返回失败（fail-closed，不再 mock 假成功）
     """
+    subject = subject or _('Shop order')
     from shared.plugin_access import get_attr
     create_alipay_order = get_attr('plugins.payment.gateways.alipay', 'create_alipay_order',
                                    feature='shop_payment_create')
@@ -69,7 +72,7 @@ def create_shop_payment(order_id: str, total_amount: float, subject: str = '商�
         'pay_url': '',
         'order_id': order_id,
         'amount': f'{amount_fen/100:.2f}',
-        'note': '请使用支付宝扫码完成支付',
+        'note': _('Scan the QR code with Alipay to complete payment'),
     }
 
 
@@ -99,7 +102,7 @@ def confirm_shop_order(order_id: str, trade_no: str = '', payment_method: str = 
             (order_id,)
         ).fetchall()
         if not items:
-            return False, '订单不存在或已支付'
+            return False, _('Order does not exist or has already been paid')
 
         for item in items:
             conn.execute(
@@ -129,4 +132,4 @@ def confirm_shop_order(order_id: str, trade_no: str = '', payment_method: str = 
     except Exception:
         pass
     
-    return True, '支付成功'
+    return True, _('Payment successful')

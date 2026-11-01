@@ -176,6 +176,7 @@ class PluginInfo:
 # ── 数据库模型 ────────────────────────────────────────────────────────────
 
 # 插件注册表 DDL
+# i18n:tech:begin — SQL DDL 建表语句及内联中文注释，非用户可见文案
 PLUGIN_REGISTRY_DDL = """
 CREATE TABLE IF NOT EXISTS plugin_registry (
     id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -236,6 +237,7 @@ CREATE INDEX IF NOT EXISTS idx_plugin_registry_status
 CREATE INDEX IF NOT EXISTS idx_plugin_registry_identifier
     ON plugin_registry(identifier);
 """
+# i18n:tech:end
 
 
 # 与 init_license_store_tables 共用同一会话级 advisory lock（见 models_store.py），

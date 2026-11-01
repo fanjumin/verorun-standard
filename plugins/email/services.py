@@ -99,15 +99,17 @@ _ENV_MAP = {
     'smtp_from': 'SMTP_FROM', 'imap_host': 'IMAP_HOST', 'imap_port': 'IMAP_PORT',
 }
 
-CONFIG_DEFS = {
-    'smtp_host':  {'label': _('SMTP 服务器'),    'default': '',   'sensitive': False},
-    'smtp_port':  {'label': _('SMTP 端口'),      'default': '',   'sensitive': False},
-    'smtp_user':  {'label': _('SMTP 账号'),      'default': '',   'sensitive': False},
-    'smtp_pass':  {'label': _('SMTP 密码'),      'default': '',   'sensitive': True},
-    'smtp_from':  {'label': _('发件人地址'),      'default': '',   'sensitive': False},
-    'imap_host':  {'label': _('IMAP 服务器'),     'default': '',   'sensitive': False},
-    'imap_port':  {'label': _('IMAP 端口'),       'default': '',   'sensitive': False},
-}
+def config_defs(locale=None):
+    """设置页字段定义（label 按当前语言翻译；模块级常量不可求值翻译）。"""
+    return {
+        'smtp_host':  {'label': _('SMTP server', locale=locale),   'default': '',   'sensitive': False},
+        'smtp_port':  {'label': _('SMTP port', locale=locale),     'default': '',   'sensitive': False},
+        'smtp_user':  {'label': _('SMTP account', locale=locale),  'default': '',   'sensitive': False},
+        'smtp_pass':  {'label': _('SMTP password', locale=locale), 'default': '',   'sensitive': True},
+        'smtp_from':  {'label': _('Sender address', locale=locale), 'default': '',  'sensitive': False},
+        'imap_host':  {'label': _('IMAP server', locale=locale),   'default': '',   'sensitive': False},
+        'imap_port':  {'label': _('IMAP port', locale=locale),     'default': '',   'sensitive': False},
+    }
 
 
 # ─── Config helpers ────────────────────────────────────────────────────────
@@ -437,11 +439,11 @@ def mail_config_error():
     """
     cfg = _get_mail_config()
     if not (cfg.get('smtp_user') or '').strip():
-        return _("邮箱账号未配置：请在「邮件服务 → ⚙ 设置」填写完整邮箱地址")
+        return _("Email account is not configured: fill in the full email address in Email → Settings")
     if not (cfg.get('smtp_pass') or '').strip():
-        return _("邮箱授权码未配置：请在「邮件服务 → ⚙ 设置」填写客户端授权码（非登录密码）")
+        return _("Email authorization code is not configured: fill in the client authorization code (not the login password) in Email → Settings")
     if not (cfg.get('imap_host') or '').strip():
-        return _("IMAP 服务器地址未配置：请在「邮件服务 → ⚙ 设置」填写 imap_host")
+        return _("IMAP server address is not configured: fill in imap_host in Email → Settings")
     return None
 
 
@@ -458,9 +460,9 @@ def _connect_imap():
         imap = imaplib.IMAP4_SSL(host, port, timeout=IMAP_CONNECT_TIMEOUT)
     except OSError as e:
         raise RuntimeError(
-            _("IMAP 服务器不可达: {host}:{port} —— 请到「邮件服务 → ⚙ 设置」核对 IMAP 主机与端口"
-              "（若 .env 配了 IMAP_HOST，其优先级高于界面设置）").format(
-                host=host, port=port) + f" [{type(e).__name__}: {str(e)[:60]}]"
+            _("IMAP server unreachable: {host}:{port} — check the IMAP host and port in "
+              "Email → Settings (IMAP_HOST in .env takes precedence over the UI setting)",
+              host=host, port=port) + f" [{type(e).__name__}: {str(e)[:60]}]"
         ) from e
     imap.login(cfg['smtp_user'], cfg['smtp_pass'])
     imap.select("INBOX")
@@ -543,7 +545,7 @@ def _get_email_body(msg):
             plain_text = _decode_body(payload, msg.get_content_charset())
         elif ct == "text/html":
             html_text = _decode_body(payload, msg.get_content_charset())
-    return plain_text or _("(无文本内容)"), html_text
+    return plain_text or _("(No text content)"), html_text
 
 
 def _get_attachments_from_msg(msg):
@@ -643,7 +645,7 @@ def fetch_inbox(page=1, per_page=20, keyword=''):
     try:
         imap = _connect_imap()
     except Exception as e:
-        return {"error": _("IMAP 连接失败: {}").format(e), "items": [], "total": 0}
+        return {"error": _("IMAP connection failed: {error}", error=e), "items": [], "total": 0}
     try:
         kw = (keyword or '').strip()
         if kw:
@@ -651,7 +653,7 @@ def fetch_inbox(page=1, per_page=20, keyword=''):
         else:
             status, data = imap.uid("search", None, "ALL")
             if status != "OK":
-                return {"error": _("无法搜索收件箱"), "items": [], "total": 0}
+                return {"error": _("Failed to search inbox"), "items": [], "total": 0}
             all_uids = data[0].split()
         total = len(all_uids)
         start = max(0, total - page * per_page)
@@ -679,7 +681,7 @@ def _fetch_one_inbox(imap, uid):
             return None
         raw_header = msg_data[0][1] if isinstance(msg_data[0], tuple) else b""
         msg = email.message_from_bytes(raw_header)
-        subject = _decode_mime_header(msg.get("Subject", _("(无主题)")))
+        subject = _decode_mime_header(msg.get("Subject", _("(No subject)")))
         _from = _decode_mime_header(msg.get("From", ""))
         date_str = msg.get("Date", "")
 
@@ -705,16 +707,16 @@ def read_email(uid):
     try:
         imap = _connect_imap()
     except Exception as e:
-        return {"error": _("IMAP 连接失败: {}").format(e)}
+        return {"error": _("IMAP connection failed: {error}", error=e)}
     try:
         uid_bytes = str(uid).encode() if isinstance(uid, int) else uid.encode() if isinstance(uid, str) else uid
         status, msg_data = imap.uid("fetch", uid_bytes, "(BODY[])")
         if status != "OK":
             imap.logout()
-            return {"error": _("无法读取邮件")}
+            return {"error": _("Failed to read email")}
         raw_email = msg_data[0][1] if isinstance(msg_data[0], tuple) else b""
         msg = email.message_from_bytes(raw_email)
-        subject = _decode_mime_header(msg.get("Subject", _("(无主题)")))
+        subject = _decode_mime_header(msg.get("Subject", _("(No subject)")))
         _from = _decode_mime_header(msg.get("From", ""))
         _to = _decode_mime_header(msg.get("To", ""))
         _cc = _decode_mime_header(msg.get("Cc", ""))
@@ -749,7 +751,7 @@ def get_attachment(uid, filename):
         status, msg_data = imap.uid("fetch", uid_bytes, "(BODY[])")
         if status != "OK":
             imap.logout()
-            return None, _("无法读取邮件")
+            return None, _("Failed to read email")
         raw_email = msg_data[0][1] if isinstance(msg_data[0], tuple) else b""
         msg = email.message_from_bytes(raw_email)
         attachments = _get_attachments_from_msg(msg)
@@ -758,7 +760,7 @@ def get_attachment(uid, filename):
             if att["filename"] == filename and not att.get("too_large"):
                 data = base64.b64decode(att["data"])
                 return data, att["content_type"]
-        return None, _("附件不存在")
+        return None, _("Attachment not found")
     except Exception as e:
         try:
             imap.logout()
@@ -792,7 +794,7 @@ def send_email(to_addr, subject, body_text, body_html=None, cc=None, bcc=None, r
     if cfg is None:
         cfg = _get_mail_config(pm)
     if not cfg['smtp_user'] or not cfg['smtp_pass']:
-        return False, _("SMTP 未配置 (请先设置 SMTP_USER/SMTP_PASS 环境变量)")
+        return False, _("SMTP is not configured (set SMTP_USER/SMTP_PASS first)")
 
     # 收件人净化（EM-4）：str / list 归一并逐项校验，任一非法即整体拒绝
     _raw_to = [to_addr] if isinstance(to_addr, str) else list(to_addr or [])
@@ -821,9 +823,9 @@ def send_email(to_addr, subject, body_text, body_html=None, cc=None, bcc=None, r
             data = base64.b64decode(att["data"]) if isinstance(att["data"], str) else att["data"]
             total_attach_size += len(data)
             if len(data) > _MAX_ATTACHMENT_SIZE:
-                return False, _("附件 {} 超过 10MB 限制").format(att['filename'])
+                return False, _("Attachment {filename} exceeds the 10MB limit", filename=att['filename'])
     if total_attach_size > 50 * 1024 * 1024:
-        return False, _("附件总大小超过 50MB 限制")
+        return False, _("Total attachment size exceeds the 50MB limit")
 
     # Build message
     if attachments:
@@ -913,20 +915,20 @@ def send_email(to_addr, subject, body_text, body_html=None, cc=None, bcc=None, r
                 )
                 db.commit()
         except Exception as _db_e:
-            logger.warning(_("邮件已发送，但记录已发送日志失败: {}").format(_db_e))
+            logger.warning(_("Email sent but failed to record the sent log: {error}", error=_db_e))
 
         logger.info(f"Email sent to {to_addr}: {subject}")
-        return True, _("发送成功")
+        return True, _("Sent successfully")
 
     except smtplib.SMTPAuthenticationError:
-        logger.error(_("SMTP 认证失败"))
-        return False, _("SMTP 认证失败，请检查 SMTP_USER/SMTP_PASS")
+        logger.error(_("SMTP authentication failed"))
+        return False, _("SMTP authentication failed, check SMTP_USER/SMTP_PASS")
     except smtplib.SMTPException as e:
-        logger.error(_("SMTP 发送失败: {}").format(e))
-        return False, _("SMTP 错误: {}").format(e)
+        logger.error(_("SMTP send failed: {error}", error=e))
+        return False, _("SMTP error: {error}", error=e)
     except Exception as e:
-        logger.error(_("邮件发送异常: {}").format(e))
-        return False, _("发送异常: {}").format(e)
+        logger.error(_("Email send error: {error}", error=e))
+        return False, _("Send error: {error}", error=e)
 
 
 def log_failed_send(to_addr, subject, body_text, error):
@@ -948,7 +950,7 @@ def log_failed_send(to_addr, subject, body_text, error):
                  body_text or '', str(error or '')[:1000]))
             db.commit()
     except Exception as e:
-        logger.warning(_("记录失败发送日志失败: {}").format(e))
+        logger.warning(_("Failed to record the failed-send log: {error}", error=e))
 
 
 def get_sent_emails(page=1, per_page=20):
@@ -1035,7 +1037,7 @@ def list_folders():
     try:
         imap = _connect_imap()
     except Exception as e:
-        return {"error": _("IMAP 连接失败: {}").format(e), "folders": []}
+        return {"error": _("IMAP connection failed: {error}", error=e), "folders": []}
     try:
         status, data = imap.list()
         folders = []
@@ -1077,17 +1079,17 @@ def delete_emails(uids):
     try:
         imap = _connect_imap()
     except Exception as e:
-        return False, _("IMAP 连接失败: {}").format(e)
+        return False, _("IMAP connection failed: {error}", error=e)
     try:
         ub = _uid_bytes(uids)
         if not ub:
-            return False, _("无效的邮件 UID")
+            return False, _("Invalid email UID")
         status, _resp = imap.uid('store', ub, '+FLAGS', '(\\Deleted)')
         if status != 'OK':
-            return False, _("标记删除失败")
+            return False, _("Failed to mark for deletion")
         imap.expunge()
         imap.logout()
-        return True, _("已删除 {} 封邮件").format(len(uids))
+        return True, _("Deleted {count} email(s)", count=len(uids))
     except Exception as e:
         try:
             imap.logout()
@@ -1101,17 +1103,17 @@ def mark_read(uids, read=True):
     try:
         imap = _connect_imap()
     except Exception as e:
-        return False, _("IMAP 连接失败: {}").format(e)
+        return False, _("IMAP connection failed: {error}", error=e)
     try:
         ub = _uid_bytes(uids)
         if not ub:
-            return False, _("无效的邮件 UID")
+            return False, _("Invalid email UID")
         op = '+FLAGS' if read else '-FLAGS'
         status, _resp = imap.uid('store', ub, op, '(\\Seen)')
         imap.logout()
         if status != 'OK':
-            return False, _("标记失败")
-        return True, _("已标记为已读") if read else _("已标记为未读")
+            return False, _("Failed to mark")
+        return True, _("Marked as read") if read else _("Marked as unread")
     except Exception as e:
         try:
             imap.logout()
@@ -1125,21 +1127,21 @@ def move_emails(uids, folder):
     try:
         imap = _connect_imap()
     except Exception as e:
-        return False, _("IMAP 连接失败: {}").format(e)
+        return False, _("IMAP connection failed: {error}", error=e)
     try:
         ub = _uid_bytes(uids)
         if not ub:
-            return False, _("无效的邮件 UID")
+            return False, _("Invalid email UID")
         folders = list_folders()
         if folder != 'INBOX' and folder not in folders.get('folders', []):
-            return False, _("目标文件夹不存在: {}").format(folder)
+            return False, _("Target folder does not exist: {folder}", folder=folder)
         status, _resp = imap.uid('copy', ub, folder)
         if status != 'OK':
-            return False, _("复制到目标文件夹失败")
+            return False, _("Failed to copy to target folder")
         imap.uid('store', ub, '+FLAGS', '(\\Deleted)')
         imap.expunge()
         imap.logout()
-        return True, _("已移动 {} 封邮件到 {}").format(len(uids), folder)
+        return True, _("Moved {count} email(s) to {folder}", count=len(uids), folder=folder)
     except Exception as e:
         try:
             imap.logout()
@@ -1154,7 +1156,7 @@ def send_contact_email(name, email_addr, subject, message, cfg=None):
     cfg: dict — 预构造配置（MCP 子进程注入）；默认 None 走 _get_mail_config()。
     """
     admin_email = os.environ.get("CONTACT_TO", "")
-    full_subject = _("[联系表单] {}").format(subject)
+    full_subject = _("[Contact Form] {subject}", subject=subject)
 
     try:
         # brand_service 来自主系统，这是跨模块调用（非数据库依赖）
@@ -1165,26 +1167,30 @@ def send_contact_email(name, email_addr, subject, message, cfg=None):
     site_name_cn = brand.get('site_name_cn', '') or ''
     site_name_en = brand.get('site_name_en', '') or ''
 
-    body_text = _("""来自 {} 联系表单
-
-姓名: {}
-邮箱: {}
-主题: {}
----
-{}
-""").format(site_name_cn or site_name_en or '', name, email_addr, subject, message)
+    body_text = _(
+        "Contact form submission from {site}\n\n"
+        "Name: {name}\n"
+        "Email: {email}\n"
+        "Subject: {subject}\n"
+        "---\n"
+        "{message}\n",
+        site=site_name_cn or site_name_en or '', name=name, email=email_addr,
+        subject=subject, message=message)
 
     body_html = (
         '<!DOCTYPE html><html><body style="font-family:sans-serif;'
         'color:#333;max-width:600px;margin:20px auto">'
         # 用户提交内容一律 HTML 转义后再拼接（EM-6：阻断模板注入）
-        + _('<h2 style="color:#00d4aa">📬 来自 {} 联系表单</h2>').format(html.escape(site_name_en or site_name_cn or ""))
+        + _('<h2 style="color:#00d4aa">📬 Contact form submission from {site}</h2>',
+            site=html.escape(site_name_en or site_name_cn or ""))
         + _('<table style="width:100%;border-collapse:collapse">'
-        '<tr><td style="padding:8px;color:#888">姓名</td><td style="padding:8px">{}</td></tr>'
-        '<tr><td style="padding:8px;color:#888">邮箱</td><td style="padding:8px"><a href="mailto:{}">{}</a></td></tr>'
-        '<tr><td style="padding:8px;color:#888">主题</td><td style="padding:8px">{}</td></tr>'
-        '</table>').format(html.escape(name), html.escape(email_addr, quote=True),
-                           html.escape(email_addr), html.escape(subject))
+            '<tr><td style="padding:8px;color:#888">Name</td><td style="padding:8px">{name}</td></tr>'
+            '<tr><td style="padding:8px;color:#888">Email</td>'
+            '<td style="padding:8px"><a href="mailto:{email_href}">{email}</a></td></tr>'
+            '<tr><td style="padding:8px;color:#888">Subject</td><td style="padding:8px">{subject}</td></tr>'
+            '</table>',
+            name=html.escape(name), email_href=html.escape(email_addr, quote=True),
+            email=html.escape(email_addr), subject=html.escape(subject))
         + '<div style="margin-top:16px;padding:16px;background:#f5f5f5;border-radius:8px">{}</div>'.format(html.escape(message))
         + '</body></html>'
     )

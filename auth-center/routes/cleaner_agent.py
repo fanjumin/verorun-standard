@@ -456,7 +456,7 @@ def auto_register_sub_agent():
             description='Clean raw content into structured knowledge entries (dedup + classify + save to knowledge base)',
         )
     except Exception as e:
-        print(f'[CleanerAgent] ⚠️ 能力注册失败: {e}')
+        print(f'[CleanerAgent] ⚠️ 能力注册失败: {e}')  # i18n:tech — 启动诊断日志
 
 
 # =============================================

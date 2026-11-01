@@ -7,6 +7,8 @@
 """
 import logging
 
+from i18n import _
+
 logger = logging.getLogger(__name__)
 
 
@@ -44,7 +46,7 @@ def register_module_scheduler(scheduler):
             hour=2,
             minute=0,
             id='module_policy_daily_scan',
-            name='模块策略每日扫描',
+            name=_('Module policy daily scan'),
             replace_existing=True,
         )
         logger.info("[ModuleScheduler] Registered daily scan at 02:00")

@@ -71,7 +71,7 @@ def _require_admin():
         token = request.args.get('token') or request.cookies.get('sso_token') or request.cookies.get('tm_token')
     payload = validate_token(token) if token else None
     if not payload or not payload.get('is_admin'):
-        return jsonify({'success': False, 'error': '需要管理员权限'}), 403
+        return jsonify({'success': False, 'error': _('Administrator privileges required')}), 403
     return None
 
 
@@ -86,12 +86,12 @@ def _require_store_admin():
         return err
     from .license import _is_official_edition
     if not _is_official_edition():
-        return jsonify({'success': False, 'error': '商店运营仅官方端可用'}), 403
+        return jsonify({'success': False, 'error': _('Store operations are only available in the official edition')}), 403
     from services.jwt_service import validate_token
     token = request.headers.get('Authorization', '').replace('Bearer ', '')
     payload = validate_token(token) if token else None
     if not payload or payload.get('role') != 'super_admin':
-        return jsonify({'success': False, 'error': '需要超级管理员'}), 403
+        return jsonify({'success': False, 'error': _('Super administrator privileges required')}), 403
     return None
 
 
@@ -121,7 +121,7 @@ def _registry_rows(identifiers=None):
             rows = conn.execute(sql, params).fetchall()
         return {dict(r)['identifier']: dict(r) for r in rows}
     except Exception as e:
-        print(f'[routes] plugin_registry 读取失败: {e}')
+        print(f'[routes] plugin_registry 读取失败: {e}')  # i18n:tech — 运维日志
         return None
 
 
@@ -138,9 +138,9 @@ def _parse_positive_int(name: str, default: int, lo: int = 1, hi: int = 100000) 
     try:
         v = int(raw)
     except (TypeError, ValueError):
-        raise ValueError(f'参数 {name} 必须为整数')
+        raise ValueError(_('Parameter {name} must be an integer', name=name))
     if v < lo or v > hi:
-        raise ValueError(f'参数 {name} 必须在 [{lo}, {hi}] 之间')
+        raise ValueError(_('Parameter {name} must be between [{lo}, {hi}]', name=name, lo=lo, hi=hi))
     return v
 
 
@@ -220,7 +220,7 @@ def _edition_hidden_ids(mgr, identifiers) -> set:
             gate.update(dist_hidden)
         return set(gate)
     except Exception as e:
-        print(f'[PluginManager] ⚠️ 插件门控取数失败（本次不隐藏）: {e}')
+        print(f'[PluginManager] ⚠️ 插件门控取数失败（本次不隐藏）: {e}')  # i18n:tech — 启动诊断
         return set()
 
 
@@ -452,7 +452,7 @@ def uninstall_plugin(identifier: str):
     # 安全确认: 必须传 confirm=true
     confirm = request.json.get('confirm', False) if request.is_json else False
     if not confirm:
-        return _json_result(False, error='请确认卸载（confirm=true）', code=400)
+        return _json_result(False, error=_('Please confirm uninstall (confirm=true)'), code=400)
 
     try:
         mgr.uninstall(identifier)
@@ -502,11 +502,11 @@ def set_plugin_config(identifier: str):
         return _json_result(False, error='PluginManager not initialized', code=503)
 
     if not request.is_json:
-        return _json_result(False, error='请求体必须是 JSON', code=400)
+        return _json_result(False, error=_('Request body must be JSON'), code=400)
 
     config = request.json
     if not isinstance(config, dict):
-        return _json_result(False, error='配置必须是键值对对象', code=400)
+        return _json_result(False, error=_('Configuration must be a key-value object'), code=400)
 
     try:
         for key, value in config.items():
@@ -625,11 +625,11 @@ def batch_save_config(identifier: str):
         return _json_result(False, error='PluginManager not initialized', code=503)
 
     if not request.is_json:
-        return _json_result(False, error='请求体必须是 JSON', code=400)
+        return _json_result(False, error=_('Request body must be JSON'), code=400)
 
     config = request.json
     if not isinstance(config, dict):
-        return _json_result(False, error='配置必须是键值对对象', code=400)
+        return _json_result(False, error=_('Configuration must be a key-value object'), code=400)
 
     result = mgr.set_config_batch(identifier, config)
     if result['success']:
@@ -894,8 +894,8 @@ def _sync_plugin_usage_kb(identifier: str, name: str, usage_guide: str, enabled:
                 conn.commit()
                 return
             text = _re.sub(r'\s+', ' ', _re.sub(r'<[^>]+>', ' ', html)).strip()[:4000]
-            title = f'Plugin {name} — 使用说明'
-            keywords = f'{identifier},{name},plugin,usage,插件,使用'
+            title = _('Plugin {name} — Usage Guide', name=name)
+            keywords = _('{identifier},{name},plugin,usage', identifier=identifier, name=name)
             existing = conn.execute(
                 'SELECT id FROM knowledge_blocks WHERE id=%s', (kb_id,)).fetchone()
             if existing:
@@ -989,7 +989,7 @@ def store_admin_save():
         from .distribution import valid_category_keys
         _cat_keys = set(CATEGORY_ENUM) | valid_category_keys()
     except Exception as _e:
-        print(f'[store] ⚠️ 动态分类取数失败，回落内置枚举: {_e}')
+        print(f'[store] ⚠️ 动态分类取数失败，回落内置枚举: {_e}')  # i18n:tech — 运维日志
         _cat_keys = set(CATEGORY_ENUM)
     if data.get('category') and data['category'] not in _cat_keys:
         return _json_result(False, error=f'category must be one of {sorted(_cat_keys)}', code=400)
@@ -1196,7 +1196,7 @@ def store_pricing_preview():
     data = request.json if request.is_json else {}
     base_month_fen_raw = data.get('base_month_fen')
     if base_month_fen_raw is None:
-        return _json_result(False, error='缺少必填字段: base_month_fen (int, 单位分)', code=400)
+        return _json_result(False, error=_('Missing required field: base_month_fen (int, in fen)'), code=400)
     try:
         base_month_fen = int(base_month_fen_raw)
     except (TypeError, ValueError):
@@ -1361,7 +1361,7 @@ def store_browse():
             data['plugins'] = [p for p in _plugins if p.get('identifier') in _keep]
             if isinstance(data.get('total'), int):
                 data['total'] = max(0, data['total'] - len(_hid))
-            print(f'[store] 🔀 动态分流隐藏 {len(_hid)} 项: {sorted(_hid)[:5]}')
+            print(f'[store] 🔀 动态分流隐藏 {len(_hid)} 项: {sorted(_hid)[:5]}')  # i18n:tech — 运维日志
     except Exception as e:
         print(f'[routes] store_browse distribution filter failed: {e}')
 
@@ -1581,7 +1581,7 @@ def store_install(identifier: str):
                 error=f'Plugin "{identifier}" is not available for this deployment ({_dres[1]})',
                 code=403)
     except Exception as _de:
-        print(f'[routes] store install 分流闸门取数失败（放行）: {_de}')
+        print(f'[routes] store install 分流闸门取数失败（放行）: {_de}')  # i18n:tech — 运维日志
 
     # 阶段 3：部署版本兼容校验
     from .store import DEPLOY_EDITION, StoreAPIClient
@@ -1697,22 +1697,22 @@ def _schedule_service_restart(delay: float = 3.0):
                'systemctl', 'restart', *_RESTART_UNITS]
         rc, out = _run(cmd)
         if rc == 0:
-            print(f'[PluginManager] ✅ 插件路由重启已提交: {" ".join(cmd)}')
+            print(f'[PluginManager] ✅ 插件路由重启已提交: {" ".join(cmd)}')  # i18n:tech — 运维日志
             return
-        print(f'[PluginManager] ⚠️ systemd-run 形态不可用（rc={rc} {out[:200]}），'
-              f'改用逐单元 systemctl')
+        print(f'[PluginManager] ⚠️ systemd-run 形态不可用（rc={rc} {out[:200]}），'  # i18n:tech — 运维日志
+              f'改用逐单元 systemctl')  # i18n:tech — 运维日志
 
         failed = []
         for unit in _RESTART_UNITS:
             rc, out = _run(['sudo', '-n', 'systemctl', 'restart', unit])
             if rc == 0:
-                print(f'[PluginManager] ✅ 已重启 {unit}')
+                print(f'[PluginManager] ✅ 已重启 {unit}')  # i18n:tech — 运维日志
             else:
                 failed.append(f'{unit} rc={rc} {out[:200]}')
-                print(f'[PluginManager] ⚠️ 重启 {unit} 失败: rc={rc} {out[:200]}')
+                print(f'[PluginManager] ⚠️ 重启 {unit} 失败: rc={rc} {out[:200]}')  # i18n:tech — 运维日志
         if failed:
-            print(f'[PluginManager] ❌ 插件路由自动重启存在失败项，'
-                  f'新启用插件页面需人工重启服务后生效: {failed}')
+            print(f'[PluginManager] ❌ 插件路由自动重启存在失败项，'  # i18n:tech — 运维日志
+                  f'新启用插件页面需人工重启服务后生效: {failed}')  # i18n:tech — 运维日志
 
     threading.Thread(target=_restart, daemon=True).start()
 
@@ -1737,7 +1737,7 @@ def store_upgrade(identifier: str):
     try:
         result = mgr.upgrade(identifier)
     except PluginNotFoundError:
-        return _json_result(False, error=f'插件 {identifier} 未安装', code=404)
+        return _json_result(False, error=_('Plugin {identifier} is not installed', identifier=identifier), code=404)
     except PluginStateError as e:
         return _json_result(False, error=str(e), code=409)
     except PluginVersionError as e:
@@ -1992,9 +1992,10 @@ def upload_plugin():
         #   本检查不依赖包内容、不依赖该插件是否已安装在本机，因此也不受目录冲突先后影响。
         if _reserved_official_identifier(identifier):
             # 尚未 makedirs，无残留需回滚
-            return _json_result(False, error=(
-                f'identifier "{identifier}" 为官方插件保留名，不接受经上传入口提交；'
-                '官方插件请通过插件商店安装。'
+            return _json_result(False, error=_(
+                'The identifier "{identifier}" is reserved for official plugins and cannot be '
+                'submitted through the upload entry; please install official plugins from '
+                'the plugin store.', identifier=identifier
             ), code=403)
 
         # ★ P7: 校验 min_app_version 兼容性
@@ -2042,7 +2043,7 @@ def upload_plugin():
                 if _guard_count > 2000 or _guard_total > 200 * 1024 * 1024:
                     import shutil as _shutil_guard
                     _shutil_guard.rmtree(dest_dir, ignore_errors=True)
-                    return _json_result(False, error='插件解压后体积或文件数超限，已拒绝', code=400)
+                    return _json_result(False, error=_('Plugin exceeds the size or file-count limit after extraction and was rejected'), code=400)
 
         # ★ 6a1. P1-3: 体积配额校验（声明 max_dependencies_kb，默认 200MB 对齐护栏）
         _max_deps_kb = int(plugin_meta.get('max_dependencies_kb') or 204800)
@@ -2052,8 +2053,8 @@ def upload_plugin():
             import shutil as _shutil_q
             _shutil_q.rmtree(dest_dir, ignore_errors=True)
             return _json_result(False,
-                error=(f'解压体积 {_guard_total / 1024 / 1024:.1f}MB '
-                       f'超过配额 {_max_deps_kb / 1024:.0f}MB'),
+                error=_('Extracted size {size_mb:.1f}MB exceeds the quota {quota_mb:.0f}MB',
+                        size_mb=_guard_total / 1024 / 1024, quota_mb=_max_deps_kb / 1024),
                 code=400)
 
         # ★ 6b. 官方插件水印检测（VeroRun 官方插件水印体系）
@@ -2065,11 +2066,13 @@ def upload_plugin():
             # 回滚：删除已解压的目录
             import shutil as _shutil_wm
             _shutil_wm.rmtree(dest_dir, ignore_errors=True)
-            return _json_result(False, error=(
-                f'检测到官方插件二次打包'
-                f'（identifier={_wm.get("identifier") or "未知"}，'
-                f'命中方式：{_wm.get("reason", "")}）。'
-                '官方插件请从插件商店安装，禁止重新打包上传。'
+            return _json_result(False, error=_(
+                'Detected re-packaging of an official plugin '
+                '(identifier={identifier}, matched by: {reason}). '
+                'Please install official plugins from the plugin store; '
+                're-packaging and uploading is prohibited.',
+                identifier=_wm.get('identifier') or 'unknown',
+                reason=_wm.get('reason', '')
             ), code=400)
 
         # ★ 6c. 进入审核队列（两阶段审核 · 批次2：pending → AI 规则审核 → 批准后安装）
@@ -2152,7 +2155,7 @@ def upload_plugin():
             'name': name,
             'version': version,
             'status': 'pending',
-            'message': '插件已提交审核，审核通过后将自动安装。',
+            'message': _('Plugin submitted for review; it will be installed automatically after approval.'),
         })
 
     except _zipfile.BadZipFile as e:
@@ -2290,11 +2293,11 @@ def approve_submission(sub_id):
         _auto_publish = bool(_req_body.get('auto_publish'))
         _sync_warn = None  # 仅 catalog sync 失败时携带告警（不回滚已发布的提交）
         if _audit_status == 'reject' and not _override:
-            return _json_result(False, error=(
-                '审计未通过（audit_status=reject），含危险代码特征，禁止安装；'
-                '如需强制放行请显式传递 override=true'), code=400)
+            return _json_result(False, error=_(
+                'Audit failed (audit_status=reject) with dangerous code characteristics; '
+                'installation is prohibited. To force approval, explicitly pass override=true'), code=400)
         if _audit_status == 'pending':
-            return _json_result(False, error='该提交尚未执行 AI 审核，请先调用 /review 后再批准', code=400)
+            return _json_result(False, error=_('This submission has not been AI-reviewed yet; call /review before approving'), code=400)
 
         mgr = _get_manager()
         if not mgr:
@@ -3317,22 +3320,22 @@ def store_reviews_list(identifier: str):
 def store_review_create(identifier: str):
     """创建评价（免费插件登录即可评价；付费插件需购买）"""
     if not request.is_json:
-        return _json_result(False, error='请求体必须是 JSON', code=400)
+        return _json_result(False, error=_('Request body must be JSON'), code=400)
 
     data = request.json
     try:
         rating = int(data.get('rating', 0))
     except (TypeError, ValueError):
-        return _json_result(False, error='评分必须为 1-5 的整数', code=400)
+        return _json_result(False, error=_('Rating must be an integer from 1 to 5'), code=400)
     content = (data.get('content') or '').strip()
 
     if rating < 1 or rating > 5:
-        return _json_result(False, error='评分必须在 1-5 之间', code=400)
+        return _json_result(False, error=_('Rating must be between 1 and 5'), code=400)
 
     # 从 JWT 获取用户信息（管理员/用户 token 双通道）
     user_id, user_name, _is_admin = _get_jwt_user()
     if not user_id:
-        return _json_result(False, error='未登录', code=401)
+        return _json_result(False, error=_('Not logged in'), code=401)
 
     # 评价资格：免费插件登录即可评价；付费插件需有效 License（D-REVIEW-FREE）
     mgr = _get_manager()
@@ -3347,7 +3350,7 @@ def store_review_create(identifier: str):
         if price_type != 'free':
             lic = mgr.license_manager.get_license(identifier)
             if not lic or lic.get('license_status') not in ('active', 'grace'):
-                return _json_result(False, error='请先购买插件后再评价', code=403)
+                return _json_result(False, error=_('Please purchase the plugin before reviewing'), code=403)
 
     with get_registry_db() as conn:
         # 检查是否已评价过
@@ -3392,14 +3395,14 @@ def store_review_delete(identifier: str, review_id: int):
     """删除评价（仅自己或管理员）"""
     user_id, _user_name, is_admin = _get_jwt_user()
     if not user_id and not is_admin:
-        return _json_result(False, error='未登录', code=401)
+        return _json_result(False, error=_('Not logged in'), code=401)
 
     with get_registry_db() as conn:
         review = conn.execute('SELECT * FROM plugin_reviews WHERE id=%s', (review_id,)).fetchone()
         if not review:
-            return _json_result(False, error='评价不存在', code=404)
+            return _json_result(False, error=_('Review not found'), code=404)
         if review['user_id'] != user_id and not is_admin:
-            return _json_result(False, error='无权删除此评价', code=403)
+            return _json_result(False, error=_('You are not allowed to delete this review'), code=403)
 
         conn.execute('UPDATE plugin_reviews SET is_active=0 WHERE id=%s', (review_id,))
         # 重新计算评分
@@ -3426,16 +3429,16 @@ def store_review_reply(identifier: str, review_id: int):
         return err
 
     if not request.is_json:
-        return _json_result(False, error='请求体必须是 JSON', code=400)
+        return _json_result(False, error=_('Request body must be JSON'), code=400)
 
     reply_content = request.json.get('content', '').strip()
     if not reply_content:
-        return _json_result(False, error='回复内容不能为空', code=400)
+        return _json_result(False, error=_('Reply content cannot be empty'), code=400)
 
     with get_registry_db() as conn:
         review = conn.execute('SELECT * FROM plugin_reviews WHERE id=%s', (review_id,)).fetchone()
         if not review:
-            return _json_result(False, error='评价不存在', code=404)
+            return _json_result(False, error=_('Review not found'), code=404)
 
         conn.execute(
             'UPDATE plugin_reviews SET reply_content=%s, reply_at=NOW() WHERE id=%s',
@@ -4318,15 +4321,17 @@ def developer_submit():
                 _guard_total += _os.path.getsize(_os.path.join(_gdp, _gfn))
                 if _guard_count > 2000 or _guard_total > 200 * 1024 * 1024:
                     _shutil.rmtree(pending_dir, ignore_errors=True)
-                    return _json_result(False, error='插件解压后体积或文件数超限，已拒绝', code=400)
+                    return _json_result(False, error=_('Plugin exceeds the size or file-count limit after extraction and was rejected'), code=400)
 
         # 4. 官方水印检测（硬拒即回滚）
         _wm = detect_official_watermark(pending_dir)
         if _wm.get('official') and _wm.get('method') in WM_HARD:
             _shutil.rmtree(pending_dir, ignore_errors=True)
-            return _json_result(False, error=(
-                f'检测到官方插件二次打包（identifier={_wm.get("identifier") or "未知"}）。'
-                '官方插件请从插件商店安装，禁止重新打包提交。'), code=400)
+            return _json_result(False, error=_(
+                'Detected re-packaging of an official plugin (identifier={identifier}). '
+                'Please install official plugins from the plugin store; '
+                're-packaging and submitting is prohibited.',
+                identifier=_wm.get('identifier') or 'unknown'), code=400)
 
         # 5. 写入审核队列（含元数据 + developer_id）
         from .models import get_registry_db
@@ -4403,7 +4408,7 @@ def developer_submit():
             'name': name,
             'version': version,
             'status': 'pending',
-            'message': '插件已提交审核，请前往开发者中心查看进度。',
+            'message': _('Plugin submitted for review; check progress in the developer center.'),
         })
 
     except json.JSONDecodeError:
@@ -5442,7 +5447,7 @@ def store_categories():
             'map': category_map(),
         })
     except Exception as e:
-        print(f'[store] ⚠️ /store/categories 取数失败（前端将走内置 fallback）: {e}')
+        print(f'[store] ⚠️ /store/categories 取数失败（前端将走内置 fallback）: {e}')  # i18n:tech — 运维日志
         return _json_result(True, data={'categories': [], 'map': {}})
 
 

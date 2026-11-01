@@ -4,7 +4,7 @@ import platform as _stdlib_platform
 # VeroRun 维洛智能 (verorun.com / verorun.cn)
 # 版权所有 (c) 2026 樊聚民 (fanjumin). All Rights Reserved.
 
-"""Admin Panel — 管理后台 (独立端口 8084)"""
+# Admin Panel
 """VeroRun — Multi-agent AI Content & Commerce Hub"""
 
 import sys, os, re, secrets, time as _time, threading
@@ -23,12 +23,18 @@ from routes.auth import auth_bp
 from routes.admin import admin_bp
 from routes.cms_admin import cms_admin_bp
 from routes.user import user_bp
+from routes.local_auth import local_auth_bp
 # social_bp（社媒推广）已解耦为 plugins/social_push/，由 PluginManager 挂载
 from routes.social_media import social_media_bp
 from routes.footer_admin import footer_bp
 from routes.header_admin import header_bp
 from routes.comments import comments_bp
-from routes.theme_admin import theme_bp
+# theme_admin 是 admin 专属实现（auth-center/routes/theme_admin.py 已精简为只含查询函数）。
+# 顶层 `routes` 是 admin/routes 与 auth-center/routes 合并的命名空间包，会解析到 auth-center
+# 的精简版；admin 是常规包，故显式走 admin.routes 命中 admin 专属实现。
+# 注意：admin/routes 下不能放 __init__.py，否则顶层 `routes` 会退化为常规包，
+# 导致 routes.auth / routes.admin 等全部导入失败。
+from admin.routes.theme_admin import theme_bp
 from routes.cleaner_agent import cleaner_bp
 from models.cms import init_cms_tables
 from routes.douyin_miniprogram import douyin_mp_bp
@@ -250,10 +256,19 @@ try:
 except Exception as e:
     print(f'[DB] init_db warning: {e}')
 
+# 桌面单机版首启引导：空库时创建默认管理员（随机初始密码）。
+# 仅 VR_LOCAL_MODE=1 生效，线上部署仍由 deploy/seed_data.py 负责播种。
+try:
+    from bootstrap import ensure_default_admin
+    ensure_default_admin()
+except Exception as e:
+    print(f'[DB] default admin bootstrap warning: {e}')
+
 # ── i18n: 启动时从 YAML 播种到 DB（已移至 gunicorn_config.py post_fork） ──
 # seed_from_yaml 通过 pg_try_advisory_lock + post_fork 延迟初始化，避免阻塞 worker
 # 注册管理后台需要的 blueprint — 包含 user_bp（管理员基本设置 /user/config）
 app.register_blueprint(user_bp)
+app.register_blueprint(local_auth_bp)  # 桌面单机版本地密码（VR_LOCAL_MODE=1 且仅本机）
 app.register_blueprint(auth_bp)
 app.register_blueprint(admin_bp)
 app.register_blueprint(cms_admin_bp)
@@ -271,13 +286,13 @@ try:
     from routes.cleaner_agent import auto_register_sub_agent
     auto_register_sub_agent()
 except Exception as e:
-    print(f'[CleanerAgent] ⚠️ 自动注册失败: {e}')
+    print(f'[CleanerAgent] ⚠️ 自动注册失败: {e}')  # i18n:tech — 启动诊断
 # 启动知识库定期维护调度器（阶段三）
 try:
     from routes.cleaner_agent import init_kb_scheduler
     init_kb_scheduler()
 except Exception as e:
-    print(f'[KnowledgeMaintenance] ⚠️ 调度器启动失败: {e}')
+    print(f'[KnowledgeMaintenance] ⚠️ 调度器启动失败: {e}')  # i18n:tech — 启动诊断
 
 # ===== 自动续费引擎（插件订阅体系，唯一调度入口）=====
 # 订阅系统已整体迁移至 plugins/subscription（subscription schema），
@@ -307,7 +322,7 @@ else:
     except ImportError:
         print('[Subscription] ⚠️ APScheduler 未安装，订阅调度跳过')
     except Exception as e:
-        print(f'[Subscription] ⚠️ 订阅调度启动失败: {e}')
+        print(f'[Subscription] ⚠️ 订阅调度启动失败: {e}')  # i18n:tech — 启动诊断
 
 # ===== 模型目录自动对齐（Phase C：周调度；消费方 = 本块 APScheduler 实例，
 # 已在启动日志确认，避免"声明式空壳"教训复发）=====
@@ -325,7 +340,7 @@ try:
     _ms_sched.start()
     print('[ModelSync] ✅ 模型目录调度已注册并启动（周一 03:40 体检落库 / 周三 03:40 1-token 探测）')
 except Exception as e:
-    print(f'[ModelSync] ⚠️ 模型目录周调度启动失败: {e}')
+    print(f'[ModelSync] ⚠️ 模型目录周调度启动失败: {e}')  # i18n:tech — 启动诊断
 
 init_cms_tables()
 
@@ -356,9 +371,9 @@ try:
         if not pm.is_path_allowed(request.path):
             abort(404)
 
-    print(f'[PluginManager] ✅ 管理 API 蓝图已注册 (/admin/plugins/*)')
+    print(f'[PluginManager] ✅ 管理 API 蓝图已注册 (/admin/plugins/*)')  # i18n:tech — 启动诊断
 except Exception as e:
-    print(f'[PluginManager] ❌ 初始化失败: {e}')
+    print(f'[PluginManager] ❌ 初始化失败: {e}')  # i18n:tech — 启动诊断
     import traceback
     traceback.print_exc()
 
@@ -369,20 +384,20 @@ try:
     sched, worker = init_automation(app)
     app.config['AUTOMATION_SCHEDULER'] = sched
     app.config['AUTOMATION_WORKER'] = worker
-    print(f'[Automation] ✅ 调度器 + Worker 池已初始化')
+    print(f'[Automation] ✅ 调度器 + Worker 池已初始化')  # i18n:tech — 启动诊断
     print(f'[Automation] 📋 API: /admin/automation/*')
     # 插件自定义 DAG 节点注册（如 veroscholar_search），供工作流执行使用
     try:
         if worker is not None:
             _n = pm.register_all_dag_nodes(worker.workflow_engine)
-            print(f'[PluginManager] ✅ 已注册 {_n} 个插件 DAG 节点')
+            print(f'[PluginManager] ✅ 已注册 {_n} 个插件 DAG 节点')  # i18n:tech — 启动诊断
     except Exception as e:
-        print(f'[PluginManager] ⚠️ 插件 DAG 节点注册失败: {e}')
+        print(f'[PluginManager] ⚠️ 插件 DAG 节点注册失败: {e}')  # i18n:tech — 启动诊断
 except ImportError as e:
-    print(f'[Automation] ⚠️ 未安装 APScheduler: pip install apscheduler sqlalchemy')
+    print(f'[Automation] ⚠️ 未安装 APScheduler: pip install apscheduler sqlalchemy')  # i18n:tech — 启动诊断
     print(f'[Automation]    import error: {e}')
 except Exception as e:
-    print(f'[Automation] ❌ 初始化失败: {e}')
+    print(f'[Automation] ❌ 初始化失败: {e}')  # i18n:tech — 启动诊断
     import traceback
     traceback.print_exc()
 
@@ -396,10 +411,10 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 try:
     from agent_matrix.routes import init_agent_matrix
     init_agent_matrix(app)
-    print(f'[Agent Matrix] ✅ 已初始化')
+    print(f'[Agent Matrix] ✅ 已初始化')  # i18n:tech — 启动诊断
     print(f'[Agent Matrix] 📋 API: /admin/agent-matrix/*')
 except Exception as e:
-    print(f'[Agent Matrix] ❌ 初始化失败: {e}')
+    print(f'[Agent Matrix] ❌ 初始化失败: {e}')  # i18n:tech — 启动诊断
     import traceback
     traceback.print_exc()
 
@@ -438,7 +453,7 @@ def _license_enforced():
         from agent_matrix.models import edition_requires_license
         requires = bool(edition_requires_license())
     except Exception as e:            # 判定不了就按不强制（否则核心起不来）
-        print(f'[License] ⚠️ edition 强制判定失败（按不强制处理）: {e}')
+        print(f'[License] ⚠️ edition 强制判定失败（按不强制处理）: {e}')  # i18n:tech — 启动诊断
         return False
     return requires and not _official_dev_exempt()
 
@@ -463,11 +478,12 @@ if _LICENSE_ENFORCED:
         _ls = None
         # fail-closed：授权服务不可用 ≠ 放行。原先这里只 print 后继续跑，
         # 等于"依赖装不上就把锁拆掉"。
-        print(f'[License] ❌ 授权服务初始化失败，管理后台按 fail-closed 锁定: {e}')
+        print(f'[License] ❌ 授权服务初始化失败，管理后台按 fail-closed 锁定: {e}')  # i18n:tech — 启动诊断
 
     def _license_denied_payload():
+        from i18n import _
         return {'success': False, 'data': None, 'error': 'subscription_expired',
-                'message': '订阅已到期或未激活，请续费后继续使用'}, 403
+                'message': _('Subscription expired or inactive. Please renew to continue')}, 403
 
     @app.before_request
     def _check_subscription():
@@ -497,9 +513,11 @@ if _LICENSE_ENFORCED:
     @app.route('/admin/renew')
     def admin_renew_page():
         """续费/授权状态页（模板 renew.html 早已存在但全仓无路由 → 锁定后跳转会 404）。"""
+        from i18n import _
         status = (_ls.get_status() if _ls else
                   {'valid': False, 'status': 'unknown', 'days_remaining': 0,
-                   'message': '授权服务不可用，请联系供应方', 'cached_at': '', 'needs_refresh': False})
+                   'message': _('License service unavailable, please contact your vendor'),
+                   'cached_at': '', 'needs_refresh': False})
         return render_template('renew.html', license=status)
 
     @app.route('/admin/api/license-refresh', methods=['POST'])
@@ -603,11 +621,12 @@ def _desktop_entry_gate() -> bool:
 
 def _desktop_only_response():
     from flask import make_response
+    from i18n import _
     from agent_matrix.models import current_edition
     edition = current_edition()
     # canonical ID 口径：current_edition() 返回 'research'，不是磁盘名 'research-desktop'。
     # 按磁盘名比较恒为 False → 科研桌面版会被显示成"金融版"（第五轮 N5-1）。
-    label = '科研版' if edition == 'research' else '金融版'
+    label = _('Research Edition') if edition == 'research' else _('Finance Edition')
     return make_response(render_template('desktop_redirect.html', edition=edition, edition_label=label), 200)
 
 
@@ -751,6 +770,7 @@ def admin_login_action():
     client_type: 'browser' (默认, Set-Cookie), 'desktop'/'mobile' (返回 JSON token)
     """
     import hashlib, hmac, time as _time_module, random, string
+    from i18n import _
     from services.jwt_service import create_token
 
     data = request.get_json(force=True, silent=True) or {}
@@ -768,14 +788,16 @@ def admin_login_action():
         attempts = _admin_login_attempts.get(attempt_key, {'count': 0, 'first': now, 'banned_until': 0})
         if attempts.get('banned_until', 0) > now:
             remaining = attempts['banned_until'] - now
-            return jsonify({'ok': False, 'error': f'登录被临时锁定，{remaining // 60 + 1} 分钟后重试'}), 429
+            return jsonify({'ok': False, 'error': _(
+                'Login temporarily locked. Please retry in {minutes} minute(s)',
+                minutes=remaining // 60 + 1)}), 429
         if now - attempts['first'] > 900:
             attempts = {'count': 0, 'first': now, 'banned_until': 0}
 
     # ── 验证码登录分支 (桌面/移动端) ──
     if code:
         if not username:
-            return jsonify({'ok': False, 'error': '请输入账号'}), 400
+            return jsonify({'ok': False, 'error': _('Please enter your account')}), 400
 
         market = os.environ.get('DEPLOY_MARKET', 'cn')
         now_iso = __import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -790,10 +812,10 @@ def admin_login_action():
                 ).fetchone()
                 if not row:
                     _hit_attempt(attempts, now)
-                    return jsonify({'ok': False, 'error': '验证码错误或已过期'}), 400
+                    return jsonify({'ok': False, 'error': _('Verification code is incorrect or expired')}), 400
                 row = dict(row)
                 if row['attempts'] >= 5:
-                    return jsonify({'ok': False, 'error': '尝试次数过多，请重新获取验证码'}), 400
+                    return jsonify({'ok': False, 'error': _('Too many attempts, please request a new code')}), 400
                 conn.execute('UPDATE email_codes SET used=1 WHERE id=%s', (row['id'],))
                 # Find user by email
                 user = conn.execute('SELECT * FROM users WHERE email=%s AND is_admin=1', (username,)).fetchone()
@@ -805,10 +827,10 @@ def admin_login_action():
                 ).fetchone()
                 if not row:
                     _hit_attempt(attempts, now)
-                    return jsonify({'ok': False, 'error': '验证码错误或已过期'}), 400
+                    return jsonify({'ok': False, 'error': _('Verification code is incorrect or expired')}), 400
                 row = dict(row)
                 if row['attempts'] >= 5:
-                    return jsonify({'ok': False, 'error': '尝试次数过多，请重新获取验证码'}), 400
+                    return jsonify({'ok': False, 'error': _('Too many attempts, please request a new code')}), 400
                 conn.execute('UPDATE sms_codes SET used=1 WHERE id=%s', (row['id'],))
                 # Find user by phone
                 user = conn.execute('SELECT * FROM users WHERE phone=%s AND is_admin=1', (username,)).fetchone()
@@ -819,7 +841,7 @@ def admin_login_action():
             with _admin_login_lock:
                 attempts['count'] += 1
                 _admin_login_attempts[attempt_key] = attempts
-            return jsonify({'ok': False, 'error': '验证码错误或账号无效'}), 400
+            return jsonify({'ok': False, 'error': _('Incorrect code or invalid account')}), 400
 
         user = dict(user)
         # Query admin role
@@ -842,7 +864,7 @@ def admin_login_action():
 
     # ── 密码登录分支 (浏览器/所有端) ──
     if not username or not password:
-        return jsonify({'ok': False, 'error': '请输入账号和密码'}), 400
+        return jsonify({'ok': False, 'error': _('Please enter username and password')}), 400
 
     from models import get_db
     with get_db() as conn:
@@ -858,14 +880,14 @@ def admin_login_action():
                 attempts['banned_until'] = now + 1800
             _admin_login_attempts[attempt_key] = attempts
         _log_admin_action(None, 'login_failed', ip, f'user={username} not_found')
-        return jsonify({'ok': False, 'error': '账号或密码错误'}), 400
+        return jsonify({'ok': False, 'error': _('Incorrect username or password')}), 400
 
     stored = user['password_hash']
     if not stored:
         with _admin_login_lock:
             attempts['count'] += 1
             _admin_login_attempts[attempt_key] = attempts
-        return jsonify({'ok': False, 'error': '账号或密码错误'}), 400
+        return jsonify({'ok': False, 'error': _('Incorrect username or password')}), 400
 
     pw_ok = False
     parts = stored.split(':')
@@ -889,7 +911,7 @@ def admin_login_action():
                 attempts['banned_until'] = now + 1800
             _admin_login_attempts[attempt_key] = attempts
         _log_admin_action(user['id'], 'login_failed', ip, f'user={username} bad_password')
-        return jsonify({'ok': False, 'error': '账号或密码错误'}), 400
+        return jsonify({'ok': False, 'error': _('Incorrect username or password')}), 400
 
     with _admin_login_lock:
         _admin_login_attempts.pop(attempt_key, None)
@@ -969,12 +991,13 @@ def admin_send_code():
     CN: 短信验证码  INTL: 邮箱验证码
     """
     import hashlib, hmac, time as _time_module, random, string, secrets
+    from i18n import _
     data = request.get_json(force=True, silent=True) or {}
     target = (data.get('phone') or data.get('email') or '').strip()
     ip = request.remote_addr or 'unknown'
 
     if not target:
-        return jsonify({'success': False, 'error': '请输入手机号或邮箱'}), 400
+        return jsonify({'success': False, 'error': _('Please enter your phone number or email')}), 400
 
     # IP 频控：每分钟最多 2 次
     code_key = f'code_{ip}'
@@ -983,7 +1006,8 @@ def admin_send_code():
         last = _admin_login_attempts.get(code_key, 0)
         if now - last < 60:
             remaining = 60 - (now - last)
-            return jsonify({'success': False, 'error': f'发送过于频繁，请 {remaining} 秒后再试'}), 429
+            return jsonify({'success': False, 'error': _(
+                'Too many requests. Please retry in {seconds} seconds', seconds=remaining)}), 429
         _admin_login_attempts[code_key] = now
 
     market = os.environ.get('DEPLOY_MARKET', 'cn')
@@ -1002,7 +1026,7 @@ def admin_send_code():
 
     if not user:
         # D-12: 统一兜底文案，避免通过 send-code 探测账号是否为管理员
-        return jsonify({'success': False, 'error': '发送失败，请检查账号后重试'}), 400
+        return jsonify({'success': False, 'error': _('Failed to send. Please check the account and try again')}), 400
 
     if market == 'intl':
         # 邮箱验证码：先发送，成功后才落库。旧实现先写 email_codes 再发信，
@@ -1018,7 +1042,8 @@ def admin_send_code():
         )
         if not ok:
             print(f'[Admin] Email code send failed for {target}')
-            return jsonify({'success': False, 'error': '验证码发送失败，请检查邮件服务配置'}), 503
+            return jsonify({'success': False,
+                            'error': _('Failed to send verification code. Please check the email service configuration')}), 503
 
         from models import get_db
         with get_db() as conn:
@@ -1027,7 +1052,7 @@ def admin_send_code():
                 (target, code, 'login', expires_at))
             conn.commit()
         print(f'[Admin] Email code sent to {target}')
-        return jsonify({'success': True, 'message': '验证码已发送到邮箱'})
+        return jsonify({'success': True, 'message': _('Verification code sent to your email')})
     else:
         # 短信验证码：先发送，成功后才落库。旧实现无条件写 sms_codes 并返回
         # success:True —— 无服务商凭据时用户永远收不到，却显示"已发送"。
@@ -1043,7 +1068,8 @@ def admin_send_code():
         if not (send_result or {}).get('success'):
             return jsonify({
                 'success': False,
-                'error': (send_result or {}).get('error') or '验证码发送失败，请先配置短信服务商',
+                'error': (send_result or {}).get('error') or _(
+                    'Failed to send verification code. Please configure an SMS provider first'),
             }), 503
 
         from models import get_db
@@ -1052,7 +1078,7 @@ def admin_send_code():
                 'INSERT INTO sms_codes (phone, code, purpose, expires_at) VALUES (%s,%s,%s,%s)',
                 (target, code, 'login', expires_at))
             conn.commit()
-        return jsonify({'success': True, 'message': '验证码已发送'})
+        return jsonify({'success': True, 'message': _('Verification code sent')})
 
 
 # ── 内存限流存储（服务重启后清空，可接受）──
@@ -1403,7 +1429,7 @@ def _get_active_theme_slug_admin():
     if now - _theme_slug_cache['ts'] < 60:
         return _theme_slug_cache['value']
     try:
-        from routes.theme_admin import get_active_theme_slug_for_site
+        from admin.routes.theme_admin import get_active_theme_slug_for_site
         slug = get_active_theme_slug_for_site('admin')
     except Exception:
         slug = None

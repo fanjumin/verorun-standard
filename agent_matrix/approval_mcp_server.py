@@ -117,6 +117,7 @@ def _is_text_file(path: str) -> bool:
     return ext.lower() in _TEXT_EXTENSIONS
 
 
+# i18n:tech:begin — SSRF 校验结果串回给模型（MCP 子进程无请求语言环境，不翻译）
 def _check_ssrf(url: str) -> str | None:
     """Returns error message if blocked, None if allowed."""
     try:
@@ -144,6 +145,7 @@ def _check_ssrf(url: str) -> str | None:
         return None
     except Exception as e:
         return f"URL 校验异常: {e}"
+# i18n:tech:end
 
 
 # ── 工具定义 ──────────────────────────────────────────────────────────
@@ -232,6 +234,7 @@ TOOLS = [
 
 
 # ── 工具实现 ──────────────────────────────────────────────────────────
+# i18n:tech:begin — MCP 工具结果串回给模型（子进程无请求语言环境，不翻译）
 def _tool_file_read(args):
     path = args.get("path", "")
     safe = _safe_path(path)
@@ -405,6 +408,7 @@ def _tool_code_exec(args):
         return _text_result(f"执行超时 ({timeout}s)", error=True)
     except Exception as e:
         return _text_result(f"执行异常: {e}", error=True)
+# i18n:tech:end
 
 
 # ── 辅助 ─────────────────────────────────────────────────────────────

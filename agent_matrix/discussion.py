@@ -38,7 +38,7 @@ def load_stage_roles():
         from agent_matrix.engine import _get_system_key
         raw = _get_system_key(STAGE_ROLES_KEY)
     except Exception as exc:
-        logger.warning("load_stage_roles: 读 %s 失败: %s，回退默认", STAGE_ROLES_KEY, exc)
+        logger.warning("load_stage_roles: 读 %s 失败: %s，回退默认", STAGE_ROLES_KEY, exc)  # i18n:tech — 运维日志
         return dict(DEFAULT_STAGE_ROLES)
     if raw:
         try:
@@ -46,7 +46,7 @@ def load_stage_roles():
             if isinstance(data, dict) and data:
                 return data
         except Exception:
-            logger.warning("load_stage_roles: %s 解析失败，回退默认", STAGE_ROLES_KEY)
+            logger.warning("load_stage_roles: %s 解析失败，回退默认", STAGE_ROLES_KEY)  # i18n:tech — 运维日志
     return dict(DEFAULT_STAGE_ROLES)
 
 
@@ -95,7 +95,7 @@ def run_discussion_stage(stage, user_prompt, *, egress_guard=None, license_ids=N
         egress_guard(license_ids, symbol=symbol or "-")   # 闸门异常上抛，由调用方归类
     if not stage:
         # stage 缺失：无法做阶段→角色解析，显式告警并跳过配置读取（不白读一次）
-        logger.warning("run_discussion_stage: 未指定 stage，跳过角色解析，降级 standard tier")
+        logger.warning("run_discussion_stage: 未指定 stage，跳过角色解析，降级 standard tier")  # i18n:tech — 运维日志
         stage_roles = {}
     else:
         stage_roles = load_stage_roles()
@@ -109,7 +109,7 @@ def run_discussion_stage(stage, user_prompt, *, egress_guard=None, license_ids=N
             if inject_role_prompt and role_prompt:
                 sys_prompt = role_prompt
         else:
-            logger.warning("discuss stage=%s role=%s 未绑定 provider_model_id，降级 standard", stage, role_slug)
+            logger.warning("discuss stage=%s role=%s 未绑定 provider_model_id，降级 standard", stage, role_slug)  # i18n:tech — 运维日志
     if cfg is None:
         from agent_matrix.model_resolver import resolve_model_args
         cfg = resolve_model_args({"strategy": "tier", "tier": "standard"})

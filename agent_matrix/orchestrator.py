@@ -84,10 +84,12 @@ class AgentOrchestrator:
         self._current_mode = mode or ''
 
         # 注入模式指令
+        # i18n:tech:begin — 模式前缀提示词（模型消费，翻译即改变模型行为）
         mode_prefixes = {
             'deep': '【深度思考模式】请进行深入、全面、细致的分析，尽可能给出最详尽的回答。',
             'image': '【图像处理模式】请优先将任务委派给内容管理Agent（内容管理域），由其负责图像生成，包括文生图、图生图、配图等操作。',
         }
+        # i18n:tech:end
         if mode in mode_prefixes:
             instruction = mode_prefixes[mode] + '\n\n' + instruction
 
@@ -97,8 +99,8 @@ class AgentOrchestrator:
                               if a.get('domain') == 'content']
             if content_agents:
                 content_agent = content_agents[0]
-                instruction = (f'请将以下任务委派给内容管理Agent（ID={content_agent["id"]}, '
-                               f'名称={content_agent["name"]}），由其执行图像相关操作：\n\n{instruction}')
+                instruction = (f'请将以下任务委派给内容管理Agent（ID={content_agent["id"]}, '  # i18n:tech — 委派提示词，模型消费
+                               f'名称={content_agent["name"]}），由其执行图像相关操作：\n\n{instruction}')  # i18n:tech — 委派提示词，模型消费
 
         # 1. 创建 Master 任务
         master_task_id = self.models.create_task({
@@ -276,7 +278,7 @@ class AgentOrchestrator:
                 self._async_extract_and_store, conversation_text, user_id, task_result
             )
         except Exception as e:
-            logger.warning(f"提交知识提取任务失败 user={user_id}: {e}")
+            logger.warning(f"提交知识提取任务失败 user={user_id}: {e}")  # i18n:tech — 运维日志
 
     def _async_extract_and_store(self, conversation_text: str, user_id: int, task_result: dict):
         """后台线程执行提取+入库（不阻塞对话响应）"""
@@ -295,9 +297,9 @@ class AgentOrchestrator:
                 try:
                     process_clean_content(fact, admin_id=user_id)
                 except Exception as e:
-                    logger.warning(f"单条知识入库失败 user={user_id}: {e}")
+                    logger.warning(f"单条知识入库失败 user={user_id}: {e}")  # i18n:tech — 运维日志
         except Exception as e:
-            logger.error(f"自动知识提取失败 user={user_id}: {e}")
+            logger.error(f"自动知识提取失败 user={user_id}: {e}")  # i18n:tech — 运维日志
 
     def _should_extract(self, conversation_text: str, task_result: dict) -> bool:
         """判断对话是否值得提取知识"""
@@ -324,7 +326,7 @@ class AgentOrchestrator:
             # 身份证 18 位：原 \d{6}(19|20)\d{8}[\dXx] 仅 17 字符，恒不匹配真实
             # 身份证（尤其数字校验位），现补足为 6+2(世纪)+2(年)+2(月)+2(日)+3(序)+1(校验)。
             r'(?<!\d)\d{6}(19|20)\d{2}\d{2}\d{2}\d{3}[\dXx](?!\d)',  # 身份证(18位)
-            r'(password|密码|secret|密钥|AKSK|access_key)',  # 密钥类
+            r'(password|密码|secret|密钥|AKSK|access_key)',  # i18n:tech — 密钥类正则
         ]
         for pat in sensitive_patterns:
             if re.search(pat, conv, re.IGNORECASE):
@@ -360,14 +362,14 @@ class AgentOrchestrator:
         失败返回空列表，不影响对话响应。
         """
         prompt = (
-            "从以下对话中提取关键事实，每条一行，简洁陈述。只提取客观事实，不推测。\n"
-            "格式：每行一条事实，以 '- ' 开头。\n"
-            "跳过寒暄和闲聊。如果对话中没有任何值得记录的事实，输出 '无'。\n\n"
-            "对话：\n" + conversation_text[:4000] + "\n\n"
-            "输出示例：\n"
-            "- 用户经营餐饮品牌\n"
-            "- 用户偏好暖色调设计\n"
-            "- 用户上次建了名为XX餐厅的官网\n"
+            "从以下对话中提取关键事实，每条一行，简洁陈述。只提取客观事实，不推测。\n"  # i18n:tech — 事实提取提示词，模型消费
+            "格式：每行一条事实，以 '- ' 开头。\n"  # i18n:tech — 事实提取提示词，模型消费
+            "跳过寒暄和闲聊。如果对话中没有任何值得记录的事实，输出 '无'。\n\n"  # i18n:tech — 事实提取提示词，模型消费
+            "对话：\n" + conversation_text[:4000] + "\n\n"  # i18n:tech — 事实提取提示词，模型消费
+            "输出示例：\n"  # i18n:tech — 事实提取提示词，模型消费
+            "- 用户经营餐饮品牌\n"  # i18n:tech — 事实提取提示词，模型消费
+            "- 用户偏好暖色调设计\n"  # i18n:tech — 事实提取提示词，模型消费
+            "- 用户上次建了名为XX餐厅的官网\n"  # i18n:tech — 事实提取提示词，模型消费
         )
 
         try:
@@ -396,11 +398,11 @@ class AgentOrchestrator:
                     if fact and fact.lower() != 'none':
                         facts.append(fact)
 
-            logger.info(f"提取事实 {len(facts)} 条: {facts}")
+            logger.info(f"提取事实 {len(facts)} 条: {facts}")  # i18n:tech — 运维日志
             return facts
 
         except Exception as e:
-            logger.warning(f"事实提取 LLM 调用失败: {e}")
+            logger.warning(f"事实提取 LLM 调用失败: {e}")  # i18n:tech — 运维日志
             return []
 
     # -------------------------------------------------------
@@ -440,7 +442,7 @@ class AgentOrchestrator:
         engine = UnifiedLLM(master_config)
 
         if not engine.is_ready():
-            logger.warning("Master Agent AI 引擎未就绪，使用模板分解")
+            logger.warning("Master Agent AI 引擎未就绪，使用模板分解")  # i18n:tech — 运维日志
             return self._template_decompose(instruction, sub_agents)
 
         # 加载 Master Agent 的 System Prompt（动态解析）
@@ -513,7 +515,7 @@ Notes:
         if not tasks:
             # LLM 已就绪但返回空任务 → 创建直接回复，不回退到模板分解
             # （模板分解仅用于 AI 引擎未就绪的情况，已在 _engine.is_ready() 处理）
-            logger.info("Master Agent 返回空子任务，创建直接回复")
+            logger.info("Master Agent 返回空子任务，创建直接回复")  # i18n:tech — 运维日志
             return [{
                 'title': _('Direct Reply'),
                 'description': instruction,
@@ -879,15 +881,15 @@ Notes:
                 f"{m['role']}: {m['content']}" for m in messages
             )[:4000]
             prompt = (
-                "请把下面的多轮对话压缩成简洁摘要，保留关键事实、结论与未完成事项，"
-                "用要点列出，不要寒暄：\n\n" + convo_text
+                "请把下面的多轮对话压缩成简洁摘要，保留关键事实、结论与未完成事项，"  # i18n:tech — 摘要提示词，模型消费
+                "用要点列出，不要寒暄：\n\n" + convo_text  # i18n:tech — 摘要提示词，模型消费
             )
             summary = engine.ask(prompt, temperature=0.3)
             if not summary or summary.startswith('Error:'):
                 return None
             return summary.strip()
         except Exception as e:
-            logger.warning(f"历史摘要压缩失败，回退最近消息: {e}")
+            logger.warning(f"历史摘要压缩失败，回退最近消息: {e}")  # i18n:tech — 运维日志
             return None
 
     def _execute_standard_agent(self, task_def, agent_config, sub_task_id, target_id,
@@ -1112,8 +1114,8 @@ Notes:
     def _build_summary(self, decomposed, sub_results, total_time, all_completed):
         """构建人类可读的汇总报告"""
         parts = []
-        parts.append(f"📋 **任务执行报告**\n")
-        parts.append(f"共 {len(decomposed)} 个子任务 | 耗时 {total_time}s\n")
+        parts.append(_('📋 **Task Execution Report**') + '\n')
+        parts.append(_('{count} sub-tasks | elapsed {seconds}s', count=len(decomposed), seconds=total_time) + '\n')
 
         for i, (task, result) in enumerate(zip(decomposed, sub_results), 1):
             icon = '✅' if result.get('status') == 'completed' else '❌'
@@ -1133,14 +1135,15 @@ Notes:
                 # 截取合理长度显示
                 display = resp[:1500]
                 if len(resp) > 1500:
-                    display += '\n...（内容较长，已截断）'
-                parts.append(f"   └ 产出:\n{display}")
+                    display += '\n' + _('... (content truncated)')
+                parts.append('   └ ' + _('Output:') + '\n' + display)
 
         if all_completed:
-            parts.append(f"\n✅ **全部 {len(decomposed)} 个子任务完成**")
+            parts.append('\n' + _('✅ **All {count} sub-tasks completed**', count=len(decomposed)))
         else:
             failed = sum(1 for r in sub_results if r.get('status') == 'failed')
-            parts.append(f"\n⚠️ **{failed}/{len(decomposed)} 个子任务失败**")
+            parts.append('\n' + _('⚠️ **{failed}/{total} sub-tasks failed**',
+                                  failed=failed, total=len(decomposed)))
 
         return '\n'.join(parts)
 
@@ -1193,12 +1196,12 @@ Notes:
             # 防止路径遍历：确保最终路径在 base_dir 内
             real_path = os.path.realpath(file_path)
             if not real_path.startswith(os.path.realpath(base_dir)):
-                logger.warning(f"Prompt 路径遍历尝试被拦截: {file_path}")
+                logger.warning(f"Prompt 路径遍历尝试被拦截: {file_path}")  # i18n:tech — 运维日志
                 return ''
             if os.path.exists(real_path):
                 with open(real_path, 'r', encoding='utf-8') as f:
                     return f.read()
-            logger.warning(f"Prompt 文件不存在: {file_path}")
+            logger.warning(f"Prompt 文件不存在: {file_path}")  # i18n:tech — 运维日志
             return ''
         return prompt_source
 
@@ -1209,7 +1212,7 @@ Notes:
                 from agent_matrix.prompt_resolver import PromptResolver
                 self._prompt_resolver = PromptResolver(self.models)
             except Exception as e:
-                logger.warning(f"PromptResolver 初始化失败: {e}")
+                logger.warning(f"PromptResolver 初始化失败: {e}")  # i18n:tech — 运维日志
                 self._resolver_init_failed = True
         return self._prompt_resolver
 

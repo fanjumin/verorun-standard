@@ -11,6 +11,7 @@ from .logger import get_plugin_logger
 logger = get_plugin_logger('store-tagline')
 
 # 7 类规范类别的默认宣传语（中英双份，与前端 _CAT_GRADS 分类一致）
+# i18n:tech:begin — 按语言键取用的本地化默认语数据表（非 UI 字面量，不做运行期翻译）
 _DEFAULT_TAGLINES = {
     'zh-CN': {
         'system': '系统运行，尽在掌握',
@@ -31,6 +32,7 @@ _DEFAULT_TAGLINES = {
         'supply_chain': 'Direct supply, streamlined sourcing',
     },
 }
+# i18n:tech:end
 
 
 def _lang_key(lang: str) -> str:
@@ -61,11 +63,13 @@ def build_tagline(plugin: dict, readme_text: str, lang: str = 'zh-CN') -> str:
         if not readme_text.strip():
             raise ValueError('empty readme')
         from services.ai_content_generator import _qwen_chat
-        lang_hint = '中文' if lk == 'zh-CN' else 'English'
+        lang_hint = '中文' if lk == 'zh-CN' else 'English'  # i18n:tech — LLM 提示词语言提示
+        # i18n:tech:begin — LLM 提示词模板，非用户可见文案
         prompt = (
             f'根据下面的插件 README，用{lang_hint}写一句不超过 14 字的宣传语（slogan），'
             f'只输出口号本身，不要引号、标点、解释：\n\n{readme_text[:2000]}'
         )
+        # i18n:tech:end
         out = (_qwen_chat([{'role': 'user', 'content': prompt}]) or '').strip()
         out = out.strip('"\'“”‘’')
         if out:

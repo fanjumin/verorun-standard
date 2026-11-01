@@ -122,7 +122,7 @@ def session_terminate(sid):
             if not row:
                 return jsonify({'success': False, 'error': _('Session does not exist')}), 404
             if row['is_current']:
-                return jsonify({'success': False, 'error': '不能退出当前会话，请使用退出登录'}), 400
+                return jsonify({'success': False, 'error': _('You cannot sign out of the current session; use Log Out instead')}), 400
             conn.execute(
                 "UPDATE user_sessions SET expired_at=NOW() WHERE id=%s",
                 (sid,)

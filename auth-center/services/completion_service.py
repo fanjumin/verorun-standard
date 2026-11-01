@@ -173,7 +173,7 @@ def check_milestone_rewards(user_id):
                     except Exception as e:
                         import logging
                         logging.getLogger(__name__).warning(
-                            '[completion_service] 优惠券发放失败 (rule=%s, user=%s): %s',
+                            '[completion_service] 优惠券发放失败 (rule=%s, user=%s): %s',  # i18n:tech — 运维日志
                             rule.get('id'), user_id, e)
 
                 # Record claim

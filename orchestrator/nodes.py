@@ -122,7 +122,7 @@ def _call_dashscope(api_key: str, model: str, prompt: str, timeout: int = 120) -
     body = json.dumps({
         "model": model,
         "messages": [
-            {"role": "system", "content": "你是一个专业的AI助手。请严格按要求完成任务。"},
+            {"role": "system", "content": "你是一个专业的AI助手。请严格按要求完成任务。"},  # i18n:tech — LLM system prompt
             {"role": "user", "content": prompt}
         ],
         "temperature": 0.7,
@@ -172,7 +172,7 @@ def _call_via_gateway(prompt: str) -> dict:
                              '(ai_text_provider/ai_text_model)', 'success': False}
         from agent_matrix.engine import UnifiedLLM
         text = UnifiedLLM().chat(
-            [{"role": "system", "content": "你是一个专业的AI助手。请严格按要求完成任务。"},
+            [{"role": "system", "content": "你是一个专业的AI助手。请严格按要求完成任务。"},  # i18n:tech — LLM system prompt
              {"role": "user", "content": prompt}],
             provider=provider, model=model_name, module='orchestrator',
             temperature=0.7, max_tokens=4096)
@@ -274,7 +274,7 @@ def handle_ai_process(node_def: dict, input_data: dict) -> dict:
                     input_content = value['body']
 
     if not input_content:
-        input_content = config.get('default_input', _('(No input content)'))
+        input_content = config.get('default_input', _('(No input content)'))  # i18n:tech:begin — LLM prompt template
 
     prompt = f"""{instruction}
 
@@ -284,7 +284,7 @@ def handle_ai_process(node_def: dict, input_data: dict) -> dict:
 请以 JSON 格式输出，包含字段: {json.dumps(fields, ensure_ascii=False)}
 """
 
-    result = _call_llm(
+    result = _call_llm(  # i18n:tech:end
         prompt,
         _get_api_key('dashscope_text_key'),
         config.get('model', 'qwen-turbo'),
@@ -670,21 +670,21 @@ def make_sub_workflow_handler(engine):
         cfg = node_def.get('config', {})
         child_id = int(cfg.get('workflow_id') or 0)
         if child_id <= 0:
-            raise ValueError('子工作流节点：必须配置 workflow_id')
+            raise ValueError(_('Sub-workflow node: workflow_id must be configured'))
 
         context = input_data.get('context', {}) or {}
         chain = list(context.get('__subflow_chain__', []))
 
         # 递归防护：防 A→B→A 环
         if child_id in chain:
-            raise ValueError(f'子工作流递归检测失败：工作流 #{child_id} 已在执行链 {chain} 中')
+            raise ValueError(_('Sub-workflow recursion detected: workflow #{child_id} is already in the execution chain {chain}', child_id=child_id, chain=chain))
         # 深度限制
         if len(chain) >= 5:
-            raise ValueError('子工作流深度超限（最多嵌套 5 层）')
+            raise ValueError(_('Sub-workflow nesting depth exceeded (maximum 5 levels)'))
 
         child_wf = m.get_workflow(child_id)
         if not child_wf or not child_wf.get('is_active'):
-            raise ValueError(f'子工作流 #{child_id} 不存在或已停用')
+            raise ValueError(_('Sub-workflow #{child_id} does not exist or is disabled', child_id=child_id))
 
         # 传入子流程的初始上下文（含递归链），子流程可继续嵌套
         ctx = dict(context)
@@ -711,11 +711,11 @@ def make_sub_workflow_handler(engine):
                 break
             time.sleep(2)
         else:
-            raise RuntimeError(f'等待子工作流 #{child_id} 执行超时')
+            raise RuntimeError(_('Timed out waiting for sub-workflow #{child_id} to finish', child_id=child_id))
 
         if status != 'completed':
             err = (inst or {}).get('error_message', '') or status
-            raise RuntimeError(f'子工作流 #{child_id} 执行失败：{err}')
+            raise RuntimeError(_('Sub-workflow #{child_id} failed: {err}', child_id=child_id, err=err))
 
         return {
             'success': True,
@@ -737,14 +737,14 @@ def run_script_safely(script_path: str, script_args: list = None,
     SCRIPTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'scripts')
     real_script = os.path.realpath(os.path.join(SCRIPTS_DIR, os.path.basename(script_path)))
     if not real_script.startswith(os.path.realpath(SCRIPTS_DIR)):
-        return {'success': False, 'error': f'脚本路径被拒绝：{script_path}'}
+        return {'success': False, 'error': _('Script path rejected: {script_path}', script_path=script_path)}
     base = os.path.basename(real_script)
     allow = _script_allowlist()
     if '*' not in allow and base not in allow:
         return {'success': False,
-                'error': f'脚本未登记白名单：{base}（system_config.automation_script_allowlist）'}
+                'error': _('Script not registered in the allowlist: {base} (system_config.automation_script_allowlist)', base=base)}
     if not os.path.isfile(real_script):
-        return {'success': False, 'error': f'脚本不存在：{script_path}'}
+        return {'success': False, 'error': _('Script does not exist: {script_path}', script_path=script_path)}
     try:
         # A5.4：env 白名单清洗，剔除密钥类环境变量（API Key/DB 凭据等）
         env = {k: v for k, v in os.environ.items()
@@ -762,7 +762,7 @@ def run_script_safely(script_path: str, script_args: list = None,
             'returncode': result.returncode
         }
     except subprocess.TimeoutExpired:
-        return {'success': False, 'error': f'脚本执行超时（{timeout}s）'}
+        return {'success': False, 'error': _('Script execution timed out ({timeout}s)', timeout=timeout)}
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
@@ -806,7 +806,7 @@ def _run_builtin_script(func, ctx: dict, cfg: dict, timeout: int = 120) -> dict:
         logger.warning('builtin script timed out after %ss; the thread keeps running '
                        'and its result is discarded (func=%s)',
                        timeout, getattr(func, '__name__', func))
-        raise RuntimeError(f'内置脚本执行超时（{timeout}s）')
+        raise RuntimeError(_('Built-in script execution timed out ({timeout}s)', timeout=timeout))
     if 'error' in box:
         raise RuntimeError(box['error'])
     return box['result']
@@ -865,11 +865,11 @@ def handle_script(node_def: dict, input_data: dict) -> dict:
     timeout = int(cfg.get('timeout_seconds') or 120)
 
     if not name:
-        raise ValueError('脚本节点：必须配置 script 名称')
+        raise ValueError(_('Script node: the script name must be configured'))
 
     if lang == 'builtin':
         if name not in BUILTIN_SCRIPTS:
-            raise ValueError(f'未知的内置脚本：{name}')
+            raise ValueError(_('Unknown built-in script: {name}', name=name))
         return _run_builtin_script(BUILTIN_SCRIPTS[name],
                                    input_data.get('context', {}) or {}, cfg, timeout)
 
@@ -882,11 +882,9 @@ def handle_script(node_def: dict, input_data: dict) -> dict:
     if lang == 'shell':
         # A5：run_script_safely 硬编码 sys.executable，从未真正支持 shell。
         # 在实现真 shell 执行（需容器沙箱 + 资源限额）之前，显式拒绝而不是静默失败。
-        raise ValueError(
-            "lang='shell' 暂不支持：脚本节点只会以 Python 解释器执行。"
-            "如需 shell，请改用 lang='python' 包装，或等待 Stage C 的容器化执行器。")
+        raise ValueError(_("lang='shell' is not supported yet: script nodes always run with the Python interpreter. Use lang='python' as a wrapper, or wait for the containerized executor in Stage C."))
 
-    raise ValueError(f'不支持的脚本语言：{lang}')
+    raise ValueError(_('Unsupported script language: {lang}', lang=lang))
 
 
 # ============================================================

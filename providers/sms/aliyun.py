@@ -74,7 +74,7 @@ class AliyunSMSProvider(BaseSMSProvider):
         template_code = TEMPLATE_MAP.get(purpose, DEFAULT_TEMPLATE)
         sign_name = cfg.get('sign_name', '')
         if not sign_name:
-            sign_name = '徐州易开网络科技'
+            sign_name = '徐州易开网络科技'  # i18n:tech — 阿里云短信签名（须与运营商备案一致，不可翻译）
 
         if not cfg['access_key'] or not cfg['secret']:
             return {'success': False, 'provider': 'aliyun', 'error': 'Aliyun SMS not configured'}

@@ -17,6 +17,7 @@ from typing import Any, Mapping, Optional
 import click
 
 from ..client import quote_segment
+from ..constants import _
 from ..output import emit_json, render
 
 
@@ -48,7 +49,7 @@ def post(ctx: click.Context, path: str, action: Optional[str] = None,
     if wants_json(ctx):
         emit_json(data)
     elif action:
-        render(f"{action}成功：{data}")
+        render(_("{action} succeeded: {data}", action=action, data=data))
     else:
         render(data)
     return data

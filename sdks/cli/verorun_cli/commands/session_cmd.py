@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import click
 
+from ..constants import _
 from ..output import emit_json, render
 from ._base import exclusive, get, post, seg
 
@@ -22,8 +23,8 @@ def register(group):
 
     @group.command("session")
     @click.argument("session_id")
-    @click.option("--clear", is_flag=True, help="清空该会话")
-    @click.option("--rm", is_flag=True, help="删除该会话")
+    @click.option("--clear", is_flag=True, help=_("Clear this session"))
+    @click.option("--rm", is_flag=True, help=_("Delete this session"))
     @click.pass_context
     def session(ctx, session_id, clear, rm):
         """查看 / 清空 / 删除某个会话"""
@@ -31,9 +32,9 @@ def register(group):
         sid = seg(session_id)  # 防目录穿越 / 非法字符
         if rm:
             post(ctx, f"/admin/agent-matrix/chat/batch-delete",
-                 "删除", {"session_ids": [session_id]})
+                 _("Delete"), {"session_ids": [session_id]})
         elif clear:
-            post(ctx, f"/admin/agent-matrix/chat/{sid}/clear", "清空")
+            post(ctx, f"/admin/agent-matrix/chat/{sid}/clear", _("Clear"))
         else:
             get(ctx, f"/admin/agent-matrix/chat/{sid}")
 

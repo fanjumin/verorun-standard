@@ -225,7 +225,8 @@ class AgentRunner:
             retries += 1
             logs.append(f'[Retry #{retries}] confidence={confidence} < 0.7，重新执行')
             self._log(task_id, 'warn', 'execution',
-                       f'重试 #{retries}: confidence={confidence} < 0.7')
+                       _('Retry #{attempt}: confidence={confidence} < 0.7',
+                         attempt=retries, confidence=confidence))
 
             # 用更明确的 prompt 重试，带入自检发现的问题点
             issues = self_review.get('issues', [])
@@ -260,7 +261,8 @@ class AgentRunner:
             confidence = self_review.get('confidence', 0.85)
             logs.append(f'[Retry #{retries}] 新 confidence={confidence}')
             self._log(task_id, 'info', 'self_review',
-                       f'重试 #{retries} 后 confidence={confidence}')
+                       _('Retry #{attempt} finished: confidence={confidence}',
+                         attempt=retries, confidence=confidence))
 
         # 6. 更新统计
         if self.models:
@@ -313,7 +315,7 @@ class AgentRunner:
             from agent_matrix.tools import resolve_agent_tools
             return get_tools_for_agent(resolve_agent_tools(self.config, allowed))
         except Exception as e:
-            logger.warning(f"[{self.name}] 加载工具失败，退回单轮: {e}")
+            logger.warning(f"[{self.name}] 加载工具失败，退回单轮: {e}")  # i18n:tech — 运维日志
             return []
 
     def _execute_batch(self, tool_calls, logs, task_id, tight, round_i,
@@ -448,7 +450,7 @@ class AgentRunner:
                 json.dump(payload, f, ensure_ascii=False)
             os.replace(tmp, path)
         except Exception as e:
-            logger.warning(f'[{self.name}] 检查点写入失败: {e}')
+            logger.warning(f'[{self.name}] 检查点写入失败: {e}')  # i18n:tech — 运维日志
 
     def _run_react_loop(self, engine, user_query, history, tools, logs, task_id,
                         max_rounds=5, task_phase='', cancel_event=None, gates=None,
@@ -552,7 +554,7 @@ class AgentRunner:
                     system_content = (system_content + '\n\n' + _memory
                                       if system_content else _memory)
             except Exception as e:
-                logger.warning(f'[{self.name}] 加载持久记忆失败，按无记忆处理: {e}')
+                logger.warning(f'[{self.name}] 加载持久记忆失败，按无记忆处理: {e}')  # i18n:tech — 运维日志
             messages = [{"role": "system", "content": system_content}]
             if history:
                 for h in history:
@@ -576,7 +578,7 @@ class AgentRunner:
                  'model': self.config.get('model_name')},
                 _sys_budget) if _sys_budget != 0 else 0)
         except Exception as e:
-            logger.warning(f'[{self.name}] 读取上下文预算失败，按关闭处理: {e}')
+            logger.warning(f'[{self.name}] 读取上下文预算失败，按关闭处理: {e}')  # i18n:tech — 运维日志
             ctx_budget = 0
         # WP-1：压缩等级只读一次（0=关 1=仅截断 2=截断+微压缩+摘要
         # 3=再叠加 WP-10 主动压缩）。读取失败按 1（仅截断）处理，
@@ -584,14 +586,14 @@ class AgentRunner:
         try:
             compress_level = get_compress_level()
         except Exception as e:
-            logger.warning(f'[{self.name}] 读取压缩等级失败，按仅截断处理: {e}')
+            logger.warning(f'[{self.name}] 读取压缩等级失败，按仅截断处理: {e}')  # i18n:tech — 运维日志
             compress_level = 1
         _summarize = self._make_summarizer(engine) if (compress_level >= 2 and ctx_budget > 0) else None
         # WP-2：并发开关每任务只读一次（默认关闭 = 串行路径，与原实现一致）
         try:
             parallel_enabled = get_parallel_enabled()
         except Exception as e:
-            logger.warning(f'[{self.name}] 读取并发开关失败，按串行处理: {e}')
+            logger.warning(f'[{self.name}] 读取并发开关失败，按串行处理: {e}')  # i18n:tech — 运维日志
             parallel_enabled = False
         TOOL_RESULT_NORMAL = 4000
         TOOL_RESULT_TIGHT = 1200
@@ -945,7 +947,7 @@ class AgentRunner:
                 'suggestion': suggestion
             }
         except (json.JSONDecodeError, TypeError, ValueError) as e:
-            logger.warning(f"[{self.name}] LLM 自评解析失败，回退规则结果: {e}")
+            logger.warning(f"[{self.name}] LLM 自评解析失败，回退规则结果: {e}")  # i18n:tech — 运维日志
             return None
 
     def _log(self, task_id, level, log_type, message):

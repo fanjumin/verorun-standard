@@ -13,6 +13,8 @@ import json
 import sys
 from typing import Any, Dict, Iterable, List, Optional
 
+from .constants import _
+
 try:
     from rich.console import Console
     from rich.table import Table
@@ -44,22 +46,22 @@ def emit_text(text: str, end: str = "") -> None:
 
 
 def err(msg: str) -> None:
-    sys.stderr.write(f"[错误] {msg}\n")
+    sys.stderr.write(_("[Error] {message}", message=msg) + "\n")
 
 
 def info(msg: str) -> None:
-    sys.stderr.write(f"[信息] {msg}\n")
+    sys.stderr.write(_("[Info] {message}", message=msg) + "\n")
 
 
 def warn(msg: str) -> None:
-    sys.stderr.write(f"[警告] {msg}\n")
+    sys.stderr.write(_("[Warning] {message}", message=msg) + "\n")
 
 
 def render_obj_as_table(title: str, rows: Optional[List[Dict[str, Any]]],
                         columns: Iterable[str]) -> None:
     """用 rich 表格渲染对象列表；无 rich 或无数据时降级为 JSON。"""
     if not HAS_RICH or not rows:
-        emit_json(rows if rows is not None else {title: "（空）"})
+        emit_json(rows if rows is not None else {title: _("(empty)")})
         return
     table = Table(title=title, show_lines=False)
     cols = list(columns)

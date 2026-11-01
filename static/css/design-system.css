@@ -786,6 +786,15 @@ body{
 .ticker-item .sym{color:var(--text-high);font-weight:600}
 .ticker-item .up{color:var(--green)}
 .ticker-item .down{color:var(--rose)}
+/* 演示数据标注（行情为演示样本，非实时数据） */
+.ticker-demo{
+  position:absolute;right:0;top:0;height:36px;
+  display:flex;align-items:center;padding:0 12px;
+  font-size:11px;color:var(--text-dim);
+  background:rgba(5,5,8,0.85);
+  border-left:1px solid var(--border);
+  z-index:2;pointer-events:none;
+}
 @keyframes ticker-scroll{
   0%{transform:translateX(0)}
   100%{transform:translateX(-50%)}

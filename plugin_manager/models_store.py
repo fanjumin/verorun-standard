@@ -46,6 +46,7 @@ class PriceInterval(str, Enum):
 
 # ── DDL ───────────────────────────────────────────────────────────────
 
+# i18n:tech:begin — SQL DDL 建表语句及内联中文注释，非用户可见文案
 LICENSE_STORE_DDL = """
 -- License 记录表
 CREATE TABLE IF NOT EXISTS plugin_licenses (
@@ -427,6 +428,7 @@ CREATE TABLE IF NOT EXISTS edition_catalog (
 );
 CREATE INDEX IF NOT EXISTS idx_edition_catalog_enabled ON edition_catalog(enabled, edition);
 """
+# i18n:tech:end
 
 
 # ── 初始化 ─────────────────────────────────────────────────────────────
@@ -575,6 +577,7 @@ _DISTRIBUTION_COLUMN_MIGRATIONS = [
 # 说明：ON CONFLICT DO NOTHING → 只补缺失键，**不覆盖管理员已改的展示名 / emoji / 渐变**。
 #       icon_svg 故意留空：内置图标由前端 _CAT_ICONS 兜底，避免把长 SVG 路径写进 SQL。
 #       渐变取值与标准 §14.7.1 内置默认表一致。
+# i18n:tech:begin — 内置分类种子（SQL 初始化数据，展示名由 plugin_categories 表/前端解析）
 _BUILTIN_CATEGORY_SEED = (
     ('system',       '系统',      '⚙️', '#4F6EF7', '#1E2A78', 10),
     ('shop',         '商城',      '🛒', '#12B886', '#0B7285', 20),
@@ -584,6 +587,7 @@ _BUILTIN_CATEGORY_SEED = (
     ('tools',        '工具',      '🔧', '#748FFC', '#364FC7', 60),
     ('supply_chain', '供应链',    '📦', '#F59F00', '#E8590C', 70),
 )
+# i18n:tech:end
 
 # 发行版注册表种子（ON CONFLICT DO NOTHING → 只补缺失 ID，不覆盖管理员已改的显示名）。
 # edition = 唯一 ID（分流判定的唯一依据，定稿后永不变更）；label = i18n 键（显示名可切换语言）。

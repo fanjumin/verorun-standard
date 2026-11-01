@@ -60,6 +60,7 @@ _PROVIDER_REGISTRY = {
 #
 # 主注册表只保留真实可导入的条目（scripts/selfcheck.py 的 registry 项据此判定），
 # 悬空条目降格登记到这里，注明能力当前的真实承载方；待实现落地后再移回主注册表。
+# i18n:tech:begin — 悬空 Provider 登记表（开发期说明，不对外展示）
 _PROVIDER_BACKLOG = {
     'cn': {
         'verify':    [('providers.verify.alipay', 'AlipayVerificationProvider',
@@ -74,6 +75,7 @@ _PROVIDER_BACKLOG = {
                        '快递鸟物流查询，未实现')],
     },
 }
+# i18n:tech:end
 
 # ─── Runtime registration (用于 oauth_service.py 等动态注册) ───
 _RUNTIME_CLASSES = {}  # market → category → [class]

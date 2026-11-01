@@ -1,0 +1,15 @@
+{#
+  主站 /static/js/app.js 的 JS 词典 — source-string-as-key。
+  仅注入 window.__I18N__，不产生可见输出；需在 app.js 之前引入。
+#}
+<script>
+window.__I18N__ = Object.assign(window.__I18N__ || {}, {
+  {{ 'A-shares / SSE' | tojson }}: {{ _('A-shares / SSE') | tojson }},
+  {{ 'A-shares / SZSE' | tojson }}: {{ _('A-shares / SZSE') | tojson }},
+  {{ 'HKEX / HSI' | tojson }}: {{ _('HKEX / HSI') | tojson }},
+  {{ 'US / S&P 500' | tojson }}: {{ _('US / S&P 500') | tojson }},
+  {{ 'US / Nasdaq' | tojson }}: {{ _('US / Nasdaq') | tojson }},
+  {{ 'Gold / XAU' | tojson }}: {{ _('Gold / XAU') | tojson }},
+  {{ 'Demo data' | tojson }}: {{ _('Demo data') | tojson }}
+});
+</script>

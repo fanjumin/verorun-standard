@@ -90,11 +90,11 @@ def audit_model_tiers(force: bool = False):
         ok, reason = _validate_tier_target(r.get('value'))
         if not ok:
             bad.append((r.get('key'), r.get('value'), reason))
-            logger.error('[model_tier] %s = %r 无效（%s）；该档位调用将降级到 '
+            logger.error('[model_tier] %s = %r 无效（%s）；该档位调用将降级到 '  # i18n:tech — 运维日志
                          'ai_text_provider/ai_text_model', r.get('key'), r.get('value'), reason)
     if not (fb and str(dict(fb).get('value') or '').strip()):
-        logger.warning('[model_tier] ai_fallback_models 为空：主模型失败时没有兜底模型，'
-                       '档位调用失败会直接抛给业务')
+        logger.warning('[model_tier] ai_fallback_models 为空：主模型失败时没有兜底模型，'  # i18n:tech — 运维日志
+                       '档位调用失败会直接抛给业务')  # i18n:tech — 运维日志
     return bad
 
 
@@ -120,11 +120,11 @@ def resolve_model_args(model_policy: dict,
             if ok:
                 return {'provider_model_id': pm_id}
             # 脏值不再透传：engine 拿到它只会抛 ValueError / DataError
-            logger.error('model_tier_%s = %r 无效（%s），已降级到 inherit/fallback 路径',
+            logger.error('model_tier_%s = %r 无效（%s），已降级到 inherit/fallback 路径',  # i18n:tech — 运维日志
                          tier, pm_id, reason)
         else:
             # BUG-8：tier 未配置时不再静默降级，显式告警以便排查
-            logger.warning('model_tier_%s 未在 system_config 配置，已降级到 inherit/fallback 路径', tier)
+            logger.warning('model_tier_%s 未在 system_config 配置，已降级到 inherit/fallback 路径', tier)  # i18n:tech — 运维日志
     # 2. explicit：策略内显式 provider+model
     if strategy == 'explicit':
         provider = model_policy.get('provider', '')
@@ -135,6 +135,6 @@ def resolve_model_args(model_policy: dict,
     provider = _get_system_key('ai_text_provider') or default_provider
     model = _get_system_key('ai_text_model') or default_model
     if not provider or not model:
-        logger.error('system_config 缺少 ai_text_provider/ai_text_model 且无显式入参，'
-                     '模型解析失败（请确认部署已执行 deploy/seed_data.py 种子）')
+        logger.error('system_config 缺少 ai_text_provider/ai_text_model 且无显式入参，'  # i18n:tech — 运维日志
+                     '模型解析失败（请确认部署已执行 deploy/seed_data.py 种子）')  # i18n:tech — 运维日志
     return {'provider': provider, 'model': model}

@@ -21,3 +21,12 @@ model_name: deepseek-v4-flash
 system_prompt: prompts/sub_ops_prompt.md
 is_system: true
 is_active: 1
+# 2026-11-01：桌面「智能对话」默认不传 agent_id，内核回落到第一个 active sub agent，
+# 实测即本角色（slug=ops）。为支持「自然语言搜索 → 回复列出来源」，把 search_hub 的两个
+# MCP 工具写进白名单：MCP 工具只有 allowed_tools 含 mcp__ 条目时才会被合并进工具 schema
+# （agent_matrix/tools.py get_tools_for_agent 的 A4 白名单约束）。
+# 命令形如 mcp__<plugin_id>__<server_name>__<tool_name>；search_hub 的 server 名是 search。
+allowed_tools:
+  - mcp__search_hub__search__search_hub_search   # 检索：返回归一化 EvidenceBundle（标题/URL/摘要）
+  - mcp__search_hub__search__search_hub_fetch    # 抓取：按 URL 取正文（SSRF 前置校验在插件内）
+

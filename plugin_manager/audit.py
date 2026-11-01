@@ -24,6 +24,8 @@ import ast
 import hashlib
 from typing import Any, Dict, List, Optional
 
+from i18n import _
+
 from .watermark import detect_official_watermark, OFFICIAL_PLUGIN_IDS
 
 # 必填字段
@@ -32,17 +34,17 @@ _IDENTIFIER_RE = re.compile(r'^[a-z0-9_]+$')
 
 # 危险代码模式（正则，忽略大小写）
 _DANGEROUS_PATTERNS = [
-    (r'\bos\.system\s*\(', 'os.system 命令执行'),
-    (r'\bos\.popen\s*\(', 'os.popen 命令执行'),
-    (r'\bsubprocess\s*(\.|\[)', 'subprocess 子进程调用'),
-    (r'\bPopen\s*\(', 'Popen 子进程调用'),
-    (r'\beval\s*\(', 'eval 动态执行'),
-    (r'\bexec\s*\(', 'exec 动态执行'),
-    (r'\bpickle\s*\.\s*(loads?|dumps)\s*\(', 'pickle 反序列化'),
-    (r'\bmarshal\s*\.\s*loads\s*\(', 'marshal 反序列化'),
-    (r'\b__import__\s*\(', '动态导入'),
-    (r'\bsocket\s*\.\s*connect\s*\(', 'socket 外连'),
-    (r'\bshutil\s*\.\s*rmtree\s*\(', 'shutil.rmtree 递归删除'),
+    (r'\bos\.system\s*\(', 'os.system command execution'),
+    (r'\bos\.popen\s*\(', 'os.popen command execution'),
+    (r'\bsubprocess\s*(\.|\[)', 'subprocess process invocation'),
+    (r'\bPopen\s*\(', 'Popen process invocation'),
+    (r'\beval\s*\(', 'eval dynamic execution'),
+    (r'\bexec\s*\(', 'exec dynamic execution'),
+    (r'\bpickle\s*\.\s*(loads?|dumps)\s*\(', 'pickle deserialization'),
+    (r'\bmarshal\s*\.\s*loads\s*\(', 'marshal deserialization'),
+    (r'\b__import__\s*\(', 'dynamic import'),
+    (r'\bsocket\s*\.\s*connect\s*\(', 'socket outbound connection'),
+    (r'\bshutil\s*\.\s*rmtree\s*\(', 'shutil.rmtree recursive deletion'),
 ]
 
 # 参与相似度比对的文件后缀
@@ -110,22 +112,22 @@ def _check_structure(plugin_dir: str) -> List[str]:
     reasons = []
     meta_path = os.path.join(plugin_dir, 'plugin.json')
     if not os.path.isfile(meta_path):
-        return ['缺少 plugin.json']
+        return [_('Missing plugin.json')]
     try:
         with open(meta_path, 'r', encoding='utf-8') as f:
             meta = json.load(f)
     except json.JSONDecodeError:
-        return ['plugin.json 不是合法 JSON']
+        return [_('Invalid plugin.json: not valid JSON')]
     except OSError as e:
-        return [f'plugin.json 读取失败: {e}']
+        return [_('Failed to read plugin.json: {error}', error=e)]
 
     missing = [k for k in _REQUIRED_FIELDS if not str(meta.get(k) or '').strip()]
     if missing:
-        reasons.append(f'缺少必填字段: {", ".join(missing)}')
+        reasons.append(_('Missing required fields: {fields}', fields=', '.join(missing)))
 
     identifier = str(meta.get('identifier') or '').strip().lower()
     if identifier and not _IDENTIFIER_RE.match(identifier):
-        reasons.append(f'identifier 格式非法: {identifier}')
+        reasons.append(_('Invalid identifier format: {identifier}', identifier=identifier))
 
     # 入口文件检查：支持插件目录内直接 __init__.py 或 <identifier>/ 子目录
     if os.path.isfile(os.path.join(plugin_dir, '__init__.py')):
@@ -133,7 +135,7 @@ def _check_structure(plugin_dir: str) -> List[str]:
     elif identifier and os.path.isfile(os.path.join(plugin_dir, identifier, '__init__.py')):
         pass
     else:
-        reasons.append('缺少插件入口 __init__.py')
+        reasons.append(_('Missing plugin entry point __init__.py'))
 
     # P1-1 / P1-2：agent_role/capabilities + 版本字段校验（并入 reasons）
     reasons.extend(_check_roles_and_capabilities(meta))
@@ -196,7 +198,7 @@ def _scan_dangerous(plugin_dir: str) -> List[str]:
             continue
         for pat, label in _DANGEROUS_PATTERNS:
             if re.search(pat, text, re.IGNORECASE):
-                hits.append(f'{label}（{os.path.relpath(path, plugin_dir)}）')
+                hits.append(f'{_(label)} ({os.path.relpath(path, plugin_dir)})')
     # 去重保序
     seen, out = set(), []
     for h in hits:
@@ -255,14 +257,17 @@ def _scan_dangerous_ast(plugin_dir: str) -> List[str]:
                     and len(node.args) >= 2
                     and isinstance(node.args[1], ast.Constant)
                     and str(node.args[1].value) in ('system', 'popen', 'Popen', 'eval', 'exec')):
-                hits.append(f'getattr 动态获取危险函数 {node.args[1].value}()（{rel}）')
+                hits.append(_('getattr dynamically obtains dangerous function {name}() ({path})',
+                              name=node.args[1].value,
+                              path=os.path.relpath(path, plugin_dir)))
                 continue
             # ② 任意对象 .system()/.popen()/.Popen()（含 __import__('os').system 链式）
             if isinstance(fn, ast.Attribute) and fn.attr in ('system', 'popen', 'Popen'):
                 if isinstance(fn.value, ast.Call) and isinstance(fn.value.func, ast.Name) and fn.value.func.id == '__import__':
-                    hits.append(f'__import__().{fn.attr} 动态命令执行（{rel}）')
+                    hits.append(_('__import__().{attr} dynamic command execution ({path})',
+                                  attr=fn.attr, path=rel))
                 elif not (isinstance(fn.value, ast.Name) and fn.value.id == 'os'):
-                    hits.append(f'.{fn.attr}() 命令执行（{rel}）')
+                    hits.append(_('.{attr}() command execution ({path})', attr=fn.attr, path=rel))
                 continue
     # 去重保序
     seen, out = set(), []
@@ -347,7 +352,8 @@ def _check_permission_consistency(plugin_dir: str, meta: Dict[str, Any]) -> List
             # 网络外连（含 urllib.request.urlopen / requests.Session().xxx 链式）
             if 'network:request' not in declared:
                 if _is_network_call(fn):
-                    issues.append(f'权限不一致：代码使用网络请求但未声明 network:request（{rel}）')
+                    issues.append(_('Permission mismatch: code uses network requests but does not '
+                                    'declare network:request ({path})', path=rel))
             # 文件写/删除
             if 'filesystem:write' not in declared:
                 fs = False
@@ -362,7 +368,8 @@ def _check_permission_consistency(plugin_dir: str, meta: Dict[str, Any]) -> List
                       and isinstance(fn.value, ast.Name) and fn.value.id in ('os', 'shutil')):
                     fs = True
                 if fs:
-                    issues.append(f'权限不一致：代码执行文件写/删除但未声明 filesystem:write（{rel}）')
+                    issues.append(_('Permission mismatch: code performs file write/delete but does '
+                                    'not declare filesystem:write ({path})', path=rel))
     # 去重
     seen, out = set(), []
     for h in issues:
@@ -389,7 +396,8 @@ def _check_similarity(plugin_dir: str,
         for pid, files in official_lib.items():
             if sha in files.values():
                 official_rel = next((k for k, v in files.items() if v == sha), '?')
-                matches.append(f'{rel} 与官方插件 {pid}/{official_rel} 完全一致')
+                matches.append(_('{path} is identical to official plugin {plugin}/{official}',
+                                 path=rel, plugin=pid, official=official_rel))
                 break
     return matches
 
@@ -419,9 +427,11 @@ def review_plugin(plugin_dir: str, watermark_result: Dict[str, Any] = None,
     wm = watermark_result or {}
     if wm.get('official'):
         if wm.get('method') in ('signature', 'manifest', 'wm_comment', 'wm_meta'):
-            reasons.append(f'命中官方水印/签名（{wm.get("reason", "")}）')
+            reasons.append(_('Official watermark/signature detected ({reason})',
+                             reason=wm.get("reason", "")))
         else:
-            reasons.append(f'命中官方标识，需人工复核（{wm.get("reason", "")}）')
+            reasons.append(_('Official marker detected, manual review required ({reason})',
+                             reason=wm.get("reason", "")))
 
     # ② 结构合规
     structure = _check_structure(plugin_dir)
@@ -434,17 +444,18 @@ def review_plugin(plugin_dir: str, watermark_result: Dict[str, Any] = None,
     similarity = _check_similarity(plugin_dir, official_lib)
     report['similarity'] = similarity
     if similarity:
-        reasons.append(f'与官方插件文件完全一致 {len(similarity)} 处，需人工复核')
+        reasons.append(_('{count} files are identical to official plugin files, manual review required',
+                         count=len(similarity)))
 
     # ④ 危险代码扫描
     dangerous = _scan_dangerous(plugin_dir)
     report['dangerous'] = dangerous
-    reasons.extend(f'危险代码：{d}' for d in dangerous)
+    reasons.extend(_('Dangerous code: {detail}', detail=d) for d in dangerous)
 
     # ⑤ AST 级危险扫描（补充正则盲区）
     ast_dangerous = _scan_dangerous_ast(plugin_dir)
     report['ast_dangerous'] = ast_dangerous
-    reasons.extend(f'危险代码：{d}' for d in ast_dangerous)
+    reasons.extend(_('Dangerous code: {detail}', detail=d) for d in ast_dangerous)
 
     # ⑥ 权限一致性校验（声明必须覆盖实际使用，进入人工复核）
     perm_issues = _check_permission_consistency(plugin_dir, _load_plugin_meta(plugin_dir))
@@ -457,20 +468,22 @@ def review_plugin(plugin_dir: str, watermark_result: Dict[str, Any] = None,
         _pkg_ver = str((_pkg_meta or {}).get('version') or '').strip()
         if _pkg_ver and _pkg_ver != str(submitted_version).strip():
             reasons.append(
-                f'包内 plugin.json.version({_pkg_ver}) 与提交版本({submitted_version}) 不一致，需人工复核')
+                _('Package plugin.json.version({pkg}) does not match submitted version({submitted}), '
+                  'manual review required', pkg=_pkg_ver, submitted=submitted_version))
 
     # 判定优先级：reject > manual > pass
     status = 'pass'
     for r in reasons:
-        if ('官方水印/签名' in r or r.startswith('缺少') or '非法' in r
-                or r.startswith('危险代码')):
+        if ('Official watermark/signature' in r or r.startswith('Missing')
+                or 'Invalid' in r or r.startswith('Dangerous code')):
             status = 'reject'
             break
     if status == 'pass':
         for r in reasons:
             # P0 修复：agent_role/capabilities/版本字段问题必须显式置 manual，
             # 防止缺 agent_role/capabilities 的第三方包自动审核静默 pass 后仍被发布。
-            if ('人工复核' in r or '完全一致' in r or '权限不一致' in r
+            if ('manual review required' in r or 'is identical to official plugin' in r
+                    or 'Permission mismatch' in r
                     or r.startswith('agent_role') or r.startswith('capabilities')
                     or r.startswith('min_app_version') or r.startswith('compatible_editions')):
                 status = 'manual'

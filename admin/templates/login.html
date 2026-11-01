@@ -465,6 +465,20 @@ body::after {
 </div><!-- /tm-page -->
 
 <script src="/static/js/vue.global.prod.js"></script>
+<script>
+/* i18n dictionary for /static/puzzle-captcha.js (source-string-as-key) */
+window.__I18N__ = {
+  "Loading security verification...": {{ _('Loading security verification...') | tojson }},
+  "Drag the correct shape into the gap": {{ _('Drag the correct shape into the gap') | tojson }},
+  "Shape mismatch": {{ _('Shape mismatch') | tojson }},
+  "Not aligned": {{ _('Not aligned') | tojson }},
+  "Loading...": {{ _('Loading...') | tojson }},
+  "Failed to load": {{ _('Failed to load') | tojson }},
+  "Verification passed": {{ _('Verification passed') | tojson }},
+  "Verification failed": {{ _('Verification failed') | tojson }},
+  "Network error": {{ _('Network error') | tojson }}
+};
+</script>
 <script src="/static/puzzle-captcha.js"></script>
 <script>
 let cd = 0, cdTimer = null, tab = 'sms', capToken = '', capSolved = false, capLoadFailed = false;

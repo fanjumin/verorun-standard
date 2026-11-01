@@ -99,24 +99,25 @@ class WorkflowEngine:
         # P0-F05: 启停与并发约束（下沉到引擎内部，确保所有调用入口一致）
         wf = m.get_workflow(workflow_id)
         if not wf:
-            raise ValueError(f'工作流 #{workflow_id} 不存在')
+            raise ValueError(_('Workflow #{workflow_id} does not exist', workflow_id=workflow_id))
 
         if not wf.get('is_active'):
-            raise ValueError(f'工作流 #{workflow_id} 已暂停（is_active=False）')
+            raise ValueError(_('Workflow #{workflow_id} is paused (is_active=False)', workflow_id=workflow_id))
 
         max_conc = wf.get('max_concurrency', 0)
         if max_conc > 0:
             running_count = len(m.get_running_instances(workflow_id))
             if running_count >= max_conc:
                 raise ValueError(
-                    f'工作流 #{workflow_id} 并发实例数已达上限 ({running_count}/{max_conc})')
+                    _('Workflow #{workflow_id} has reached the maximum concurrent instances ({running}/{max})',
+                      workflow_id=workflow_id, running=running_count, max=max_conc))
 
         # 创建工作流实例
         inst_id = m.create_workflow_instance(
             workflow_id, trigger_type, trigger_config
         )
         if not inst_id:
-            raise ValueError(f'工作流 #{workflow_id} 实例创建失败')
+            raise ValueError(_('Failed to create an instance for workflow #{workflow_id}', workflow_id=workflow_id))
 
         # 更新上下文
         if initial_context:
@@ -128,7 +129,7 @@ class WorkflowEngine:
             })
 
         m.add_log('workflow', inst_id, 'info',
-                   f'🚀 工作流 #{workflow_id} 实例 #{inst_id} 启动')
+                   f'🚀 工作流 #{workflow_id} 实例 #{inst_id} 启动')  # i18n:tech — 运维日志
 
         # 获取 DAG 定义
         wf = m.get_workflow(workflow_id)
@@ -794,6 +795,7 @@ def _validate_target_url(url: str):
 # 快速测试
 # ============================================================
 
+# i18n:tech:begin — __main__ self-test script (not product copy)
 if __name__ == '__main__':
     m.init_orchestrator_tables()
 
@@ -833,3 +835,5 @@ if __name__ == '__main__':
     nodes = m.get_node_instances_by_workflow(inst_id)
     for n in nodes:
         print(f'  📌 {n["node_name"]}: {n["status"]} ({n.get("duration_ms", 0)}ms)')
+
+# i18n:tech:end

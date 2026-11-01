@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import click
 
+from ..constants import _
 from ..output import emit_json, render
 from ._base import wants_json
 
@@ -49,21 +50,21 @@ def register(group):
             emit_json(info)
             return
 
-        render(f"入口地址     : {info['base_url']}")
-        render(f"SSL 校验     : {info['verify_ssl']}")
-        render(f"已登录       : {info['authenticated']}")
-        render(f"服务端连通   : {info['server_reachable']}")
+        render(_("Base URL: {value}", value=info["base_url"]))
+        render(_("SSL verify: {value}", value=info["verify_ssl"]))
+        render(_("Logged in: {value}", value=info["authenticated"]))
+        render(_("Server reachable: {value}", value=info["server_reachable"]))
         if "probe_status" in info:
-            render(f"探测状态码   : {info['probe_status']}")
+            render(_("Probe status: {value}", value=info["probe_status"]))
 
         cp = info["credential_protection"]
         if cp.get("token", {}).get("exists"):
             tok = cp["token"]
-            render(f"Token 保护   : {'已保护' if tok.get('protected') else '未受保护'} "
-                   f"({tok.get('detail')})")
+            status = _("Protected") if tok.get("protected") else _("Not protected")
+            render(_("Token protection: {status} ({detail})", status=status, detail=tok.get("detail")))
         else:
-            render("Token 保护   : 尚未登录（无 token 文件）")
+            render(_("Token protection: not logged in (no token file)"))
 
         if info["server_reachable"] is False:
             from ..output import err
-            err("无法连接服务端，请检查 --base-url 或网络。")
+            err(_("Cannot connect to the server; check --base-url or your network."))

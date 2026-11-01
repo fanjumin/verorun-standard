@@ -24,61 +24,72 @@ from .auth import AuthManager
 from .client import VeroRunClient
 from .commands import register_all
 from .config import Config
-from .constants import DEFAULT_TIMEOUT
+from .constants import DEFAULT_TIMEOUT, _
 from .exceptions import APIError, AuthError, SSEError, VeroRunError
 
 _DEBUG = False
 
 
-@click.group()
-@click.option("--base-url", help="服务端入口（覆盖配置与 VERORUN_BASE_URL）")
-@click.option("--insecure", is_flag=True, help="关闭 SSL 证书校验（仅开发自签证书）")
-@click.option("--json", "as_json", is_flag=True, help="以 JSON 输出，便于脚本集成")
-@click.option("--timeout", type=int, default=None,
-              help=f"单次请求超时秒数（默认 {DEFAULT_TIMEOUT}）")
-@click.option("--debug", is_flag=True, help="出错时打印完整堆栈")
-@click.pass_context
-def cli(ctx: click.Context, base_url, insecure, as_json, timeout, debug) -> None:
-    """VeroRun AI 命令行客户端。"""
-    global _DEBUG
-    _DEBUG = debug
+def _build_cli() -> click.Group:
+    """在运行时构建命令树。
 
-    config = Config()
-    client = VeroRunClient(
-        config,
-        base_url=base_url,
-        verify_ssl=(False if insecure else None),
-        timeout=timeout or DEFAULT_TIMEOUT,
-    )
-    auth = AuthManager(client, config)
-    auth.bind(client)
+    click 的 `help` 文案在装饰器求值时就固定下来；若在模块导入期求值翻译，
+    语言会被定死在进程启动时的环境。因此把命令树构建收进函数，由 `main()` 调用。
+    """
 
-    ctx.ensure_object(dict)
-    ctx.obj["config"] = config
-    ctx.obj["client"] = client
-    ctx.obj["auth"] = auth
-    ctx.obj["as_json"] = as_json
-    ctx.obj["debug"] = debug
-    ctx.call_on_close(client.close)
+    @click.group()
+    @click.option("--base-url",
+                  help=_("Server endpoint (overrides config and VERORUN_BASE_URL)"))
+    @click.option("--insecure", is_flag=True,
+                  help=_("Disable SSL certificate verification (dev self-signed certificates only)"))
+    @click.option("--json", "as_json", is_flag=True,
+                  help=_("Output as JSON for script integration"))
+    @click.option("--timeout", type=int, default=None,
+                  help=_("Request timeout in seconds (default {default})", default=DEFAULT_TIMEOUT))
+    @click.option("--debug", is_flag=True, help=_("Print the full traceback on errors"))
+    @click.pass_context
+    def cli(ctx: click.Context, base_url, insecure, as_json, timeout, debug) -> None:
+        """VeroRun AI 命令行客户端。"""
+        global _DEBUG
+        _DEBUG = debug
 
+        config = Config()
+        client = VeroRunClient(
+            config,
+            base_url=base_url,
+            verify_ssl=(False if insecure else None),
+            timeout=timeout or DEFAULT_TIMEOUT,
+        )
+        auth = AuthManager(client, config)
+        auth.bind(client)
 
-@cli.command()
-def version() -> None:
-    """显示版本号。"""
-    click.echo(f"verorun {__version__}")
+        ctx.ensure_object(dict)
+        ctx.obj["config"] = config
+        ctx.obj["client"] = client
+        ctx.obj["auth"] = auth
+        ctx.obj["as_json"] = as_json
+        ctx.obj["debug"] = debug
+        ctx.call_on_close(client.close)
+
+    @cli.command()
+    def version() -> None:
+        """显示版本号。"""
+        click.echo(f"verorun {__version__}")
+
+    return cli
 
 
 def _handle_error(exc: BaseException) -> None:
     if isinstance(exc, AuthError):
-        click.echo(f"认证错误：{exc}", err=True)
+        click.echo(_("Authentication error: {error}", error=exc), err=True)
     elif isinstance(exc, APIError):
-        click.echo(f"API 错误：{exc}", err=True)
+        click.echo(_("API error: {error}", error=exc), err=True)
     elif isinstance(exc, SSEError):
-        click.echo(f"流式响应错误：{exc}", err=True)
+        click.echo(_("Streaming error: {error}", error=exc), err=True)
     elif isinstance(exc, VeroRunError):
-        click.echo(f"错误：{exc}", err=True)
+        click.echo(_("Error: {error}", error=exc), err=True)
     else:
-        click.echo(f"未知错误：{exc}", err=True)
+        click.echo(_("Unexpected error: {error}", error=exc), err=True)
     if _DEBUG:
         import traceback
 
@@ -87,6 +98,7 @@ def _handle_error(exc: BaseException) -> None:
 
 
 def main() -> None:
+    cli = _build_cli()
     register_all(cli)
     try:
         cli()
@@ -94,7 +106,7 @@ def main() -> None:
         # AuthError / APIError / SSEError 均继承自 VeroRunError
         _handle_error(exc)
     except KeyboardInterrupt:
-        click.echo("\n已中断。", err=True)
+        click.echo("\n" + _("Interrupted."), err=True)
         raise SystemExit(130)
     except BrokenPipeError:
         # 下游管道提前关闭（如 `verorun agents list | head`），静默正常退出

@@ -61,11 +61,11 @@ NATURAL_RULES = {
     _('Each trading day'): '0 30 9 ? * MON-FRI',
     _('Trading day opens'): '0 30 9 ? * MON-FRI',
     _('Trading day closes'): '0 0 15 ? * MON-FRI',
-    '交易时段': '*/30 9-15 ? * MON-FRI',
+    '交易时段': '*/30 9-15 ? * MON-FRI',  # i18n:tech — 中文自然语言输入匹配键
     # 固定时间
     _('Hourly'): '0 0 * * *',
-    '每半小时': '*/30 * * * *',
-    '每10分钟': '*/10 * * * *',
+    '每半小时': '*/30 * * * *',  # i18n:tech — 中文自然语言输入匹配键
+    '每10分钟': '*/10 * * * *',  # i18n:tech — 中文自然语言输入匹配键
     _('8 AM'): '0 0 8 * * *',
     _('9 AM'): '0 0 9 * * *',
     _('Midday'): '0 0 12 * * *',
@@ -89,13 +89,13 @@ def parse_natural_cron(expr: str) -> str:
     # 尝试模式匹配
     import re
     # "每个交易日 HH:MM 执行"
-    trade_match = re.match(r'每个交易日\s*(\d{1,2}):(\d{2})', expr)
+    trade_match = re.match(r'每个交易日\s*(\d{1,2}):(\d{2})', expr)  # i18n:tech — 中文输入正则
     if trade_match:
         h, m = trade_match.group(1), trade_match.group(2)
         return f'0 {m} {h} ? * MON-FRI'
 
     # "每 X 分钟/小时"
-    interval_match = re.match(r'每\s*(\d+)\s*(分钟|小时)', expr)
+    interval_match = re.match(r'每\s*(\d+)\s*(分钟|小时)', expr)  # i18n:tech — 中文输入正则
     if interval_match:
         num = int(interval_match.group(1))
         unit = interval_match.group(2)
@@ -105,7 +105,7 @@ def parse_natural_cron(expr: str) -> str:
             return f'0 */{num} * * *'
 
     # "每天 HH:MM"
-    daily_match = re.match(r'每天\s*(\d{1,2}):(\d{2})', expr)
+    daily_match = re.match(r'每天\s*(\d{1,2}):(\d{2})', expr)  # i18n:tech — 中文输入正则
     if daily_match:
         h, m = daily_match.group(1), daily_match.group(2)
         return f'0 {m} {h} * * *'
@@ -158,7 +158,7 @@ class SchedulerEngine:
 
         if not HAS_APSCHEDULER:
             raise ImportError(
-                "APScheduler 未安装。请运行: pip install apscheduler sqlalchemy"
+                _('APScheduler is not installed. Please run: pip install apscheduler sqlalchemy')
             )
 
         # APScheduler 配置
@@ -646,7 +646,7 @@ class SchedulerEngine:
         for dep in deps:
             dep = dict(dep)
             m.add_log('cron', dep['id'], 'info',
-                       f'🔗 由任务 #{job_id} 完成触发执行')
+                       f'🔗 由任务 #{job_id} 完成触发执行')  # i18n:tech — 运维日志
             self._execute_job_wrapper(dep['id'])
 
     # ---- 事件处理 ----

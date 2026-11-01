@@ -103,6 +103,11 @@ WeCom webhook_url is empty: WeCom webhook_url is empty
 'Telegram Connected! Bot: {}': 'Telegram Connected! Bot: {}'
 'WeCom returned: {} (errcode={})': 'WeCom returned: {} (errcode={})'
 'Channel {channel} does not support media push': 'Channel {channel} does not support media push'
+# Document manager "send to" single-channel push (2026-11-01)
+'Channel {channel} is not enabled': 'Channel {channel} is not enabled'
+'Content required': 'Content required'
+'Send failed': 'Send failed'
+'Document pushed to IM channel': 'Document pushed to IM channel'
 # Card-based multi-level management UI (Phase 2)
 Instant Messaging: Instant Messaging
 Third-party Login: Third-party Login
@@ -165,3 +170,9 @@ WeCom webhook_url or corp credentials are required: WeCom webhook_url or corp cr
 'Discord returned HTTP {}': 'Discord returned HTTP {}'
 'Discord channel_id is not configured': 'Discord channel_id is not configured'
 'Discord send failed': 'Discord send failed'
+
+# ── 告警推送正文 ───────────────────────────────────────────
+'VeroRun Alert': 'VeroRun Alert'
+'Current value: {observed} / threshold: {threshold}': 'Current value: {observed} / threshold: {threshold}'
+'Current value: {observed}': 'Current value: {observed}'
+'Time: {time}': 'Time: {time}'

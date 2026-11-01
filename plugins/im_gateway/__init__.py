@@ -115,16 +115,19 @@ class ImGatewayPlugin(BasePlugin):
         """告警纯文本（各 IM 适配器均支持 text；长度截断由适配器各自负责）"""
         symbol = ev.get('symbol') or ''
         name = ev.get('name') or symbol
-        lines = ['【VeroRun 告警】', f'{name} ({symbol})'.strip()]
+        lines = [_('VeroRun Alert'), f'{name} ({symbol})'.strip()]
         if ev.get('message'):
             lines.append(str(ev['message']))
         if ev.get('observed') is not None:
-            line = f'当前值: {ev["observed"]}'
             if ev.get('threshold') is not None:
-                line += f' / 阈值: {ev["threshold"]}'
-            lines.append(line)
+                lines.append(_('Current value: {observed} / threshold: {threshold}',
+                               observed=ev['observed'],
+                               threshold=ev['threshold']))
+            else:
+                lines.append(_('Current value: {observed}',
+                               observed=ev['observed']))
         if ev.get('at'):
-            lines.append(f'时间: {ev["at"]}')
+            lines.append(_('Time: {time}', time=ev['at']))
         return '\n'.join(lines)
 
     @staticmethod
@@ -196,7 +199,7 @@ class ImGatewayPlugin(BasePlugin):
         """向指定频道推送媒体文件。
 
         供主系统 media_library_push 调用。插件禁用时该实例不存在，
-        主系统需据此提示_("IM Gateway is not enabled")。
+        主系统需据此提示「IM Gateway is not enabled」。
 
         Args:
             channel: 'feishu' | 'wecom'

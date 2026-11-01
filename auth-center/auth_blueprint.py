@@ -45,7 +45,7 @@ def register_auth(app, exclude_blueprints=None):
         init_oauth(app)
         print('[OAuth] ✅ 插件 OAuth 已初始化')
     except Exception as e:
-        print(f'[OAuth] ⚠️ 插件不可用: {e}')
+        print(f'[OAuth] ⚠️ 插件不可用: {e}')  # i18n:tech — 启动诊断日志
     all_bps = [
         ('auth', auth_bp),
         ('user', user_bp),

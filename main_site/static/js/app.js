@@ -5,6 +5,13 @@
 (function() {
   'use strict';
 
+  /* i18n：文案由模板 app_js_i18n.html 注入 window.__I18N__（source-string-as-key），
+     词典缺失时回退英文源串。 */
+  function T(k) {
+    var d = window.__I18N__;
+    return (d && Object.prototype.hasOwnProperty.call(d, k)) ? d[k] : k;
+  }
+
   // ── tsParticles Initialization ──
   function initParticles() {
     if (typeof tsParticles === 'undefined') return;
@@ -148,16 +155,25 @@
     if (!ticker) return;
     ticker.style.display = 'block';
 
+    // 演示数据：数值为本地随机样本，非实时行情。真实行情须由 VeroRun 后端
+    // 行情 API 提供（前端不自行取数、不自行编造业务数据），故此处固定标注「演示数据」。
+    if (!ticker.querySelector('.ticker-demo')) {
+      var demoBadge = document.createElement('span');
+      demoBadge.className = 'ticker-demo';
+      demoBadge.textContent = T('Demo data');
+      ticker.appendChild(demoBadge);
+    }
+
     // Mock stock data
     var stocks = [
-      {sym:'A股/上证', price:'3128.45', chg:'+0.68%', dir:'up'},
-      {sym:'A股/深证', price:'10234.56', chg:'+1.23%', dir:'up'},
-      {sym:'港股/恒指', price:'18945.67', chg:'-0.32%', dir:'down'},
-      {sym:'美股/标普500', price:'5213.89', chg:'+0.89%', dir:'up'},
-      {sym:'美股/纳斯达克', price:'16234.56', chg:'+1.45%', dir:'up'},
+      {sym:T('A-shares / SSE'), price:'3128.45', chg:'+0.68%', dir:'up'},
+      {sym:T('A-shares / SZSE'), price:'10234.56', chg:'+1.23%', dir:'up'},
+      {sym:T('HKEX / HSI'), price:'18945.67', chg:'-0.32%', dir:'down'},
+      {sym:T('US / S&P 500'), price:'5213.89', chg:'+0.89%', dir:'up'},
+      {sym:T('US / Nasdaq'), price:'16234.56', chg:'+1.45%', dir:'up'},
       {sym:'Crypto/BTC', price:'67,432', chg:'+2.34%', dir:'up'},
       {sym:'Crypto/ETH', price:'3,245', chg:'-1.21%', dir:'down'},
-      {sym:'黄金/XAU', price:'2,345.6', chg:'+0.56%', dir:'up'},
+      {sym:T('Gold / XAU'), price:'2,345.6', chg:'+0.56%', dir:'up'},
     ];
 
     function buildTickerItems() {

@@ -23,6 +23,7 @@ from i18n import _
 # 一级敏感词 — 政治类（法律法规禁止）
 # 依据: 《互联网用户账号名称管理规定》第六条
 # ═══════════════════════════════════════════
+# i18n:tech:begin — 违规词表与法规条文：必须与用户输入原文原样匹配，翻译即失效
 LEVEL1_POLITICAL = [
     # 国家安全类
     '法轮功', '法轮', 'falun', '轮功', '大纪元', '新唐人',
@@ -106,7 +107,7 @@ LEADER_NAMES = [
 # 系统保留名称 — 不可注册
 # ═══════════════════════════════════════════
 RESERVED_NAMES = [
-    'admin', 'administrator', 'root', 'system', 'superadmin', '官方', _('Customer Service'),
+    'admin', 'administrator', 'root', 'system', 'superadmin', '官方', _('Customer Service'),  # i18n:tech — 保留名匹配项保持英文（无译文，避免改动中文保留名匹配语义）
     _('Admin'), '系统', _('Notifications'), '公告',
 ]
 
@@ -119,6 +120,7 @@ IMPERSONATION_KEYWORDS = [
     '公安局', '法院', '检察院', '军队',
     '税务', '工商', '银行',
 ]
+# i18n:tech:end
 
 # ═══════════════════════════════════════════
 # 手机号/邮箱/网址匹配模式
@@ -148,56 +150,56 @@ def check_username(username: str) -> dict:
     
     # ── 格式检查 ──
     if not name:
-        return {'valid': False, 'error': '名称不能为空', 'level': 5}
+        return {'valid': False, 'error': _('Name cannot be empty'), 'level': 5}
     if len(name) < 2:
-        return {'valid': False, 'error': '名称至少2个字符', 'level': 5}
+        return {'valid': False, 'error': _('Name must be at least 2 characters'), 'level': 5}
     if len(name) > 20:
-        return {'valid': False, 'error': '名称不超过20个字符', 'level': 5}
+        return {'valid': False, 'error': _('Name must not exceed 20 characters'), 'level': 5}
     
     # ── 纯数字或纯符号 ──
     if _patterns['pure_numbers'].match(name):
-        return {'valid': False, 'error': '名称不能为纯数字', 'level': 5}
+        return {'valid': False, 'error': _('Name cannot be all digits'), 'level': 5}
     if not re.search(r'[a-zA-Z\u4e00-\u9fff]', name):
-        return {'valid': False, 'error': '名称需包含字母或汉字', 'level': 5}
+        return {'valid': False, 'error': _('Name must contain letters or Chinese characters'), 'level': 5}
     
     # ── 检查敏感词 ──
     for word in LEVEL1_POLITICAL:
         if word in name:
-            return {'valid': False, 'error': '名称包含违规内容', 'level': 1}
+            return {'valid': False, 'error': _('Name contains prohibited content'), 'level': 1}
     
     for word in LEVEL2_VULGAR:
         if word in name:
-            return {'valid': False, 'error': '名称包含违规内容', 'level': 2}
+            return {'valid': False, 'error': _('Name contains prohibited content'), 'level': 2}
     
     for word in LEVEL3_INSULT:
         if word in name:
-            return {'valid': False, 'error': '名称包含不文明用语', 'level': 3}
+            return {'valid': False, 'error': _('Name contains offensive language'), 'level': 3}
     
     for word in LEADER_NAMES:
         if word in name:
-            return {'valid': False, 'error': '名称包含受保护内容', 'level': 1}          
+            return {'valid': False, 'error': _('Name contains protected content'), 'level': 1}          
     
     # ── 保留名称（精确 + 前缀匹配）──
     for r in RESERVED_NAMES:
         lr = r.lower()
         if name == lr or name.startswith(lr + '_') or name.startswith(lr + '-'):
-            return {'valid': False, 'error': '该名称已被系统保留', 'level': 4}
+            return {'valid': False, 'error': _('This name is reserved by the system'), 'level': 4}
     # 不能包含 "admin" 作为主体部分
     if re.search(r'(^|[^a-z])admin($|[^a-z])', name):
-        return {'valid': False, 'error': '该名称已被系统保留', 'level': 4}
+        return {'valid': False, 'error': _('This name is reserved by the system'), 'level': 4}
     
     # ── 冒充判定：包含"官方/客服/认证"等词 ──
     for word in IMPERSONATION_KEYWORDS:
         if word in name:
-            return {'valid': False, 'error': '名称不能包含"' + word + '"等误导性词汇', 'level': 5}
+            return {'valid': False, 'error': _('Name cannot contain misleading words such as "{word}"', word=word), 'level': 5}
     
     # ── 联系方式泄漏 ──
     if _patterns['phone'].search(name):
-        return {'valid': False, 'error': '名称不能包含手机号', 'level': 5}
+        return {'valid': False, 'error': _('Name cannot contain a phone number'), 'level': 5}
     if _patterns['email'].search(name):
-        return {'valid': False, 'error': '名称不能包含邮箱', 'level': 5}
+        return {'valid': False, 'error': _('Name cannot contain an email address'), 'level': 5}
     if _patterns['url'].search(name):
-        return {'valid': False, 'error': '名称不能包含网址', 'level': 5}
+        return {'valid': False, 'error': _('Name cannot contain a URL'), 'level': 5}
     
     return {'valid': True, 'error': None, 'level': 0}
 
@@ -225,6 +227,7 @@ def sanitize_name(name: str) -> str:
 
 if __name__ == '__main__':
     # 测试
+    # i18n:tech:begin — 本地自测样本与断言标签（非产品文案）
     tests = [
         ('admin', False, '保留名'),
         ('***REMOVED***', True, _('Normal')),
@@ -239,6 +242,7 @@ if __name__ == '__main__':
         ('www.baidu.com', False, '含网址'),
         ('a', False, '太短'),
     ]
+    # i18n:tech:end
     for name, expect_valid, label in tests:
         r = check_username(name)
         status = '✅' if r['valid'] == expect_valid else '❌'

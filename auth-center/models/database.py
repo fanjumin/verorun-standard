@@ -306,6 +306,7 @@ def init_db():
         cur.close()
         _INIT_DB_RUNNING = True
         # ── Mega DDL block: 核心表（隔离在单独事务中，失败不级联）──
+        # i18n:tech:begin — 建表 DDL 的 -- 注释与 SQL 文本不属可翻译文案（§9.1）
         cur = fresh_conn.cursor()
         cur.execute("""
                 CREATE TABLE IF NOT EXISTS users (
@@ -332,6 +333,8 @@ def init_db():
                 display_name      TEXT DEFAULT '',
                 email_verified    BIGINT DEFAULT 0,
                 password_changed_at TIMESTAMP,
+                recovery_code_hash TEXT DEFAULT '',
+                recovery_code_created_at TIMESTAMP,
                 totp_secret       TEXT DEFAULT '',
                 totp_enabled      BIGINT DEFAULT 0,
                 security_level    BIGINT DEFAULT 0,
@@ -865,6 +868,7 @@ def init_db():
             );
             INSERT INTO brand_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
         """)
+        # i18n:tech:end
         fresh_conn.commit()
         # -- social_links: 后台社媒图标管理 --
         with get_db() as c2:
@@ -884,6 +888,7 @@ def init_db():
             c2.commit()
         # service_plans 表 — 套餐管理
         with get_db() as c3:
+            # i18n:tech:begin — 套餐种子数据（SQL 字面量），翻译即失效
             c3.execute("""
                 CREATE TABLE IF NOT EXISTS service_plans (
                     id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -906,6 +911,7 @@ def init_db():
                        "('standard', 'Standard', '每日100次调用', 88, 888, 100, '[\"basic\",\"sentiment\",\"market\"]', 2) ON CONFLICT (plan_key) DO NOTHING")
             c3.execute("INSERT INTO service_plans (plan_key, name, description, price_month, price_year, daily_limit, features, sort_order) VALUES "
                        "('pro', 'Pro', '每日1000次调用', 188, 1888, 1000, '[\"all\"]', 3) ON CONFLICT (plan_key) DO NOTHING")
+            # i18n:tech:end
             c3.commit()
         # ── 管理员配置表 (2026-05-10) ──
         cur = fresh_conn.cursor()
@@ -1103,6 +1109,23 @@ def init_db():
             logger.info('[Migration] IAM v2 backfill complete')
         except Exception:
             m.rollback()
+
+    # ── 桌面单机版本地密码：一次性恢复码字段（2026-10-30）──
+    with get_db() as m:
+        cols = get_table_columns(m, 'users')
+        for col_name, col_def in [
+            ('recovery_code_hash', "TEXT DEFAULT ''"),
+            ('recovery_code_created_at', 'TIMESTAMP'),
+        ]:
+            if col_name not in cols:
+                try:
+                    m.execute(f'ALTER TABLE users ADD COLUMN {col_name} {col_def}')
+                    logger.info(f'[Migration] users.{col_name} added')
+                except Exception:
+                    pass
+        m.commit()
+        logger.info('[Migration] local recovery-code columns ready')
+
     # ── Real-name verification migration v2 (2026-05-19) ──
     # 合规要求：不存储身份证号（明文或加密），只存认证状态标记
     with get_db() as m:
@@ -1145,6 +1168,7 @@ def init_db():
 
     # ── Verification provider config seeds (admin fills in credentials later) ──
     with get_db() as m:
+        # i18n:tech:begin — system_config 种子数据说明（入库后由后台维护），翻译即失效
         provider_seeds = [
             ('verification.provider', 'alipay', '实名认证服务商: alipay / wechat / stub'),
             ('verification.alipay.app_id', '', '支付宝开放平台 App ID'),
@@ -1158,6 +1182,7 @@ def init_db():
             ('verification.enabled', 'false', '是否启用第三方实名认证 (true/false)'),
             ('verification.stub_mode', 'false', '开发模式：true=跳过真实第三方调用，直接模拟通过（默认关闭，安全优先）'),
         ]
+        # i18n:tech:end
         for key, value, desc in provider_seeds:
             m.execute(
                 "INSERT INTO system_config (key, value, description) VALUES (%s,%s,%s) ON CONFLICT (key) DO NOTHING",
@@ -1190,6 +1215,7 @@ def init_db():
         # Ensure UNIQUE index to prevent duplicate model seeds
         m.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_pm_provider_model_unique ON provider_models(provider_id, model_name)')
         # Seed providers —— 第 4 项 kind：vendor=自研厂商 / aggregator=多厂商聚合平台
+        # i18n:tech:begin — 供应商种子数据（入库后由后台维护），翻译即失效
         provider_seeds = [
             ('dashscope',  '阿里百炼（DashScope）', 'Alibaba Bailian — Qwen 自研 + DeepSeek 等第三方聚合，OpenAI 兼容', 'aggregator'),
             ('deepseek',   'DeepSeek', 'DeepSeek large language models', 'vendor'),
@@ -1209,6 +1235,7 @@ def init_db():
             ('qianfan',    '百度千帆', 'Baidu Qianfan v2 — ERNIE 自研 + DeepSeek/GLM/Kimi/Qwen 等第三方中转，OpenAI 兼容', 'aggregator'),
             ('edge_tts',   'Microsoft Edge TTS', 'Free Edge browser TTS — no key required, same neural voices', 'vendor'),
         ]
+        # i18n:tech:end
         # 旧库守卫：providers.endpoint_url / kind 由模块级迁移补；全新库建表已含列，此处幂等兜底
         cols_p = get_table_columns(m, 'providers')
         if 'endpoint_url' not in cols_p:
@@ -1224,12 +1251,13 @@ def init_db():
         # 旧库显示名一次性正名（仅当仍是旧名时；用户自定义名不覆盖）
         m.execute(
             "UPDATE providers SET name=%s WHERE slug='dashscope' AND name=%s",
-            ('阿里百炼（DashScope）', '阿里云 DashScope')
+            ('阿里百炼（DashScope）', '阿里云 DashScope')  # i18n:tech — 旧库显示名种子数据
         )
         # Resolve provider IDs
         pids = {slug: m.execute("SELECT id FROM providers WHERE slug = %s", (slug,)).fetchone()['id']
                 for slug, _, _, _ in provider_seeds}
         # Seed provider_models
+        # i18n:tech:begin — 模型种子数据（入库后由后台维护），翻译即失效
         model_seeds = [
             # Alibaba Cloud DashScope
             (pids['dashscope'],  'Qwen Turbo',     'qwen-turbo',             'https://dashscope.aliyuncs.com/compatible-mode/v1',          'dashscope_text_key',    'text',     10),
@@ -1346,6 +1374,7 @@ def init_db():
             (pids['qianfan'],    '智谱 GLM-5.2',        'glm-5.2',               'https://qianfan.baidubce.com/v2',      'qianfan_api_key',     'text',     213),
             (pids['qianfan'],    'Qwen3.5 27B',         'qwen3.5-27b',           'https://qianfan.baidubce.com/v2',      'qianfan_api_key',     'text',     214),
         ]
+        # i18n:tech:end
         for pid, name, model, url, key_ref, caps, sort in model_seeds:
             m.execute(
                 "INSERT INTO provider_models (provider_id, name, model_name, endpoint_url, api_key_ref, capabilities, sort_order) VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (provider_id, model_name) DO NOTHING",
@@ -1415,6 +1444,7 @@ def init_db():
         or_id = m.execute("SELECT id FROM providers WHERE slug='openrouter'").fetchone()
         if or_id:
             pid = or_id['id']
+            # i18n:tech:begin — OpenRouter 免费模型种子数据，翻译即失效
             or_free_models = [
                 (pid, 'DeepSeek V4 Flash (免费)',   'deepseek/deepseek-v4-flash:free',                        'https://openrouter.ai/api/v1', 'openrouter_api_key', 'text', 70),
                 (pid, 'Llama 3.3 70B (免费)',       'meta-llama/llama-3.3-70b-instruct:free',               'https://openrouter.ai/api/v1', 'openrouter_api_key', 'text', 71),
@@ -1441,6 +1471,7 @@ def init_db():
                 (pid, 'Laguna XS.2 (免费)',          'poolside/laguna-xs.2:free',                             'https://openrouter.ai/api/v1', 'openrouter_api_key', 'text', 92),
                 (pid, 'Laguna M.1 (免费)',           'poolside/laguna-m.1:free',                              'https://openrouter.ai/api/v1', 'openrouter_api_key', 'text', 93),
             ]
+            # i18n:tech:end
             for pid_val, name, model, url, key_ref, caps, sort in or_free_models:
                 m.execute(
                     "INSERT INTO provider_models (provider_id, name, model_name, endpoint_url, api_key_ref, capabilities, sort_order) VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (provider_id, model_name) DO NOTHING",
@@ -1518,6 +1549,7 @@ def init_db():
 
     # ── Payment / Third-party config seeds (admin fills in credentials later) ──
     with get_db() as m:
+        # i18n:tech:begin — 支付/第三方 system_config 种子数据，翻译即失效
         payment_seeds = [
             # 支付回调域名
             ('payment.notify_base',           '',    '支付回调通知域名 (如 https://your-domain.com)'),
@@ -1535,6 +1567,7 @@ def init_db():
             ('kdniao_eid',                    '',    '【已迁移至插件】快递鸟商户ID'),
             ('kdniao_api_key',                '',    '【已迁移至插件】快递鸟 API Key'),
         ]
+        # i18n:tech:end
         for key, value, desc in payment_seeds:
             m.execute(
                 "INSERT INTO system_config (key, value, description) VALUES (%s,%s,%s) ON CONFLICT (key) DO NOTHING",
@@ -1545,10 +1578,12 @@ def init_db():
 
     # ── Shop AI 商城商品优化配置 ──
     with get_db() as m:
+        # i18n:tech:begin — 商城 AI 配置种子数据，翻译即失效
         shop_ai_seeds = [
             ('shop_ai_provider',                'deepseek',     '商城AI商品优化 — 供应商 (deepseek/dashscope/openai/openrouter/siliconflow/ollama)'),
             ('shop_ai_model',                   '','商城AI商品优化 — 模型名（来自 AI Hub，留空自动使用默认）'),
         ]
+        # i18n:tech:end
         for key, value, desc in shop_ai_seeds:
             m.execute(
                 "INSERT INTO system_config (key, value, description) VALUES (%s,%s,%s) ON CONFLICT (key) DO NOTHING",
@@ -1559,12 +1594,14 @@ def init_db():
 
     # ── enterprise_verify: OCR / AI 审核模型配置（去硬编码，provider+model 由 DB 驱动）──
     with get_db() as m:
+        # i18n:tech:begin — 企业认证模型配置种子数据，翻译即失效
         ev_model_seeds = [
             ('enterprise_verify_ocr_provider',   'siliconflow',               '企业认证 OCR — 供应商 (providers.slug，需支持视觉输入)'),
             ('enterprise_verify_ocr_model',      'deepseek-ai/DeepSeek-OCR',  '企业认证 OCR — 模型名 (provider_models.model_name)'),
             ('enterprise_verify_audit_provider', 'siliconflow',               '企业认证 AI 审核 — 供应商 (providers.slug)'),
             ('enterprise_verify_audit_model',    'deepseek-ai/DeepSeek-V3',   '企业认证 AI 审核 — 模型名 (provider_models.model_name)'),
         ]
+        # i18n:tech:end
         for key, value, desc in ev_model_seeds:
             m.execute(
                 "INSERT INTO system_config (key, value, description) VALUES (%s,%s,%s) ON CONFLICT (key) DO NOTHING",
@@ -1820,6 +1857,7 @@ def init_db():
         empty = m.execute("SELECT count(*) FROM regions").fetchone()['count']
         if empty == 0:
             # 省/自治区/直辖市 level-1（基础兜底，含港澳台）
+            # i18n:tech:begin — 省市区划基础种子数据（须与国家行政区划代码原样匹配），翻译即失效
             base_regions = [
                 (110000, '北京市', 1, 100000, '中国/北京市'),
                 (120000, '天津市', 1, 100000, '中国/天津市'),
@@ -1856,6 +1894,7 @@ def init_db():
                 (810000, '香港特别行政区', 1, 100000, '中国/香港特别行政区'),
                 (820000, '澳门特别行政区', 1, 100000, '中国/澳门特别行政区'),
             ]
+            # i18n:tech:end
             for b in base_regions:
                 m.execute("INSERT INTO regions (code, name, level, parent_code, full_name) VALUES (%s,%s,%s,%s,%s) ON CONFLICT (code) DO NOTHING", b)
             m.commit()
@@ -1901,6 +1940,7 @@ def init_db():
 
     # ── Seed notification templates ──
     with get_db() as m:
+        # i18n:tech:begin — 通知模板种子数据（入库后由后台维护），翻译即失效
         templates = [
             ('user.realname_verified',      '实名认证通过',   '恭喜您已通过实名认证，解锁全部功能权益。',                                                          '',                   'reward', 1, 1),
             ('user.profile_completion.100',  '资料完成度100%', '您已完成全部个人资料填写，获得专属福利！',                                                            '',                   'reward', 2, 2),
@@ -1910,6 +1950,7 @@ def init_db():
             ('referral.referee_completed_action', '好友完成首单', '您的好友 {friend_name} 已完成首次操作，您的推广奖励已到账。',                                '',                   'reward', 6, 6),
             ('coupon.expiring',             '优惠券即将过期', '您有一张 {coupon_name} 即将在 {expire_days} 天后过期，请尽快使用。',                         '',                   'promo',  7, 7),
         ]
+        # i18n:tech:end
         for t in templates:
             existing = m.execute("SELECT id FROM notification_templates WHERE event_type = %s", (t[0],)).fetchone()
             if not existing:
@@ -1990,6 +2031,7 @@ def init_db():
         # Seed knowledge blocks from mini-program
         row = m.execute("SELECT COUNT(*) as c FROM knowledge_blocks").fetchone()
         if row['c'] == 0:
+            # i18n:tech:begin — 演示知识库种子数据（入库后可由后台编辑），非 UI 文案
             kb_seeds = [
                 ('kb_company_001','公司基本信息','Demo Company，位于示例地址。服务热线：400-000-0000，工作时间：周一至周五 9:00-18:00。','公司,地址,电话,邮箱,联系方式,工作时间','company',10),
                 ('kb_company_002','公司定位与愿景','本平台由专业团队研发，定位为AI驱动的企业智能运营平台。公司愿景是通过AI技术降低企业运营门槛，助力中小企业数字化转型。','定位,愿景,使命,AI驱动,企业运营,数字化转型,中小企业','company',8),
@@ -2017,12 +2059,14 @@ def init_db():
                 m.execute("INSERT INTO knowledge_blocks (id,title,content,keywords,category,priority,scope,owner_id) VALUES (%s,%s,%s,%s,%s,%s,'user',NULL) ON CONFLICT (id) DO NOTHING", s)
             m.commit()
             logger.info(f'[Migration] knowledge_blocks seeded: {len(kb_seeds)} blocks')
+            # i18n:tech:end
 
     # ── Migration: seed FAQ and white paper from community/ (2026-06-11) ──
     with get_db() as ms:
         # Only seed if fewer than 25 entries (commercial FAQ not yet seeded)
         cnt = ms.execute("SELECT COUNT(*) as c FROM knowledge_blocks").fetchone()
         if cnt['c'] < 25:
+            # i18n:tech:begin — 演示 FAQ 种子数据（入库后可由后台编辑），非 UI 文案
             faq_seeds_data = [
                 ('kb_faq_faq_p1', '你们的产品有哪些功能？', 'VeroRun(RuiCe AI)是生成式AI平台，支持智能对话（多模型）、AI建站、AI内容生成、数据清洗、知识库管理等。具体可查看官网产品页面或试用体验。', '功能,产品,能力,特性', 'faq', 6),
                 ('kb_faq_faq_p2', '支持哪些AI模型？', '我们通过 Agent Matrix 体系支持多种AI模型，包括 DeepSeek（推荐）、阿里通义千问、以及 OpenAI 兼容接口。模型选择可在系统设置中配置。', '模型,AI,DeepSeek,千问,OpenAI', 'tech', 6),
@@ -2041,6 +2085,7 @@ def init_db():
                 ms.execute("INSERT INTO knowledge_blocks (id,title,content,keywords,category,priority,scope,owner_id) VALUES (%s,%s,%s,%s,%s,%s,'user',NULL) ON CONFLICT (id) DO NOTHING", s)
             ms.commit()
             logger.info(f'[Migration] FAQ & whitepaper seeded: {len(faq_seeds_data)} blocks')
+            # i18n:tech:end
 
     # ── Migration: knowledge_queue（数据清洗 — 2026-06-10）──
     with get_db() as m:
@@ -2078,6 +2123,7 @@ def init_db():
 
     # ── Migration: seed extra themes (light/nature/warm/ocean) ──
     with get_db() as m:
+        # i18n:tech:begin — 内置主题种子数据（主题名/描述由主题系统维护），非 UI 文案
         theme_seeds = [
             ('light', '纯净白', '1.0.0', '',
              '纯净白色风格 — 适合教育、咨询、法律服务。干净、通透、可信赖。',
@@ -2092,6 +2138,7 @@ def init_db():
              '深海蓝色风格 — 适合企业、制造、物流、金融。沉稳、专业。',
              'enterprise', '["dark","blue","enterprise","manufacturing"]'),
         ]
+        # i18n:tech:end
         for slug, name, ver, author, desc, industry, tags in theme_seeds:
             m.execute(
                 "INSERT INTO themes (slug, name, version, author, description, industry, tags, config_json, dir_name) "
@@ -2103,6 +2150,7 @@ def init_db():
         logger.info(f'[Migration] seed themes: {len(theme_seeds)} themes added')
 
     # ── Migration: brand_settings software_name + software_slogan ──
+    # i18n:tech:begin — 列默认值为数据库初始化数据（品牌名），非 UI 文案
     with get_db() as m:
         cols = get_table_columns(m, 'brand_settings')
         if 'software_name' not in cols:
@@ -2113,6 +2161,7 @@ def init_db():
             m.execute("ALTER TABLE brand_settings ADD COLUMN software_slogan TEXT NOT NULL DEFAULT 'Multi-Agent AI Operating System / 多智能体驱动的AI内容与商业枢纽'")
             m.commit()
             logger.info('[Migration] brand_settings.software_slogan added')
+    # i18n:tech:end
 
     # ── Migration: tm_brand_settings site_name_cn → VeroRun ──
     with get_db() as m:
@@ -2455,6 +2504,7 @@ def init_db():
 
 
 def _get_default_interests():
+    # i18n:tech:begin — 兴趣标签种子数据（用户可选标签，入库后由后台维护）
     """6 大类 ~35 个兴趣标签"""
     cats = [
         ("娱乐与媒体", ["电影","电视剧","音乐","动漫","游戏","阅读","短视频","综艺","纪录片"]),
@@ -2464,6 +2514,7 @@ def _get_default_interests():
         ("艺术创作",   ["绘画","写作","手工艺","摄影","设计","书法","插画"]),
         ("其他",       ["健康养生","教育","环保","汽车","星座","心理学","投资","创业"]),
     ]
+    # i18n:tech:end
     tags = []
     for cat, items in cats:
         for i, n in enumerate(items):
@@ -2536,9 +2587,11 @@ with _safe_get_db_for_migration() as m:
 
 
 def get_active_model(provider_slug='deepseek'):
+    # i18n:tech:begin — 函数说明文档，非 UI 文案
     """从 AI Hub (provider_models) 查询指定 provider 的第一个活跃模型。
     返回 (provider_model_id, model_name, base_url) 或 (None, None, None)。
     整个系统必须通过此函数获取模型，严禁硬编码模型名。"""
+    # i18n:tech:end
     try:
         with get_db() as conn:
             row = conn.execute("""
@@ -2646,6 +2699,24 @@ with _safe_get_db_for_migration() as m:
     m.execute('CREATE INDEX IF NOT EXISTS idx_i18n_locale ON i18n_strings(locale)')
     logger.info('[i18n] ✅ i18n_strings table created')
 
+# ── Migration: i18n 词条命名空间隔离 (2026-10-29) ──
+# plugin_id 标明词条归属：'__kernel__' = 内核/shared，其余为插件标识。
+# 解析只合并「内核 + 已启用插件」；插件禁用即不参与解析，卸载即清理。
+# 历史行来源不可考（插件词条曾被写成内核行），由 seed_plugin_translations()
+# 在启动时按「源串是否在根词典」自动回收归属，故此处不删除任何数据。
+with _safe_get_db_for_migration() as m:
+    if _table_exists(m, 'i18n_strings'):
+        _i18n_cols = get_table_columns(m, 'i18n_strings')
+        if 'plugin_id' not in _i18n_cols:
+            try:
+                m.execute("ALTER TABLE i18n_strings ADD COLUMN "
+                          "plugin_id TEXT NOT NULL DEFAULT '__kernel__'")
+                logger.info('[i18n] ✅ i18n_strings.plugin_id added')
+            except Exception as e:
+                logger.warning(f'[i18n] plugin_id migration skipped: {e}')
+        m.execute('CREATE INDEX IF NOT EXISTS idx_i18n_plugin '
+                  'ON i18n_strings(plugin_id)')
+
 # ── Migration: site_domains 子域名管理表 (2026-07-06) ──
 # Note: 移除了 FOREIGN KEY 引用 site_configs，因为 site_configs 在 init_db() 中创建
 # 模块级 migration 执行时 site_configs 可能尚未建表
@@ -2692,11 +2763,13 @@ except Exception:
     pass  # site_configs 表可能尚未创建
 
 # site_domains 默认种子（3 个标准子域名）
+# i18n:tech:begin — 站点域名显示名种子数据（后台可改），非 UI 文案
 _defaults = [
     ('www',      f'www.{_default_domain}',      f'{_default_brand} 官网',       'default', 1, 1),
     ('agent',    f'agent.{_default_domain}',    f'{_default_brand} 管理后台',   'default', 1, 2),
     ('platform', f'platform.{_default_domain}', f'{_default_brand} 用户中心',   'default', 1, 3),
 ]
+# i18n:tech:end
 try:
     with _safe_get_db_for_migration() as m:
         for sub, full, name, template, pub, so in _defaults:
@@ -2779,11 +2852,13 @@ def now_iso():
     return datetime.now().isoformat()
 
 
+# i18n:tech:begin — 套餐档位定义（与 service_plans 种子数据一致），翻译即失效
 TIERS = {
     'free':     {'name': 'Free',     'daily_limit': 20,   'price_month': 0,   'price_year': 0,    'features': ['basic'],       'desc': '每日20次调用', 'max_agents': 1},
     'standard': {'name': 'Standard', 'daily_limit': 100,  'price_month': 88,  'price_year': 888,  'features': ['basic', 'sentiment', 'market'], 'desc': '每日100次调用', 'max_agents': 3},
     'pro':      {'name': 'Pro',      'daily_limit': 1000, 'price_month': 188, 'price_year': 1888,  'features': ['all'],         'desc': '每日1000次调用', 'max_agents': 10},
 }
+# i18n:tech:end
 
 # ── Migration: provider_api_keys 统一 LLM 供应商 Key 管理 ──
 # 注意：此表与用户 API Key 表 (api_keys) 不同，专用于管理 LLM 供应商的 API Key
@@ -2802,6 +2877,7 @@ with _safe_get_db_for_migration() as m:
         )
     ''')
 
+    # i18n:tech:begin — 供应商 Key 种子数据，翻译即失效
     seed_keys = [
         ('Alibaba Cloud DashScope', '', 'dashscope', 'Qwen series models API Key'),
         ('OpenAI',                  '', 'openai',    'GPT-4o series models API Key'),
@@ -2814,6 +2890,7 @@ with _safe_get_db_for_migration() as m:
         ('Zhipu',                    '', 'zhipu',     '智谱 AI / ChatGLM API Key'),
         ('Anthropic',                '', 'anthropic', 'Claude series models API Key'),
     ]
+    # i18n:tech:end
     for name, key_val, provider, desc in seed_keys:
         m.execute(
             "INSERT INTO provider_api_keys (name, key_value_enc, provider, description) "

@@ -11,6 +11,8 @@ import re
 import secrets
 import string
 
+from i18n import _
+
 PASSWORD_POLICY = {
     'min_length': 10,
     'max_length': 128,
@@ -53,26 +55,29 @@ def validate_password(password: str) -> dict:
     errors = []
 
     if not password:
-        errors.append('密码不能为空')
+        errors.append(_('Password cannot be empty'))
         return {'valid': False, 'errors': errors}
 
     # Length checks
     if len(password) < PASSWORD_POLICY['min_length']:
-        errors.append(f'密码长度至少{PASSWORD_POLICY["min_length"]}位')
+        errors.append(_('Password must be at least {min_length} characters',
+                        min_length=PASSWORD_POLICY['min_length']))
 
     if len(password) > PASSWORD_POLICY['max_length']:
-        errors.append(f'密码长度不能超过{PASSWORD_POLICY["max_length"]}位')
+        errors.append(_('Password cannot exceed {max_length} characters',
+                        max_length=PASSWORD_POLICY['max_length']))
 
     # Category checks: 4 类中至少 3 类（不再对单类做硬性要求，避免与
     # “至少 3 类”规则冲突的死分支）
     cats = _count_categories(password)
     categories_matched = sum(cats.values())
     if categories_matched < PASSWORD_POLICY['min_categories']:
-        errors.append(f'密码至少包含{PASSWORD_POLICY["min_categories"]}类字符（大写字母、小写字母、数字、特殊字符）')
+        errors.append(_('Password must contain at least {min_categories} of these character types: uppercase letters, lowercase letters, digits, special characters',
+                        min_categories=PASSWORD_POLICY['min_categories']))
 
     # Check against weak passwords (case insensitive)
     if password.lower() in {w.lower() for w in WEAK_PASSWORDS}:
-        errors.append('密码过于简单，请更换')
+        errors.append(_('Password is too simple; please choose another'))
 
     return {
         'valid': len(errors) == 0,
@@ -89,7 +94,7 @@ def get_password_strength(password: str) -> dict:
     Labels: 0=极弱, 1=弱, 2=中等, 3=强, 4=极强
     """
     if not password:
-        return {'score': 0, 'label': '极弱', 'categories': 0}
+        return {'score': 0, 'label': _('Very weak'), 'categories': 0}
 
     cats = _count_categories(password)
     categories_matched = sum(cats.values())
@@ -104,7 +109,7 @@ def get_password_strength(password: str) -> dict:
     # Cap at 4
     score = min(score, 4)
 
-    labels = {0: '极弱', 1: '弱', 2: '中等', 3: '强', 4: '极强'}
+    labels = {0: _('Very weak'), 1: _('Weak'), 2: _('Medium'), 3: _('Strong'), 4: _('Very strong')}
 
     return {
         'score': score,
@@ -156,6 +161,8 @@ def generate_strong_password(length: int = 16) -> str:
 def get_password_rules_text() -> str:
     """Return human-readable rules text for UI display."""
     parts = []
-    parts.append(f'至少{PASSWORD_POLICY["min_length"]}位，最多{PASSWORD_POLICY["max_length"]}位')
-    parts.append(f'至少包含{PASSWORD_POLICY["min_categories"]}类字符（大写字母、小写字母、数字、特殊字符）')
-    return '密码要求：' + '、'.join(parts)
+    parts.append(_('At least {min_length} characters, at most {max_length} characters',
+                   min_length=PASSWORD_POLICY['min_length'], max_length=PASSWORD_POLICY['max_length']))
+    parts.append(_('Must contain at least {min_categories} of these character types: uppercase letters, lowercase letters, digits, special characters',
+                   min_categories=PASSWORD_POLICY['min_categories']))
+    return _('Password requirements: {rules}', rules=', '.join(parts))

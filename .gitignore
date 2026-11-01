@@ -79,6 +79,11 @@ deploy_*.py
 fix_cache.py
 verify_*.py
 
+# ── 本地运行数据根目录（数据库 / 日志 / 媒体 / vault / 交付物 / 加解密盐）──
+# 只忽略仓库根的 data/：plugins/*/data、veroguard/data、auth-center/data 下的
+# 静态资源（日历 csv、ip2region、manifest 等）必须继续入库，故绝不写裸 `data/`。
+/data/
+
 # DB backups
 backups/
 data/*.db
@@ -88,6 +93,10 @@ data/*.db-wal
 
 # vault 插件运行时备份归档（体积大、每台机器不同、含加密数据，永不入库）
 data/vault/
+
+# 交付物（研报 md/xlsx/pptx）：客户数据，只在本机留存，不入库
+# 索引 index.json 同样含标的与标题，一并不入库
+data/deliverables/
 
 # Runtime SQLite databases (plugins own DBs are created at runtime)
 plugins/*/*.db
@@ -250,6 +259,18 @@ deploy/VeroRun-Deploy-Report.html
 *.p12
 *.pfx
 .quarantine-*/
+
+# ── 仓库根授权凭证 / 发行清单（官方版凭证泄漏即等于授权绕过，永不入库）──
+# 文件已移至仓库外归档；plugin_manager/license.py 的设计前提是「客户仓库没有该凭证」。
+/official_token.json
+/official_token.json.sig
+/enterprise_token.json
+/enterprise_token.json.sig
+/release_manifest.json
+/release_manifest.sig
+
+# ── 旧版提示词迁移备份（一次性历史残留，不入库）──
+agent_matrix/prompts/_legacy_zh_backup/
 
 # ── 运行时生成的加解密盐（auth-center/services/crypto.py 首次调用时落盘）──
 # 二进制、每台机器不同、泄漏即等于泄漏加密凭据 —— 永不入库。

@@ -14,6 +14,7 @@ from typing import Any, Optional
 
 import click
 
+from ..constants import _
 from ..output import emit_json, emit_text
 from ..sse import iter_data_payloads, parse_payload
 from ._base import parse_json_option, show, wants_json
@@ -26,11 +27,11 @@ DISPATCH_PATH = "/admin/agent-matrix/dispatch"
 def register(group: Any) -> None:
     @group.command("chat")
     @click.argument("message")
-    @click.option("--session", "-s", "session_id", help="会话 ID（续接历史）")
+    @click.option("--session", "-s", "session_id", help=_("Session ID (continue the history)"))
     @click.option("--agent", "-a", "agent_id", type=int,
-                  help="指定 Sub Agent 的数字 ID（走 /chat/stream）")
+                  help=_("Numeric ID of the Sub Agent (uses /chat/stream)"))
     @click.option("--stream/--no-stream", default=None,
-                  help="是否流式输出；默认：有 --agent 时流式，否则同步 Master 编排")
+                  help=_("Stream the output; default: streaming when --agent is set, otherwise synchronous Master orchestration"))
     @click.pass_context
     def chat(ctx, message, session_id, agent_id, stream):
         """与 VeroRun AI 对话。
@@ -48,9 +49,9 @@ def register(group: Any) -> None:
     @group.command("dispatch")
     @click.argument("description")
     @click.option("--agent", "-a", "agent_id", type=int, required=True,
-                  help="目标 Sub Agent 的数字 ID")
-    @click.option("--title", "-t", default="", help="任务标题")
-    @click.option("--input", "input_data", default="", help="输入数据（JSON 字符串）")
+                  help=_("Numeric ID of the target Sub Agent"))
+    @click.option("--title", "-t", default="", help=_("Task title"))
+    @click.option("--input", "input_data", default="", help=_("Input data (JSON string)"))
     @click.pass_context
     def dispatch(ctx, description, agent_id, title, input_data):
         """直接下发任务给指定 Sub Agent（POST /admin/agent-matrix/dispatch）"""

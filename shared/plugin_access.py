@@ -22,6 +22,7 @@ _MISSING_TTL = 300  # 缺失负缓存 5 分钟，避免每请求重复 import �
 _missing: dict = {}
 
 # 插件触点登记表：核心允许触达的插件模块全集（新增触点 = 改这张表并写明用途）
+# i18n:tech:begin — 开发期依赖登记表，仅供核心开发者阅读，不对外展示
 PLUGIN_TOUCHPOINTS = {
     'plugins.email.services': '邮件发送（admin / auth / orchestrator）',
     'plugins.subscription.scheduler': '订阅续费调度（admin，P3 收权前过渡）',
@@ -43,6 +44,7 @@ PLUGIN_TOUCHPOINTS = {
     'plugins.coupons': '优惠券引擎（completion_service）',
     'plugins.payment.gateways.alipay': '支付宝网关（shop 支付）',
 }
+# i18n:tech:end
 
 
 class PluginTouchpointDenied(ImportError):
@@ -58,7 +60,7 @@ def optional_import(dotted: str, feature: str = ''):
     """
     if dotted not in PLUGIN_TOUCHPOINTS:
         raise PluginTouchpointDenied(
-            f'未登记的插件触点: {dotted}（请更新 PLUGIN_TOUCHPOINTS 并注明用途）')
+            f'未登记的插件触点: {dotted}（请更新 PLUGIN_TOUCHPOINTS 并注明用途）')  # i18n:tech — 开发者契约错误，不面向终端用户
     ts = _missing.get(dotted)
     if ts and time.time() - ts < _MISSING_TTL:
         return None
@@ -79,7 +81,7 @@ def get_attr(dotted: str, name: str, default=None, feature: str = ''):
     try:
         return getattr(mod, name)
     except AttributeError:
-        logger.error('[%s] %s 缺少属性 %s', feature or 'n/a', dotted, name)
+        logger.error('[%s] %s 缺少属性 %s', feature or 'n/a', dotted, name)  # i18n:tech — 运维日志
         return default
 
 

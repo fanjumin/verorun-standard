@@ -130,7 +130,7 @@ def _load(conn):
             if d and d.get('key'):
                 cats[d['key']] = d
     except Exception as e:
-        print(f'[Distribution] ⚠️ plugin_categories 读取失败（按空处理）: {e}')
+        print(f'[Distribution] ⚠️ plugin_categories 读取失败（按空处理）: {e}')  # i18n:tech — 运维日志
 
     rules = {}
     try:
@@ -139,7 +139,7 @@ def _load(conn):
             if d and d.get('identifier'):
                 rules[d['identifier']] = d
     except Exception as e:
-        print(f'[Distribution] ⚠️ plugin_distribution_rules 读取失败（按空处理）: {e}')
+        print(f'[Distribution] ⚠️ plugin_distribution_rules 读取失败（按空处理）: {e}')  # i18n:tech — 运维日志
 
     editions = {}
     try:
@@ -148,7 +148,7 @@ def _load(conn):
             if d and d.get('edition'):
                 editions[d['edition']] = d
     except Exception as e:
-        print(f'[Distribution] ⚠️ edition_catalog 读取失败（按空处理）: {e}')
+        print(f'[Distribution] ⚠️ edition_catalog 读取失败（按空处理）: {e}')  # i18n:tech — 运维日志
 
     return cats, rules, editions
 
@@ -225,7 +225,7 @@ def _snapshot():
             _fp_state['checked_at'] = now
             _fp_state['value'] = fp
         except Exception as e:
-            print(f'[Distribution] ⚠️ 规则读取失败（沿用旧快照）: {e}')
+            print(f'[Distribution] ⚠️ 规则读取失败（沿用旧快照）: {e}')  # i18n:tech — 运维日志
             # 记录时间戳，避免每请求都重试打库；保留旧数据不清零
             _cache['ts'] = now
         return _cache['categories'], _cache['rules'], _cache['editions']

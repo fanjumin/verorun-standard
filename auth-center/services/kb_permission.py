@@ -45,14 +45,14 @@ def check_kb_permission(scope: str, owner_id: int, action: str,
                 return True, None
             return False, (jsonify({
                 'success': False,
-                'error': '系统知识库仅超级管理员可修改'
+                'error': _('System knowledge base can only be modified by super admin')
             }), 403)
 
         if action == 'delete':
             # 系统KB删除：完全禁止
             return False, (jsonify({
                 'success': False,
-                'error': '系统知识库禁止删除。如需更新请使用在线更新功能'
+                'error': _('System knowledge base cannot be deleted; use the online update feature instead')
             }), 403)
 
     elif scope == 'user':
@@ -65,7 +65,7 @@ def check_kb_permission(scope: str, owner_id: int, action: str,
                 return True, None
             return False, (jsonify({
                 'success': False,
-                'error': '仅可操作自己的知识库条目'
+                'error': _('You can only operate on your own knowledge base entries')
             }), 403)
 
     return False, (jsonify({

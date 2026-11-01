@@ -297,8 +297,8 @@ def legal_page(slug):
 
 @cms_bp.route('/insights')
 def insights():
-    posts = get_posts(category='产品动态', audience='public', limit=20)
-    return render_template('insights_list.html', posts=posts, category='产品动态')
+    posts = get_posts(category='产品动态', audience='public', limit=20)  # i18n:tech — 分类值匹配，翻译即失效
+    return render_template('insights_list.html', posts=posts, category='产品动态')  # i18n:tech — 分类值匹配，翻译即失效
 
 
 @cms_bp.route('/insights/<slug>')

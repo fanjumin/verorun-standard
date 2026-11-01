@@ -35,6 +35,7 @@ from .constants import (
     CRED_FILE,
     JWT_LEEWAY,
     TOKEN_FILE,
+    _,
 )
 from .exceptions import APIError, AuthError
 from .output import warn
@@ -64,11 +65,13 @@ class AuthManager:
             # 若原样抛服务端英文原文，用户只会看到 "Please complete the CAPTCHA
             # challenge" 而不知道要等多久、怎么解，故翻译为可操作的指引。
             if exc.status == 400 and "CAPTCHA" in str(exc.message):
-                raise AuthError(
-                    "登录被服务端频控拦截：15 分钟内同一账号失败 ≥5 次或同一 IP 失败 ≥10 次后，"
-                    "必须提供图形验证码。请在管理后台完成一次验证码后，用 `--captcha <token>` 重试，"
-                    "或等待 15 分钟后再次登录；也可改用 `--api-key` 登录。"
-                ) from exc
+                raise AuthError(_(
+                    "Login blocked by server rate limiting. A CAPTCHA is required after "
+                    "5 failed attempts for the same account or 10 for the same IP within "
+                    "15 minutes. Complete a CAPTCHA in the admin console, then retry with "
+                    "`--captcha <token>`, or wait 15 minutes and log in again; you can also "
+                    "log in with `--api-key`."
+                )) from exc
             raise
         self._save_token(self._extract_token(resp))
         return resp
@@ -84,19 +87,21 @@ class AuthManager:
     def login_apikey(self, apikey: str) -> Dict[str, str]:
         apikey = (apikey or "").strip()
         if not apikey.startswith(AGENT_APIKEY_PREFIX):
-            raise AuthError(f"API Key 应以 {AGENT_APIKEY_PREFIX} 开头")
+            raise AuthError(_("API Key must start with {prefix}", prefix=AGENT_APIKEY_PREFIX))
         if len(apikey) < AGENT_APIKEY_MIN_LEN:
-            raise AuthError(
-                f"API Key 长度不足（至少 {AGENT_APIKEY_MIN_LEN} 字符），请确认复制完整"
-            )
+            raise AuthError(_(
+                "API Key is too short (at least {min_len} characters); make sure the copy is complete",
+                min_len=AGENT_APIKEY_MIN_LEN,
+            ))
         if any(ch.isspace() for ch in apikey):
-            raise AuthError("API Key 含空白字符，请确认复制时未换行")
+            raise AuthError(_("API Key contains whitespace; make sure the copy did not wrap across lines"))
 
         self._write_credential(CRED_FILE, {"api_key": apikey})
-        warn(
-            "该 API Key 仅通过本地格式校验后保存，未经服务端验证"
-            "（仓库内未发现可用于校验的公开端点）；请执行一次真实命令确认其有效性。"
-        )
+        warn(_(
+            "This API Key was saved after local format validation only and has not been "
+            "verified by the server (no public verification endpoint exists in the repository); "
+            "run a real command to confirm it works."
+        ))
         return {"api_key": apikey}
 
     @staticmethod
@@ -108,7 +113,7 @@ class AuthManager:
             token = data.get("token") or resp.get("token")
             if token:
                 return token
-        raise AuthError("登录响应中未找到 token（请确认账号为管理员）")
+        raise AuthError(_("No token found in the login response (make sure the account is an administrator)"))
 
     def _save_token(self, token: str) -> None:
         payload: Dict[str, Any] = {"token": token, "saved_at": int(time.time())}
@@ -121,10 +126,12 @@ class AuthManager:
     def _write_credential(path: str, payload: Dict[str, Any]) -> None:
         hardened, detail = write_secret(path, payload)
         if not hardened:
-            warn(
-                f"凭证已写入 {path}，但未能收紧文件权限：{detail}。"
-                "该文件包含可直接调用管理接口的凭证，请自行限制访问或改用受控环境。"
-            )
+            warn(_(
+                "Credentials were written to {path}, but file permissions could not be "
+                "tightened: {detail}. This file contains credentials that can call admin "
+                "APIs; restrict access yourself or use a controlled environment.",
+                path=path, detail=detail,
+            ))
 
     # ------------------------------------------------------------------ #
     # 读取
@@ -181,9 +188,9 @@ class AuthManager:
         if token and not apikey:
             state = self.token_state()
             if state.get("expired"):
-                problem = (
-                    f"本地 token 已于 {state['expires_at_text']} 过期，"
-                    "请重新执行 `verorun login`"
+                problem = _(
+                    "The local token expired at {expires_at}; run `verorun login` again",
+                    expires_at=state["expires_at_text"],
                 )
         target.bind_auth(token=token, apikey=apikey, token_problem=problem)
 
@@ -195,7 +202,7 @@ class AuthManager:
             self.client.request("POST", "/auth/logout", auth_required=True)
         except Exception as exc:
             # 不再静默吞掉：服务端登出失败时告知用户，但仍清理本地凭证
-            warn(f"服务端登出未成功（{exc}），仍将清除本地凭证。")
+            warn(_("Server logout failed ({exc}); local credentials will still be cleared.", exc=exc))
         for path in (TOKEN_FILE, CRED_FILE):
             try:
                 import os
@@ -203,7 +210,7 @@ class AuthManager:
                 if os.path.exists(path):
                     os.remove(path)
             except OSError as exc:
-                warn(f"无法删除本地凭证 {path}：{exc}")
+                warn(_("Could not delete local credentials {path}: {exc}", path=path, exc=exc))
 
 
 # ---------------------------------------------------------------------- #

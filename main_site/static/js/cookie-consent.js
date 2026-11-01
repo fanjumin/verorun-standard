@@ -15,6 +15,13 @@
 ;(function () {
   'use strict';
 
+  /* i18n：文案由服务端模板注入 window.__I18N__（source-string-as-key）；
+     词典缺失时回退英文源串，不阻断同意流程。 */
+  function T(k) {
+    var d = window.__I18N__;
+    return (d && Object.prototype.hasOwnProperty.call(d, k)) ? d[k] : k;
+  }
+
   /* ═══════════════════════════════════════════════
      Configuration
      ═══════════════════════════════════════════════ */
@@ -26,27 +33,27 @@
     categories: [
       {
         id: 'necessary',
-        label: '必要 Cookie',
-        desc: '登录态、安全校验、会话管理。网站核心功能依赖这些 Cookie，无法关闭。',
+        label: T('Necessary cookies'),
+        desc: T('Login state, security checks and session management. Core site features depend on these cookies and cannot be disabled.'),
         required: true
       },
       {
         id: 'analytics',
-        label: '分析与性能 Cookie',
-        desc: '帮助我们了解访客如何使用网站，以便改进体验。数据匿名化处理。',
+        label: T('Analytics and performance cookies'),
+        desc: T('Help us understand how visitors use the site so we can improve the experience. Data is anonymized.'),
         required: false
       },
       {
         id: 'marketing',
-        label: '营销 Cookie',
-        desc: '用于投放相关广告和衡量广告效果。可能与第三方广告商共享。',
+        label: T('Marketing cookies'),
+        desc: T('Used to deliver relevant ads and measure their performance. May be shared with third-party advertisers.'),
         required: false
       }
     ],
     privacyUrl: '/cookie-policy',
-    bannerTitle: 'Cookie 使用说明',
-    bannerText: '本站使用 Cookie 来保障基本功能、分析访问数据以及提升您的体验。详细信息请阅读我们的',
-    privacyLinkText: '隐私政策',
+    bannerTitle: T('Cookie notice'),
+    bannerText: T('This site uses cookies to keep essential features working, analyze traffic and improve your experience. For details, please read our'),
+    privacyLinkText: T('Privacy Policy'),
   };
 
   /* ═══════════════════════════════════════════════
@@ -159,7 +166,7 @@
           '<div class="cc-setting-info">' +
             '<div class="cc-setting-label">' + cat.label + '</div>' +
             '<div class="cc-setting-desc">' + cat.desc + '</div>' +
-            (cat.required ? '<div class="cc-setting-always">始终启用</div>' : '') +
+            (cat.required ? '<div class="cc-setting-always">' + T('Always enabled') + '</div>' : '') +
           '</div>' +
           buildToggle(cat.id, checked, cat.required) +
         '</div>'
@@ -172,29 +179,29 @@
     var prefs = _prefs;
     return (
       '<div class="cc-root">' +
-        '<div class="cc-overlay" role="dialog" aria-label="Cookie 同意提示" aria-live="polite">' +
+        '<div class="cc-overlay" role="dialog" aria-label="' + T('Cookie consent notice') + '" aria-live="polite">' +
           '<div class="cc-banner">' +
             '<div class="cc-banner-title">' + CONFIG.bannerTitle + '</div>' +
             '<div class="cc-banner-text">' +
               CONFIG.bannerText + ' ' +
-              '<a href="' + CONFIG.privacyUrl + '" target="_blank" rel="noopener">' + CONFIG.privacyLinkText + '</a>。' +
+              '<a href="' + CONFIG.privacyUrl + '" target="_blank" rel="noopener">' + CONFIG.privacyLinkText + '</a>' + T('.') +
             '</div>' +
 
             // Main buttons row
             '<div class="cc-btn-row">' +
               '<button class="cc-btn cc-btn-settings" id="cc-btn-settings" aria-expanded="false">' +
-                '个性化设置' +
+                T('Customize settings') +
               '</button>' +
               '<span class="cc-spacer"></span>' +
-              '<button class="cc-btn cc-btn-decline" id="cc-btn-decline">拒绝全部</button>' +
-              '<button class="cc-btn cc-btn-accept" id="cc-btn-accept">同意全部</button>' +
+              '<button class="cc-btn cc-btn-decline" id="cc-btn-decline">' + T('Decline all') + '</button>' +
+              '<button class="cc-btn cc-btn-accept" id="cc-btn-accept">' + T('Accept all') + '</button>' +
             '</div>' +
 
             // Settings panel (hidden)
             '<div class="cc-settings" id="cc-settings">' +
               buildSettingsHTML(prefs) +
               '<div class="cc-btn-row" style="margin-top:16px;justify-content:flex-end">' +
-                '<button class="cc-btn cc-btn-accept" id="cc-btn-save">保存设置</button>' +
+                '<button class="cc-btn cc-btn-accept" id="cc-btn-save">' + T('Save settings') + '</button>' +
               '</div>' +
             '</div>' +
           '</div>' +
@@ -205,7 +212,7 @@
 
   function buildFloatButton() {
     return (
-      '<button class="cc-float" id="cc-float-btn" aria-label="Cookie 设置" title="Cookie 设置">' +
+      '<button class="cc-float" id="cc-float-btn" aria-label="' + T('Cookie settings') + '" title="' + T('Cookie settings') + '">' +
         '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
           '<circle cx="12" cy="12" r="3"/>' +
           '<path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>' +

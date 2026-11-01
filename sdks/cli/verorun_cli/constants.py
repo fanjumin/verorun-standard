@@ -4,17 +4,27 @@ from __future__ import annotations
 
 import os
 
+# i18n 入口（docs/i18n-standard.md §0.2：英文源串即 Key）。
+# 仓库内运行时使用根 `i18n` 包；CLI 被单独安装（wheel/脱离仓库树）时该包不存在，
+# 回退为原样返回英文源串，保证薄客户端仍可独立运行。
+try:
+    from i18n import _
+except ImportError:  # pragma: no cover - 仅独立安装场景触发
+    def _(text, **kwargs):
+        return text.format(**kwargs) if kwargs else text
+
+
 APP_NAME = "verorun"
 
 # 版本号策略：CLI 是 VeroRun 系统的配套客户端，**复用系统主版本号**（仓库根
-# `VERSION` 文件，由 version.py 统一管理，当前 0.65.0），避免用户看到系统
-# 0.65.0 却看到 CLI 独立的 0.2.0 而产生"割裂/过期"误解。
+# `VERSION` 文件，由 version.py 统一管理，当前 0.66.0），避免用户看到系统
+# 0.66.0 却看到 CLI 独立的 0.2.0 而产生"割裂/过期"误解。
 #
 # 读取方式：从本包位置向上两级定位仓库根 `VERSION`（sdks/cli -> sdks -> 根）。
 # 这是**只读**文件访问，不 import 任何核心模块、不引入核心依赖，满足"零入侵"约束。
 # 若 CLI 被单独打包发布（脱离仓库树），则回退到下方 PACKAGED_VERSION 常量
 # （由构建流程在 sdist/wheel 阶段注入，保持与系统发版一致）。
-_PACKAGED_VERSION = "0.65.0"
+_PACKAGED_VERSION = "0.66.0"
 
 
 def _resolve_version() -> str:

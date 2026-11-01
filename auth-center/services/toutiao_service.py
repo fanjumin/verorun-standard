@@ -3,6 +3,7 @@
 
 import logging, json, requests, hashlib, time
 from models import get_db
+from i18n import _
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ def publish_article(title, content_html, cover_url='', summary=''):
     cfg = _get_config()
     access_token = cfg.get('toutiao_access_token', '')
     if not access_token:
-        raise ValueError('今日头条 Access Token 未配置')
+        raise ValueError(_('Toutiao Access Token is not configured'))
 
     # 头条号 API endpoint for article publishing
     api_url = 'https://open-api.toutiao.com/2/article/publish/'
@@ -71,7 +72,7 @@ def publish_article(title, content_html, cover_url='', summary=''):
     err_no = result.get('err_no', -1)
     if err_no != 0:
         err_msg = result.get('message', result.get('err_msg', str(result)))
-        raise ValueError(f'今日头条发布失败: {err_msg}')
+        raise ValueError(_('Failed to publish to Toutiao: {error}', error=err_msg))
 
     data = result.get('data', {})
     article_id = data.get('article_id', '')

@@ -59,11 +59,11 @@ def _ffmpeg_pcm16k(audio_data: bytes) -> bytes:
             stderr=subprocess.PIPE, timeout=120
         )
     except Exception as e:
-        logger.warning('[AudioInput] ffmpeg 转码异常: %s', e)
+        logger.warning('[AudioInput] ffmpeg 转码异常: %s', e)  # i18n:tech — 运维日志
         return b''
     if proc.returncode != 0 or not proc.stdout:
         logger.warning(
-            '[AudioInput] ffmpeg 转码失败: %s',
+            '[AudioInput] ffmpeg 转码失败: %s',  # i18n:tech — 运维日志
             proc.stderr.decode('utf-8', 'ignore')[:200]
         )
         return b''
@@ -106,7 +106,7 @@ class AudioInputProcessor:
         self._initialized = False
         self._model = None
         self._recognizer = None
-        logger.info(f'[AudioInput] 接口已创建（提供商: {provider}）')
+        logger.info(f'[AudioInput] 接口已创建（提供商: {provider}）')  # i18n:tech — 启动诊断
 
     def initialize(self) -> bool:
         """初始化语音识别引擎；依赖缺失/未配置时返回 False（不抛异常）。"""
@@ -117,7 +117,7 @@ class AudioInputProcessor:
         else:
             # 阿里云实时识别是 WebSocket 流式协议，本同步 base64 接口无法驱动
             logger.warning(
-                '[AudioInput] 提供商 %s 未实现（本接口仅接收 base64 音频），返回空文案',
+                '[AudioInput] 提供商 %s 未实现（本接口仅接收 base64 音频），返回空文案',  # i18n:tech — 运维日志
                 self.provider
             )
         return self._initialized
@@ -132,7 +132,7 @@ class AudioInputProcessor:
             if self.provider == 'vosk':
                 return self._transcribe_vosk(audio_data)
         except Exception as e:
-            logger.error('[AudioInput] transcribe 失败: %s', e)
+            logger.error('[AudioInput] transcribe 失败: %s', e)  # i18n:tech — 运维日志
         return ''
 
     def transcribe_file(self, file_path: str) -> str:
@@ -141,7 +141,7 @@ class AudioInputProcessor:
             with open(file_path, 'rb') as f:
                 return self.transcribe(f.read())
         except OSError as e:
-            logger.error('[AudioInput] 读取音频文件失败: %s', e)
+            logger.error('[AudioInput] 读取音频文件失败: %s', e)  # i18n:tech — 运维日志
             return ''
 
     def _init_vosk(self) -> bool:
@@ -150,22 +150,22 @@ class AudioInputProcessor:
             import vosk
         except ImportError:
             logger.warning(
-                '[AudioInput] 未安装 vosk（pip install vosk），ASR 不可用，返回空文案'
+                '[AudioInput] 未安装 vosk（pip install vosk），ASR 不可用，返回空文案'  # i18n:tech — 启动诊断
             )
             return False
         if not self.model_path or not os.path.isdir(self.model_path):
             logger.warning(
-                '[AudioInput] 未配置 VOSK_MODEL_PATH（或目录不存在），'
-                'ASR 不可用，返回空文案'
+                '[AudioInput] 未配置 VOSK_MODEL_PATH（或目录不存在），'  # i18n:tech — 启动诊断
+                'ASR 不可用，返回空文案'  # i18n:tech — 启动诊断
             )
             return False
         try:
             self._model = vosk.Model(self.model_path)
             self._recognizer = vosk.KaldiRecognizer(self._model, _ASR_SAMPLE_RATE)
-            logger.info('[AudioInput] vosk 已就绪（model=%s）', self.model_path)
+            logger.info('[AudioInput] vosk 已就绪（model=%s）', self.model_path)  # i18n:tech — 启动诊断
             return True
         except Exception as e:
-            logger.error('[AudioInput] vosk 模型加载失败: %s', e)
+            logger.error('[AudioInput] vosk 模型加载失败: %s', e)  # i18n:tech — 启动诊断
             return False
 
     def _transcribe_vosk(self, audio_data: bytes) -> str:
@@ -173,7 +173,7 @@ class AudioInputProcessor:
         pcm = _to_pcm16k(audio_data)
         if not pcm:
             logger.warning(
-                '[AudioInput] 音频无法归一化为 16kHz PCM（需本机 ffmpeg），返回空文案'
+                '[AudioInput] 音频无法归一化为 16kHz PCM（需本机 ffmpeg），返回空文案'  # i18n:tech — 运维日志
             )
             return ''
         self._recognizer.Reset()
@@ -391,8 +391,7 @@ def asr_diagnostics() -> dict:
         'ffmpeg_found': bool(_shutil.which('ffmpeg')),
         'ready': vosk_ok and model_ok,
         'hint': (
-            'pip install vosk && python tools/fetch_vosk_model.py，'
-            '并在 .env 配置 VOSK_MODEL_PATH'
+            _('pip install vosk && python tools/fetch_vosk_model.py, then set VOSK_MODEL_PATH in .env')
             if not (vosk_ok and model_ok) else ''
         ),
     }
@@ -435,11 +434,11 @@ def _audio_model_config() -> tuple:
         model = cfg.get('ai_audio_model') or model
     except Exception as e:
         logging.getLogger(__name__).warning(
-            '[AudioUnderstand] 读取 ai_audio_* 配置失败，使用缺省: %s', e)
+            '[AudioUnderstand] 读取 ai_audio_* 配置失败，使用缺省: %s', e)  # i18n:tech — 运维日志
     return provider, model
 
 
-def analyze_audio(audio_data: bytes, question: str = '请完整转写这段音频，并总结其核心内容与说话人意图') -> str:
+def analyze_audio(audio_data: bytes, question: str = '请完整转写这段音频，并总结其核心内容与说话人意图') -> str:  # i18n:tech — 默认提示词，模型消费
     """音频语义理解：base64 音频 + 问题 → 文本（转写/摘要/意图分析）。
 
     走 UnifiedLLM 网关（预算闸门/四级配额/计量对普通调用不可绕过）。

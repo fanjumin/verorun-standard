@@ -11,6 +11,7 @@ from typing import Any
 
 import click
 
+from ..constants import _
 from ._base import get, post
 
 PREFIX = "/admin/agent-matrix/agents"
@@ -39,14 +40,14 @@ def register(group: Any) -> None:
     @click.pass_context
     def toggle_agent(ctx, agent_id):
         """启用 / 停用 Agent"""
-        post(ctx, f"{PREFIX}/{agent_id}/toggle", "切换")
+        post(ctx, f"{PREFIX}/{agent_id}/toggle", _("Toggle"))
 
     @agents.command("test")
     @click.argument("agent_id", type=int)
     @click.pass_context
     def test_agent(ctx, agent_id):
         """测试 Agent"""
-        post(ctx, f"{PREFIX}/{agent_id}/test", "测试")
+        post(ctx, f"{PREFIX}/{agent_id}/test", _("Test"))
 
     @agents.command("capabilities")
     @click.argument("agent_id", type=int)

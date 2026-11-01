@@ -173,6 +173,8 @@ def generate_all() -> list:
 
 def _category_slug(cat_name: str) -> str:
     """Map category name to slug."""
+    # i18n:tech:begin
+    # 分类名是数据库既有中文口径（posts.category 的原值），必须原样匹配，不属可翻译文案
     mapping = {
         '快速入门': 'getting-started',
         'Agent 开发': 'agent-dev',
@@ -186,6 +188,7 @@ def _category_slug(cat_name: str) -> str:
         '技术文档': 'tech-docs',
         '市场洞察': 'market-insights',
     }
+    # i18n:tech:end
     return mapping.get(cat_name, '')
 
 

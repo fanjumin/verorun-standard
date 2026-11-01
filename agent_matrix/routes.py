@@ -12,7 +12,7 @@ API 端点统计: ~35 个
 import os, sys, json, base64, logging, threading, uuid
 
 from i18n import _, _current_locale
-from flask import Blueprint, request, jsonify, send_from_directory
+from flask import Blueprint, request, jsonify, send_file, send_from_directory
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(BASE_DIR, '..', 'auth-center'))
@@ -191,11 +191,11 @@ def _inject_knowledge(user_message: str, top_k: int = 5, scope: str = None,
         if not lines:
             return ''
 
-        return '\n\n=== 知识库（自动检索） ===\n' + '\n'.join(lines) + '\n=== 知识库结束 ==='
+        return '\n\n=== 知识库（自动检索） ===\n' + '\n'.join(lines) + '\n=== 知识库结束 ==='  # i18n:tech — 知识库注入块，模型消费
 
     except Exception as e:
         import logging
-        logging.getLogger(__name__).warning(f"RAG 检索失败: {e}")
+        logging.getLogger(__name__).warning(f"RAG 检索失败: {e}")  # i18n:tech — 运维日志
         return ''
 
 
@@ -352,7 +352,7 @@ def create_agent():
         detail = str(e)
         is_duplicate = (
             getattr(e, 'pgcode', None) == '23505'
-            or '重复键违反唯一约束' in detail
+            or '重复键违反唯一约束' in detail  # i18n:tech — DB 本地化报错文案匹配
             or 'duplicate key value violates unique constraint' in detail
             or 'UNIQUE constraint failed' in detail
         )
@@ -426,7 +426,7 @@ def test_agent(aid):
     data = request.get_json(force=True) or {}
     query = data.get('query', '')
     if not query:
-        return _error('请先输入测试消息（不能为空）')
+        return _error(_('Please enter a test message (cannot be empty)'))
 
     agent_config = _m().get_agent(aid)
     if not agent_config:
@@ -629,7 +629,7 @@ def chat_with_master():
     # 获取 Master Agent
     agents = _m().list_agents(role_type='master', active_only=True)
     if not agents:
-        return _error('没有可用的 Master Agent，请先创建', 500)
+        return _error(_('No available Master Agent, please create one first'), 500)
 
     master = agents[0]
     master_id = master['id']
@@ -693,6 +693,7 @@ def chat_tool():
     master = agents[0]
 
     # 工具路由映射
+    # i18n:tech:begin — 意图识别提示词，模型消费（翻译即改变模型行为）
     intent_prompt = """你是一个意图分析器。分析用户消息，只返回一个 JSON：
 {"intent":"ppt|image|voice|video|cms|supply_chain|clean|site_build|ads|chat","args":{}}
 
@@ -706,6 +707,7 @@ def chat_tool():
 - site_build: 用户想创建一个全新的网站（不是广告/文章/PPT等具体内容）。关键词包括"建网站""创建网站""做网站""搭建网站""生成网站""Build a website""Create Website"。注意：创建广告/创建文章/生成PPT等具体内容操作不属于site_build。args: {prompt_identifier: 行业标识(如law_firm/restaurant等，从用户描述推断), action:"preview"|"execute"|"modify"}
 - ads: 广告管理操作（优先级高于site_build）。用户提到了广告相关内容："广告""广告位""AD""banner""投放""活动""分析广告""新增广告""创建广告""广告管理""查看广告""广告列表""帮我创建广告""生成广告""广告代码""ad_code"。注意：如果用户说"创建""新增""帮我创建""生成"广告，action必须设为create；如果说"查看""列出""查询"广告，action设为list。args: {action:"list"|"create"|"update"|"delete"|"stats"|"analyze"|"snippet", name, position, ad_type, image_url, link_url, ad_code, site_key(默认default), page(默认*), ad_id, days(默认7)}
 - chat: 普通对话，不是工具调用。"""
+    # i18n:tech:end
 
     # 用轻量模型快速识别意图
     import json, re
@@ -736,14 +738,16 @@ def chat_tool():
             if filename:
                 url = f"/admin/agent-matrix/media/download/{filename}"
                 actions.append({'type': 'ppt_download', 'url': url, 'filename': filename})
-                summary = f'✅ PPT已生成：{topic}（{pages}页）\n⬇ 点击下方按钮下载'
+                summary = (_('✅ PPT generated: {topic} ({pages} pages)',
+                             topic=topic, pages=pages)
+                           + '\n' + _('⬇ Click the button below to download'))
             else:
-                summary = f'❌ PPT生成失败，请检查后端日志'
+                summary = _('❌ PPT generation failed, please check the backend logs')
 
         elif intent == 'image':
             action_type = args.get('action', 'generate')
             if action_type == 'analyze':
-                summary = '🔍 图像理解：请先上传图片（点击📎按钮），然后重新发送指令。'
+                summary = _('🔍 Image understanding: please upload an image first (click the 📎 button), then resend the instruction.')
             else:
                 prompt = args.get('prompt', message)
                 style = args.get('style', 'realistic')
@@ -767,22 +771,25 @@ def chat_tool():
             audio_url = args.get('audio_url', '')
             if audio_url:
                 # voice_clone 功能暂未实现，返回提示
-                summary = f'🎙️ 声音克隆：{name}\n语音克隆功能开发中，请到「🎙️ 多媒体」Tab使用音频上传功能。'
+                summary = (_('🎙️ Voice cloning: {name}', name=name) + '\n'
+                           + _('Voice cloning is under development, please use the audio upload feature in the 「🎙️ Media」tab.'))
                 logger = logging.getLogger(__name__)
                 logger.warning(f"[Voice] voice_clone not implemented for '{name}', audio_url={audio_url}")
             else:
-                summary = '🎙️ 请提供音频URL来克隆声音，或到「🎙️ 多媒体」Tab上传音频文件。'
+                summary = _('🎙️ Please provide an audio URL to clone a voice, or upload an audio file in the 「🎙️ Media」tab.')
 
         elif intent == 'video':
             title = args.get('title', _('Digital human video'))
             text = args.get('text', message)
             voice_id = args.get('voice_id', '')
             image_url = args.get('image_url', '')
-            summary = f'🎬 视频创作："{title}"\n请到「🎙️ 多媒体 → 🎬 视频创作」Tab选择声音后提交。'
+            summary = (_('🎬 Video creation: "{title}"', title=title) + '\n'
+                       + _('Please go to the 「🎙️ Media → 🎬 Video Creation」tab, select a voice and submit.'))
 
         elif intent == 'cms':
             title = args.get('title', '')
-            summary = f'📝 CMS文章：{title or "待定"}\\n请切换到「📝 文章」Tab编辑并提交。'
+            summary = (_('📝 CMS article: {title}', title=title or _('TBD'))
+                       + '\\n' + _('Please switch to the 「📝 Articles」tab to edit and submit.'))
 
         elif intent == 'clean':
             content = args.get('content', message)
@@ -844,17 +851,17 @@ def chat_tool():
             # 代码推断 action（LLM 不一定正确返回）
             if not action:
                 msg_lower = message.lower()
-                if any(w in msg_lower for w in ['创建','新增','生成','帮我创建','添加','create','add','new']):
+                if any(w in msg_lower for w in ['创建','新增','生成','帮我创建','添加','create','add','new']):  # i18n:tech — 中文关键词匹配库
                     action = 'create'
-                elif any(w in msg_lower for w in ['更新','修改','编辑','update','edit','modify']):
+                elif any(w in msg_lower for w in ['更新','修改','编辑','update','edit','modify']):  # i18n:tech — 中文关键词匹配库
                     action = 'update'
-                elif any(w in msg_lower for w in ['删除','移除','delete','remove']):
+                elif any(w in msg_lower for w in ['删除','移除','delete','remove']):  # i18n:tech — 中文关键词匹配库
                     action = 'delete'
-                elif any(w in msg_lower for w in ['统计','数据','stats','statistics']):
+                elif any(w in msg_lower for w in ['统计','数据','stats','statistics']):  # i18n:tech — 中文关键词匹配库
                     action = 'stats'
-                elif any(w in msg_lower for w in ['分析','analyze','insight']):
+                elif any(w in msg_lower for w in ['分析','analyze','insight']):  # i18n:tech — 中文关键词匹配库
                     action = 'analyze'
-                elif any(w in msg_lower for w in ['代码','snippet','渲染','render','模板']):
+                elif any(w in msg_lower for w in ['代码','snippet','渲染','render','模板']):  # i18n:tech — 中文关键词匹配库
                     action = 'snippet'
                 else:
                     action = 'list'
@@ -939,7 +946,7 @@ def chat_tool():
                     prompt_template = prompts[0] if prompts else None
 
                 if not prompt_template:
-                    summary = '❌ 没有可用的行业提示词模板，请先在「AI 建站」中创建模板。'
+                    summary = _('❌ No available industry prompt template, please create one in 「AI Site Builder」 first.')
                     return _success({
                         'session_id': session_id,
                         'summary': summary,
@@ -951,7 +958,7 @@ def chat_tool():
 
                 if action == 'execute':
                     # 执行建站：需要前端传来的 plan 数据
-                    summary = '✅ 请切换到「AI 智能建站」页面，在方案预览中点击「确认执行」按钮来启动建站流程。'
+                    summary = _('✅ Please switch to the 「AI Smart Site Builder」 page and click 「Confirm Execution」 in the plan preview to start the site build.')
                     actions.append({
                         'type': 'navigate',
                         'text': _('Go to AI Smart Website Builder'),
@@ -1030,10 +1037,12 @@ def _generate_ppt_file(topic, pages=10, style=_('Dark Tech Style, 16:9')):
         engine = UnifiedLLM(agents[0])
 
         # AI 生成大纲
+        # i18n:tech:begin — PPT 大纲生成提示词，模型消费
         outline_prompt = f"""你是一个PPT大纲生成器。主题：{topic}，需要{pages}页，风格：{style}。
 返回JSON格式：
 {{"title":"...","subtitle":"...","slides":[{{"title":"...","content":["要点1","要点2",...],"layout":"bullet"}}]}}
 每页3-5个要点，第1页是封面，最后1页是总结。只返回JSON。"""
+        # i18n:tech:end
         raw = engine.chat([{"role": "user", "content": outline_prompt}], temperature=0.7, max_tokens=4000)
         import re
         m = re.search(r'\{[\s\S]*\}', raw)
@@ -1191,7 +1200,7 @@ def chat_batch_delete():
     data = request.get_json(force=True) or {}
     session_ids = data.get('session_ids', [])
     if not session_ids or not isinstance(session_ids, list):
-        return _error('请提供 session_ids 列表')
+        return _error(_('Please provide a session_ids list'))
 
     count = _m().batch_delete_sessions(session_ids)
     return _success({'deleted': count}, f'Deleted {count} records')
@@ -1437,7 +1446,7 @@ def test_provider_connection(slug):
     data = request.get_json(force=True) or {}
     key = _get_provider_key(slug)
     if not key:
-        return _error(f'{slug}: 未配置 API Key，请先保存', 400)
+        return _error(_('{slug}: API Key not configured, please save it first', slug=slug), 400)
 
     base_url = str(data.get('base_url') or '').strip().rstrip('/')
     model = str(data.get('model') or '').strip()
@@ -1456,7 +1465,7 @@ def test_provider_connection(slug):
         except Exception:
             pass
     if not base_url:
-        return _error(f'{slug}: 缺少 API 地址', 400)
+        return _error(_('{slug}: API address is missing', slug=slug), 400)
 
     import requests
     url = base_url + ('/chat/completions' if not base_url.endswith('/chat/completions') else '')
@@ -1500,7 +1509,7 @@ def list_prompt_files():
     if err: return err
 
     templates = [
-        {"id": "custom", "name": "自定义提示词", "description": "手动编写完整的 System Prompt", "is_builtin": False},
+        {"id": "custom", "name": _('Custom Prompt'), "description": _('Write a complete System Prompt manually'), "is_builtin": False},
     ]
 
     # 文件模板（保持 chat 编辑器兼容）
@@ -1544,7 +1553,7 @@ def load_prompt_content():
     full_path = os.path.realpath(os.path.join(os.path.dirname(__file__), path))
     real_base = os.path.realpath(prompt_dir)
     if not full_path.startswith(real_base + os.sep):
-        logging.getLogger(__name__).warning(f'Prompt 路径遍历尝试被拦截: {path}')
+        logging.getLogger(__name__).warning(f'Prompt 路径遍历尝试被拦截: {path}')  # i18n:tech — 运维日志
         return _error(_('Invalid path'), 400)
 
     if not os.path.exists(full_path):
@@ -1861,6 +1870,10 @@ def chat_stream_sse():
     if not message:
         return jsonify({'error': _('Message is required')}), 400
 
+    # 本轮上传到工作区（outputs/inbox/）的附件：正文由后端读取后注入，
+    # 前端只传 rel_path，不把文件内容塞进请求体。
+    attachment_block = _build_attachment_block(data.get('attachments') or [])
+
     # 获取 Agent 配置
     if agent_id:
         agent_config = _m().get_agent(agent_id)
@@ -1899,7 +1912,7 @@ def chat_stream_sse():
     # 构建完整的 system prompt（先静态知识，后动态知识）
     full_system = base_prompt
     if static_knowledge:
-        full_system += f"\n\n=== 基础知识库 ===\n{static_knowledge}\n=== 基础知识库结束 ==="
+        full_system += f"\n\n=== 基础知识库 ===\n{static_knowledge}\n=== 基础知识库结束 ==="  # i18n:tech — 知识库注入块，模型消费
     if knowledge:
         full_system += knowledge
 
@@ -1925,7 +1938,7 @@ def chat_stream_sse():
     for h in (history or []):
         if h.get('role') in ('user', 'assistant'):
             messages.append({"role": h['role'], "content": h['content']})
-    messages.append({"role": "user", "content": message})
+    messages.append({"role": "user", "content": message + attachment_block})
 
     from flask import Response, stream_with_context
 
@@ -2499,7 +2512,7 @@ def generate_and_save_image():
     use_for_cover = data.get('cover', True)
 
     if not prompt and not title:
-        return _error('请输入图片描述或文章标题')
+        return _error(_('Please enter an image description or article title'))
 
     try:
         from services.ai_content_generator import generate_image as gen_img
@@ -2584,7 +2597,7 @@ def upload_file():
         return err
 
     if 'file' not in request.files:
-        return _error('请选择要上传的文件')
+        return _error(_('Please select a file to upload'))
 
     file = request.files['file']
     if not file.filename:
@@ -2620,6 +2633,128 @@ def upload_file():
         import traceback
         traceback.print_exc()
         return _error(f'Upload failed: {str(e)}', 500)
+
+
+# —— 本机工作区持久上传（与 Agent 落盘产物同一个 outputs/ 根） ——
+# 与「临时上传」不同：这里不设过期时间。壳层用 VERORUN_OUTPUTS_DIR 注入根目录，
+# 与 Electron IPC 读「本机文件」的目录保持一致；未注入时回落到 <cwd>/outputs。
+INBOX_DIR_NAME = 'inbox'
+MAX_WORKSPACE_UPLOAD = 25 * 1024 * 1024
+CODE_EXTENSIONS = {
+    'ts', 'tsx', 'js', 'jsx', 'py', 'html', 'css', 'yaml', 'yml', 'log',
+    'xml', 'sql', 'sh', 'ps1', 'toml', 'ini', 'conf', 'text',
+}
+TEXT_LIKE_EXTENSIONS = {
+    'txt', 'md', 'markdown', 'csv', 'json', *CODE_EXTENSIONS,
+}
+IMAGE_EXTENSIONS = {'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'}
+
+
+def _outputs_root() -> str:
+    """outputs 根：优先壳层注入的 VERORUN_OUTPUTS_DIR。"""
+    root = os.environ.get('VERORUN_OUTPUTS_DIR') or os.path.join(os.getcwd(), 'outputs')
+    return os.path.abspath(root)
+
+
+def _workspace_text(path: str, ext: str) -> str:
+    """把已落盘附件转成可注入正文的文本；抽不出来返回空串（不阻断上传）。"""
+    try:
+        if ext == 'pdf':
+            import pdfplumber
+            with pdfplumber.open(path) as pdf:
+                return '\n'.join((p.extract_text() or '') for p in pdf.pages[:80])
+        if ext == 'docx':
+            from docx import Document
+            return '\n'.join(p.text for p in Document(path).paragraphs)
+        if ext in TEXT_LIKE_EXTENSIONS:
+            with open(path, 'r', encoding='utf-8') as f:
+                return f.read()
+    except Exception:
+        return ''
+    return ''
+
+
+ATTACH_MAX_CHARS = 20000   # 单个附件注入上限，防止一份长文撑爆上下文
+ATTACH_MAX_TOTAL = 60000   # 单轮全部附件注入上限
+
+
+def _build_attachment_block(attachments) -> str:
+    """把本轮上传的工作区附件拼成注入块（正文由后端读取，前端不传内容）。"""
+    root = _outputs_root()
+    blocks: list[str] = []
+    total = 0
+    for a in (attachments or [])[:5]:
+        rel = str((a or {}).get('rel_path') or '') if isinstance(a, dict) else ''
+        # 只允许读 inbox/ 下的文件，杜绝借附件参数读任意路径
+        if not rel.startswith(f'{INBOX_DIR_NAME}/'):
+            continue
+        path = os.path.join(root, rel)
+        if not os.path.isfile(path):
+            continue
+        name = str(a.get('name') or os.path.basename(path))
+        ext = path.rsplit('.', 1)[-1].lower() if '.' in path else ''
+        text = _workspace_text(path, ext)
+        if text:
+            text = text[:ATTACH_MAX_CHARS]
+            if total + len(text) > ATTACH_MAX_TOTAL:
+                break
+            total += len(text)
+            blocks.append(f'=== 附件: {name}（{rel}） ===\n{text}\n=== 附件结束 ===')
+        else:
+            blocks.append(f'[附件] {name} 已保存到 {rel}（二进制/未能提取正文）')
+    return ('\n\n' + '\n\n'.join(blocks)) if blocks else ''
+
+
+@agent_matrix_bp.route('/files/upload', methods=['POST'])
+def upload_workspace_file():
+    """上传到本机工作区 outputs/inbox/（持久保存，与 Agent 产物同目录）。"""
+    admin, err = _require_admin()
+    if err:
+        return err
+
+    if 'file' not in request.files:
+        return _error(_('Please select a file to upload'))
+    file = request.files['file']
+    original = file.filename or ''
+    if not original or '.' not in original:
+        return _error(_('File name is empty'))
+
+    import re, uuid
+    ext = original.rsplit('.', 1)[1].lower()
+    allowed = ALLOWED_EXTENSIONS | CODE_EXTENSIONS | IMAGE_EXTENSIONS
+    if ext not in allowed:
+        return _error(f'Unsupported file type, allowed: {", ".join(sorted(allowed))}')
+
+    stem = re.sub(r'[^\w\-.]+', '_', os.path.splitext(os.path.basename(original))[0])[:60] or 'file'
+    stored_name = f'{stem}-{uuid.uuid4().hex[:6]}.{ext}'
+    dest_dir = os.path.join(_outputs_root(), INBOX_DIR_NAME)
+    os.makedirs(dest_dir, exist_ok=True)
+    save_path = os.path.join(dest_dir, stored_name)
+    file.save(save_path)
+
+    size = os.path.getsize(save_path)
+    if size > MAX_WORKSPACE_UPLOAD:
+        os.remove(save_path)
+        return _error('File too large (max 25MB)', 413)
+
+    if ext in TEXT_LIKE_EXTENSIONS:
+        kind = 'text'
+    elif ext == 'pdf':
+        kind = 'pdf'
+    elif ext == 'docx':
+        kind = 'docx'
+    elif ext in IMAGE_EXTENSIONS:
+        kind = 'image'
+    else:
+        kind = 'binary'
+
+    return _success({
+        'rel_path': f'{INBOX_DIR_NAME}/{stored_name}',
+        'name': original,
+        'stored_name': stored_name,
+        'size': size,
+        'kind': kind,
+    }, 'File saved to workspace')
 
 
 @agent_matrix_bp.route('/download/<filename>', methods=['GET'])
@@ -2840,7 +2975,7 @@ def asr_transcribe():
         text = (get_default_asr().transcribe(audio_bytes) or '').strip()
     except Exception as e:
         # ASR 不可用不得打断语音输入（前端有 Web Speech 降级）
-        logging.getLogger(__name__).warning('[ASR] 转写失败: %s', e)
+        logging.getLogger(__name__).warning('[ASR] 转写失败: %s', e)  # i18n:tech — 运维日志
         text = ''
 
     # confidence 仅作"是否有结果"指示（Vosk 不提供整段置信度），前端未消费该值
@@ -2886,12 +3021,12 @@ def audio_understand():
         from agent_matrix.audio import analyze_audio, _audio_model_config
         text = analyze_audio(
             audio_bytes,
-            question or '请完整转写这段音频，并总结其核心内容与说话人意图',
+            question or '请完整转写这段音频，并总结其核心内容与说话人意图',  # i18n:tech — 默认提示词，模型消费
         )
     except RuntimeError as e:
         return _error(str(e), 502)
     except Exception as e:
-        logging.getLogger(__name__).warning('[AudioUnderstand] 失败: %s', e)
+        logging.getLogger(__name__).warning('[AudioUnderstand] 失败: %s', e)  # i18n:tech — 运维日志
         return _error(_('audio understanding failed') + f': {e}', 502)
 
     provider, model = _audio_model_config()
@@ -3418,3 +3553,178 @@ def init_agent_matrix(app):
     print(_('[Agent Matrix] ✅ Database + seed data has been initialized'))
     print(f'[Agent Matrix] 📋 API: /admin/agent-matrix/*')
     return _m()
+
+
+# ── 交付物中心（统一输出位置）─────────────────────────────────────────
+# 三种格式（md / xlsx / pptx）出自同一份 deck，登记在 agent_matrix/deliverables.py。
+# 本段只做「鉴权 → 取参 → 调存储 → 回 JSON/文件」，不含装配与渲染逻辑。
+# 前端入口统一在「资讯管理 → 交付物」；智能会话的 markdown 产物也登记到这里，
+# 不再各自弹浏览器下载——那样关掉会话就找不回来了。
+
+@agent_matrix_bp.route('/api/deliverables', methods=['GET'])
+def list_deliverables():
+    """交付物清单。列表页只读索引，不扫目录（见 deliverables.py 注释）。"""
+    admin, err = _require_admin()
+    if err:
+        return err
+    from agent_matrix.deliverables import deck_path, file_path, list_items
+    try:
+        limit = int(request.args.get('limit', 200))
+    except (TypeError, ValueError):
+        limit = 200
+    items = list_items(limit=limit)
+    # 可用格式按磁盘实际文件算：索引只记「登记时写过什么」，文件可能已被清理。
+    # 一个可用文件都没有的条目直接剔除，否则用户点开只能得到 404。
+    usable = []
+    for item in items:
+        available = [f for f in (item.get('formats') or []) if file_path(item, f)]
+        if not available:
+            continue
+        item['available_formats'] = available
+        # has_snapshot：能不能「改假设重生成」。老条目（加 deck 快照之前登记的）
+        # 没有快照，前端据此不显示那个按钮 —— 点了才报错是最差的交互。
+        item['has_snapshot'] = bool(deck_path(item))
+        usable.append(item)
+    return _success({'items': usable})
+
+
+@agent_matrix_bp.route('/api/deliverables/<did>/download/<fmt>', methods=['GET'])
+def download_deliverable(did, fmt):
+    """按格式下载。fmt 不在登记表里 → 404，不回「格式不支持」——对调用方而言
+    这个条目就是没有该格式（例如会话产出的 md 没有 xlsx）。"""
+    admin, err = _require_admin()
+    if err:
+        return err
+    from agent_matrix.deliverables import file_path, get_item
+    item = get_item(did)
+    if not item:
+        return _error(_('Deliverable not found'), 404)
+    path = file_path(item, fmt)
+    if not path:
+        return _error(_('Format not available'), 404)
+    return send_file(path, as_attachment=True,
+                     download_name=os.path.basename(path))
+
+
+@agent_matrix_bp.route('/api/deliverables/<did>', methods=['DELETE'])
+def delete_deliverable(did):
+    """删除交付物：索引移除 + 目录移入 data/deliverables/.trash（可人工恢复）。"""
+    admin, err = _require_admin()
+    if err:
+        return err
+    from agent_matrix.deliverables import delete_item
+    if not delete_item(did):
+        return _error(_('Deliverable not found'), 404)
+    return _success({'deleted': True})
+
+
+@agent_matrix_bp.route('/api/deliverables', methods=['POST'])
+def create_deliverable():
+    """登记一段 markdown（智能会话产物）。
+
+    只收 markdown：这条路径没有结构化数据，给不出三表，硬套模板就是编数据。
+    要 xlsx/pptx 请走研报链路（POST /stock-analysis/api/research/report/<id>/deliverable）。
+    """
+    admin, err = _require_admin()
+    if err:
+        return err
+    body = request.get_json(silent=True) or {}
+    content = str(body.get('content') or '').strip()
+    if not content:
+        return _error(_('Content required'), 400)
+    # 单文件 2MB 上限：交付物不是网盘，超长的多半是误传了整个对话记录
+    if len(content.encode('utf-8')) > 2 * 1024 * 1024:
+        return _error(_('Content too large'), 413)
+    from agent_matrix.deliverables import create
+    try:
+        item = create(title=str(body.get('title') or '').strip(),
+                      subject_id=str(body.get('subject_id') or '').strip(),
+                      subject_name=str(body.get('subject_name') or '').strip(),
+                      narrative=content, source='chat')
+    except ValueError:
+        return _error(_('Content required'), 400)
+    return _success(item)
+
+
+@agent_matrix_bp.route('/api/deliverables/<did>/text', methods=['GET'])
+def deliverable_text(did):
+    """交付物 md 正文（预览用）。
+
+    只读 md：预览页要显示「这份研报写了什么」，xlsx/pptx 是二进制，预览另说。
+    2MB 上限与登记端一致——同一份内容不该在两条路径上有两种限制。
+    """
+    admin, err = _require_admin()
+    if err:
+        return err
+    from agent_matrix.deliverables import file_path, get_item
+    item = get_item(did)
+    if not item:
+        return _error(_('Deliverable not found'), 404)
+    path = file_path(item, 'md')
+    if not path:
+        return _error(_('Format not available'), 404)
+    try:
+        with open(path, encoding='utf-8') as fh:
+            content = fh.read(2 * 1024 * 1024)
+    except OSError:
+        return _error(_('Format not available'), 404)
+    return _success({'id': did, 'title': item.get('title'), 'content': content})
+
+
+@agent_matrix_bp.route('/api/deliverables/<did>/sheet', methods=['GET'])
+def deliverable_sheet(did):
+    """xlsx 的网页表格预览：把单元格读成前端能直接渲染的结构。
+
+    为什么不转 PDF 了：PDF 是「纸」，屏幕上看表格要横向挤 A4 版心，宽表还被
+    切断，也没法筛选和定位。而 xlsx 里的公式结果已经写进缓存值，data_only
+    一读就是对的数——不需要 LibreOffice 参与，也就不用等它冷启 79 秒。
+
+    pptx 仍然走 PDF（见 deliverable_preview）：幻灯片的版式没有表格那样的
+    结构可降维，脱离渲染器就失真。
+    """
+    admin, err = _require_admin()
+    if err:
+        return err
+    from agent_matrix.deliverables import get_item, read_sheet
+    item = get_item(did)
+    if not item:
+        return _error(_('Deliverable not found'), 404)
+
+    data = read_sheet(item)
+    if data is None:
+        return _error(_('Preview not available'), 404)
+    return jsonify({'success': True, 'data': data})
+
+
+@agent_matrix_bp.route('/api/deliverables/<did>/preview/<fmt>', methods=['GET'])
+def deliverable_preview(did, fmt):
+    """xlsx / pptx 的页面内预览：转成 PDF 内联返回。
+
+    为什么是 PDF 而不是网页表格：估值页的目标价是活公式，openpyxl 读出来是
+    None（公式是我们写进去的，没有缓存值），只有 LibreOffice 会真算一遍。
+    转 PDF 才能保证「预览看到的」与「Excel 打开看到的」一致。
+
+    三种状态分开回，不让前端猜：
+      200 有缓存，直接给 PDF
+      202 转换中（首次打开，热 15~27s），前端轮询
+      503 转不了（没装 LibreOffice / 文件损坏），前端改为提示下载
+    """
+    admin, err = _require_admin()
+    if err:
+        return err
+    from agent_matrix.deliverables import get_item, preview_path, preview_state
+    item = get_item(did)
+    if not item:
+        return _error(_('Deliverable not found'), 404)
+
+    state = preview_state(item, fmt)
+    if state == 'ready':
+        path = preview_path(item, fmt)
+        # 内联：浏览器自带 PDF 查看器直接显示，翻页/缩放/全屏都是原生的
+        return send_file(path, mimetype='application/pdf',
+                         as_attachment=False,
+                         download_name=os.path.basename(path))
+    if state == 'converting':
+        return jsonify({'success': True, 'data': {'status': 'converting'},
+                        'message': 'converting'}), 202
+    return _error(_('Preview not available'), 503)

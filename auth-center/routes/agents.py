@@ -338,7 +338,7 @@ def agent_key_create(aid):
         'key_prefix': key_prefix,
         'name': name,
         'expire_days': expire_days,
-        'warning': '⚠️ 密钥只显示一次！关闭后将无法再次查看完整密钥。请立即复制保存。',
+        'warning': _('⚠️ The key is shown only once. You will not be able to view the full key again after closing this dialog. Copy and save it now.'),
     }})
 
 

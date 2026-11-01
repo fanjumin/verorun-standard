@@ -19,6 +19,8 @@ import logging
 import threading
 import time as _time
 
+from i18n import _
+
 logger = logging.getLogger('failover')
 
 # ── 熔断默认参数（可经 system_config 覆盖：ai_fb_threshold / ai_fb_cooldown）──
@@ -318,14 +320,16 @@ class FallbackEngine:
                                            cooldown_until=_now_str(st['cooldown_until']))
                 logger.warning(f'[failover] {key} failed: {e}')
                 if just_opened:
-                    _send_alert(
-                        f'[AI 兜底引擎] 模型 {cfg.get("provider", "")}::{cfg.get("model", "")} '
-                        f'连续失败触发熔断，已进入冷却（冷却至 {_now_str(st["cooldown_until"])}），'
-                        f'将自动使用兜底模型')
+                    _send_alert(_(
+                        '[AI Failover] Model {model} failed repeatedly and the circuit breaker opened '
+                        '(cooling until {until}); fallback models will be used automatically',
+                        model=f'{cfg.get("provider", "")}::{cfg.get("model", "")}',
+                        until=_now_str(st["cooldown_until"])))
         if last_err:
             primary_key = _cfg_key(primary_cfg.get('provider', ''), primary_cfg.get('model', ''))
             primary_msg = f'primary {primary_key} failed: {primary_err or last_err}'
-            _send_alert(f'[AI 兜底引擎] 全部候选不可用 | {primary_msg}; fallbacks also failed, last: {last_err}')
+            _send_alert(_('[AI Failover] All candidates unavailable | {primary}; fallbacks also failed, last: {last}',
+                          primary=primary_msg, last=last_err))
             raise RuntimeError(f'{primary_msg}; fallbacks also failed, last: {last_err}') from last_err
         raise RuntimeError('All models unavailable (circuit open)')
 
@@ -372,13 +376,16 @@ class FallbackEngine:
                                                cooldown_until=_now_str(st['cooldown_until']))
                     logger.warning(f'[failover] stream {key} failed before first chunk: {e}')
                     if just_opened:
-                        _send_alert(
-                            f'[AI 兜底引擎] 模型 {cfg.get("provider", "")}::{cfg.get("model", "")} '
-                            f'连续失败触发熔断，已进入冷却（冷却至 {_now_str(st["cooldown_until"])}）')
+                        _send_alert(_(
+                            '[AI Failover] Model {model} failed repeatedly and the circuit breaker opened '
+                            '(cooling until {until})',
+                            model=f'{cfg.get("provider", "")}::{cfg.get("model", "")}',
+                            until=_now_str(st["cooldown_until"])))
             if last_err:
                 primary_key = _cfg_key(primary_cfg.get('provider', ''), primary_cfg.get('model', ''))
                 primary_msg = f'primary {primary_key} failed: {primary_err or last_err}'
-                _send_alert(f'[AI 兜底引擎] 全部候选不可用 | {primary_msg}; fallbacks also failed, last: {last_err}')
+                _send_alert(_('[AI Failover] All candidates unavailable | {primary}; fallbacks also failed, last: {last}',
+                              primary=primary_msg, last=last_err))
                 raise RuntimeError(f'{primary_msg}; fallbacks also failed, last: {last_err}') from last_err
             raise RuntimeError('All models unavailable (circuit open)')
         return StreamFailoverResult(_iter(), sink)

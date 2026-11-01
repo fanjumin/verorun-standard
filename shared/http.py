@@ -11,6 +11,8 @@ HTTP 状态码仅表示传输层语义，业务细节由 code 承载。
 """
 from flask import jsonify, request
 
+from i18n import _
+
 ERROR_CODES = {
     'PARAM_INVALID': 40001,
     'NOT_AUTHENTICATED': 40101,
@@ -62,5 +64,5 @@ def _parse_positive_int(name: str, default: int, lo: int = 1, hi: int = 100000) 
     try:
         v = int(raw)
     except (TypeError, ValueError):
-        raise ValueError(f'参数 {name} 必须为整数')
+        raise ValueError(_('Parameter {name} must be an integer', name=name))
     return max(lo, min(hi, v))

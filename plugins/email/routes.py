@@ -18,7 +18,7 @@ if _auth_dir not in sys.path:
 from flask import Blueprint, request, jsonify, send_file
 
 from plugins.email.services import _MAIL_KEYS  # 修复 EM-D1: POST handler 使用（原仅 GET handler 内局部导入）
-from plugins.email.mail_providers import MAIL_PROVIDERS, get_provider_by_domain  # 服务商预置清单（单一数据源）
+from plugins.email.mail_providers import localized_providers, get_provider_by_domain  # 服务商预置清单（单一数据源）
 
 email_bp = Blueprint('email', __name__, url_prefix='/admin/email')
 
@@ -26,9 +26,9 @@ logger = logging.getLogger(__name__)
 
 
 def _list_providers():
-    """输出服务商清单（保持旧字段兼容：ssl = smtp_ssl）。"""
+    """输出服务商清单（保持旧字段兼容：ssl = smtp_ssl）；名称/说明按当前语言翻译。"""
     out = []
-    for p in MAIL_PROVIDERS:
+    for p in localized_providers():
         item = dict(p)
         item['ssl'] = bool(p.get('smtp_ssl', True))
         out.append(item)
@@ -179,7 +179,7 @@ def admin_email_settings_get():
     admin, err = _require_admin()
     if err:
         return err
-    from plugins.email.services import _get_mail_config, CONFIG_DEFS, _MAIL_KEYS
+    from plugins.email.services import _get_mail_config, config_defs, _MAIL_KEYS
     try:
         cfg = _get_mail_config()
         # 按 _MAIL_KEYS 顺序组织返回，敏感字段掩码显示
@@ -194,10 +194,11 @@ def admin_email_settings_get():
         account = str(result.get('smtp_user') or result.get('smtp_from') or '').strip()
         provider = get_provider_by_domain(account) if account else None
         if provider:
-            suggestion = {'id': provider['id'], 'name': provider['name']}
+            suggestion = {'id': provider['id'], 'name': _(provider['name'])}
+        defs = config_defs()
         return jsonify({'success': True, 'data': {
             'config': result,
-            'defs': {k: CONFIG_DEFS.get(k, {}) for k in _MAIL_KEYS},
+            'defs': {k: defs.get(k, {}) for k in _MAIL_KEYS},
             'providers': _list_providers(),
             'suggestion': suggestion,
         }})
@@ -328,7 +329,7 @@ def admin_email_test_config():
 
     # ── SMTP 登录探测 ──
     if not smtp_host or not smtp_port:
-        result['smtp']['err'] = _('SMTP 未配置')
+        result['smtp']['err'] = _('SMTP is not configured')
     elif not _allow_private and _is_blocked_probe_target(smtp_host):
         result['smtp']['err'] = _("Target address not allowed")
     else:
@@ -347,14 +348,14 @@ def admin_email_test_config():
             server.quit()
             result['smtp']['ok'] = True
         except smtplib.SMTPAuthenticationError as e:
-            result['smtp']['err'] = _('SMTP 认证失败: {}').format(e.smtp_code)
+            result['smtp']['err'] = _('SMTP authentication failed: {code}', code=e.smtp_code)
         except Exception as e:
             logger.exception('[email] test-config smtp failed')
             result['smtp']['err'] = _("Connection failed") + ": " + type(e).__name__
 
     # ── IMAP 登录探测 ──
     if not imap_host or not imap_port:
-        result['imap']['err'] = _('IMAP 未配置')
+        result['imap']['err'] = _('IMAP is not configured')
     elif not _allow_private and _is_blocked_probe_target(imap_host):
         result['imap']['err'] = _("Target address not allowed")
     else:
@@ -368,7 +369,7 @@ def admin_email_test_config():
             conn.logout()
             result['imap']['ok'] = True
         except imaplib.IMAP4.error as e:
-            result['imap']['err'] = _('IMAP 认证失败: {}').format(e)
+            result['imap']['err'] = _('IMAP authentication failed: {error}', error=e)
         except Exception as e:
             logger.exception('[email] test-config imap failed')
             result['imap']['err'] = _("Connection failed") + ": " + type(e).__name__
@@ -449,7 +450,7 @@ def admin_email_drafts_save():
             body_html=str(data.get('body_html', '') or ''),
             attachments=data.get('attachments'))
         if draft_id is None:
-            return jsonify({'success': False, 'error': _('草稿不存在或已删除')}), 404
+            return jsonify({'success': False, 'error': _('Draft does not exist or has been deleted')}), 404
         return jsonify({'success': True, 'data': {'draft_id': draft_id}})
     except Exception:
         logger.exception('[email] draft save failed')
@@ -465,7 +466,7 @@ def admin_email_drafts_delete(draft_id):
     try:
         ok = delete_draft(draft_id)
         if not ok:
-            return jsonify({'success': False, 'error': _('草稿不存在')}), 404
+            return jsonify({'success': False, 'error': _('Draft does not exist')}), 404
         return jsonify({'success': True, 'data': {'deleted': True}})
     except Exception:
         logger.exception('[email] draft delete failed')
@@ -504,7 +505,7 @@ def admin_email_batch():
     if isinstance(uids, str):
         uids = [u for u in uids.replace('，', ',').split(',') if u.strip()]
     if not uids:
-        return jsonify({'success': False, 'error': _('请选择要操作的邮件')}), 400
+        return jsonify({'success': False, 'error': _('Please select the emails to operate on')}), 400
     from plugins.email.services import delete_emails, mark_read, move_emails
     try:
         if action == 'delete':
@@ -516,10 +517,10 @@ def admin_email_batch():
         elif action == 'move':
             folder = str(data.get('folder', '')).strip()
             if not folder:
-                return jsonify({'success': False, 'error': _('请选择目标文件夹')}), 400
+                return jsonify({'success': False, 'error': _('Please choose a target folder')}), 400
             ok, msg = move_emails(uids, folder)
         else:
-            return jsonify({'success': False, 'error': _('不支持的批量操作: {}').format(action)}), 400
+            return jsonify({'success': False, 'error': _('Unsupported batch action: {action}', action=action)}), 400
         if not ok:
             return jsonify({'success': False, 'error': msg}), 400
         return jsonify({'success': True, 'data': {'message': msg, 'affected': len(uids)}})

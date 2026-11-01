@@ -59,6 +59,8 @@ from .store import StoreAPIClient, get_store_client
 from .watermark import OFFICIAL_PLUGIN_IDS
 from .guard import CIRCUIT_BREAKER_THRESHOLD, should_trip, record_failure
 
+from i18n import _
+
 
 def _conflicting_enabled(identifier, conflicts, all_plugins):
     """返回与 `conflicts` 声明互斥、且当前处于 ENABLED/ACTIVE 的插件标识（双向判定）。
@@ -330,7 +332,9 @@ class PluginManager:
         """
         acquired = self._lock.acquire(timeout=timeout)
         if not acquired:
-            raise PluginBusyError(f'插件系统正忙（{timeout} 秒内未能获得写锁），请稍后重试')
+            raise PluginBusyError(_(
+                'Plugin system is busy (could not acquire the write lock within {timeout} seconds), '
+                'please try again later', timeout=timeout))
         try:
             yield
         finally:
@@ -361,11 +365,11 @@ class PluginManager:
             slow = sorted(getattr(self, '_startup_slow', []), key=lambda x: -x[1])[:3]
             # phases 元素为三元组 (阶段名, 本阶段 ms, 自 init_app 起累计 ms)
             brief = ' '.join(f'{name}={span}ms' for name, span, _cum in phases)
-            slow_txt = (' | 最慢插件: ' + ', '.join(f'{p}={ms}ms' for p, ms in slow)) if slow else ''
-            print(f'[PluginManager] ⏱ 启动画像 total={total}ms {brief}{slow_txt}')
+            slow_txt = (' | 最慢插件: ' + ', '.join(f'{p}={ms}ms' for p, ms in slow)) if slow else ''  # i18n:tech — 启动画像日志
+            print(f'[PluginManager] ⏱ 启动画像 total={total}ms {brief}{slow_txt}')  # i18n:tech — 启动画像日志
         except Exception as e:
             # 不再完全静默：上一版这里静默 catch，令解包 bug 藏了一整轮（画像行从未输出）
-            print(f'[PluginManager] ⚠️ 启动画像输出失败: {e!r}')
+            print(f'[PluginManager] ⚠️ 启动画像输出失败: {e!r}')  # i18n:tech — 启动诊断
 
     def init_app(self, app):
         """工厂模式初始化，绑定到 Flask 应用
@@ -379,7 +383,7 @@ class PluginManager:
         self._startup_t0 = time.monotonic()
         self._startup_phases: List[tuple] = []
         self._startup_slow: List[tuple] = []
-        self._profile_mark('init_app 进入')
+        self._profile_mark('init_app 进入')  # i18n:tech — 启动画像阶段名
 
         # 确定插件目录
         plugins_dir = getattr(app, 'plugins_dir', None) or \
@@ -395,7 +399,7 @@ class PluginManager:
             from .event_bus import init_event_outbox_table
             init_event_outbox_table()
         except Exception as e:
-            print(f'[PluginManager] ⚠️ event_outbox 表初始化失败: {e}')
+            print(f'[PluginManager] ⚠️ event_outbox 表初始化失败: {e}')  # i18n:tech — 启动诊断
 
         # 初始化日志系统
         init_plugin_logging()
@@ -403,21 +407,21 @@ class PluginManager:
         from .models_store import init_license_store_tables
         init_license_store_tables()
 
-        self._profile_mark('表结构与日志')
+        self._profile_mark('表结构与日志')  # i18n:tech — 启动画像阶段名
 
         # 初始化订阅表（plugin_subscriptions / subscription_events）
         try:
             from .subscription import init_subscription_tables
             init_subscription_tables()
         except Exception as e:
-            print(f'[PluginManager] ⚠️ 订阅表初始化失败: {e}')
+            print(f'[PluginManager] ⚠️ 订阅表初始化失败: {e}')  # i18n:tech — 启动诊断
 
         # 初始化优惠券表（coupon_codes）
         try:
             from .coupons import init_coupon_table
             init_coupon_table()
         except Exception as e:
-            print(f'[PluginManager] ⚠️ 优惠券表初始化失败: {e}')
+            print(f'[PluginManager] ⚠️ 优惠券表初始化失败: {e}')  # i18n:tech — 启动诊断
 
         # 初始化插件支付订单表（plugin_payment_orders）
         # BUG-1：此前仅由 get_payment_router() 惰性建表，全新实例未走到支付路由时
@@ -426,7 +430,7 @@ class PluginManager:
             from .payment import init_payment_tables
             init_payment_tables()
         except Exception as e:
-            print(f'[PluginManager] ⚠️ 支付订单表初始化失败: {e}')
+            print(f'[PluginManager] ⚠️ 支付订单表初始化失败: {e}')  # i18n:tech — 启动诊断
 
         # License & Store 客户端（延迟初始化）
         self._license_mgr = get_license_manager()
@@ -525,8 +529,8 @@ class PluginManager:
                 try:
                     rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
                     if rss_mb > mem_mb_limit:
-                        print(f'[Watchdog] ⚠️ 进程 RSS {rss_mb:.0f}MB 超限 {mem_mb_limit}MB，'
-                              f'可能由插件内存泄漏导致，建议重启')
+                        print(f'[Watchdog] ⚠️ 进程 RSS {rss_mb:.0f}MB 超限 {mem_mb_limit}MB，'  # i18n:tech — 运维日志
+                              f'可能由插件内存泄漏导致，建议重启')  # i18n:tech — 运维日志
                 except Exception:
                     pass
                 try:
@@ -537,7 +541,7 @@ class PluginManager:
 
         # 从数据库加载已注册插件到缓存
         self._load_cache()
-        self._profile_mark('DB 缓存装载')
+        self._profile_mark('DB 缓存装载')  # i18n:tech — 启动画像阶段名
 
         # 自动安装新发现的插件
         # PLUGIN_AUTO_INSTALL=0 时跳过自动安装/自动启用（部署默认关，插件由后台手动安装启用）
@@ -590,7 +594,7 @@ class PluginManager:
                         self._converge_excluded_rows(_hidden_ids, _edition_name)
                     self._release_previously_excluded(_hidden_ids, _edition_name)
             except Exception as e:
-                print(f'[PluginManager] ⚠️ 版侧状态收敛/释放失败（不影响本次启动）: {e}')
+                print(f'[PluginManager] ⚠️ 版侧状态收敛/释放失败（不影响本次启动）: {e}')  # i18n:tech — 启动诊断
 
             # ── 加载本版可见插件的 locale 翻译 ─────────────────
             try:
@@ -602,7 +606,12 @@ class PluginManager:
                     if os.path.isdir(locale_dir):
                         seed_plugin_translations(disk_info.identifier, locale_dir)
             except Exception as e:
-                print(f'[PluginManager] ⚠️ 加载插件翻译失败: {e}')
+                print(f'[PluginManager] ⚠️ 加载插件翻译失败: {e}')  # i18n:tech — 启动诊断
+
+            # ── 注册 i18n 命名空间：只有已启用插件参与词条解析 ──────
+            # 播种不区分启用状态（需保证词条归属正确、再启用可秒级生效），
+            # 但解析阶段按本集合过滤：被禁用插件的词条不合并、不占用内存。
+            self._sync_i18n_enabled_plugins()
 
             if auto_install:
                 # ── error 状态插件自愈重试（科研版 veroscholar「无数据」根因）──
@@ -612,7 +621,7 @@ class PluginManager:
                 # ⚠️ 必须早于下面的自动安装循环：后者抛错会跳过本块（见上方修复说明）。
                 _recovered = self._recover_error_plugins(discovered)
                 if _recovered > 0:
-                    print(f'[PluginManager] ✅ error 自愈恢复 {_recovered} 个插件')
+                    print(f'[PluginManager] ✅ error 自愈恢复 {_recovered} 个插件')  # i18n:tech — 启动诊断
                     self._load_cache()
 
                 auto_installed = 0
@@ -634,9 +643,9 @@ class PluginManager:
                         auto_installed += 1
                     except Exception as e:
                         # 逐插件容错：单个插件失败（发行版不兼容 / 依赖缺失）不得中断其余插件
-                        print(f'[PluginManager] ⚠️ 自动安装跳过 {info.identifier}: {e}')
+                        print(f'[PluginManager] ⚠️ 自动安装跳过 {info.identifier}: {e}')  # i18n:tech — 启动诊断
                 if auto_installed > 0:
-                    print(f'[PluginManager] ✅ 自动安装 {auto_installed} 个新插件')
+                    print(f'[PluginManager] ✅ 自动安装 {auto_installed} 个新插件')  # i18n:tech — 启动诊断
                     self._load_cache()  # 重新加载缓存
 
                 # 自动启用所有 INSTALLED 状态的插件（新安装 + 已安装未启用）
@@ -650,31 +659,31 @@ class PluginManager:
                         except Exception as e:
                             print(f'[PluginManager] ⚠️ auto-enable {info.identifier}: {e}')
                 if auto_enabled > 0:
-                    print(f'[PluginManager] ✅ 自动启用 {auto_enabled} 个插件')
+                    print(f'[PluginManager] ✅ 自动启用 {auto_enabled} 个插件')  # i18n:tech — 启动诊断
                     self._load_cache()
 
-            self._profile_mark('发现+装启+清单刷新')
+            self._profile_mark('发现+装启+清单刷新')  # i18n:tech — 启动画像阶段名
         except Exception as e:
-            print(f'[PluginManager] ⚠️ 自动安装失败: {e}')
+            print(f'[PluginManager] ⚠️ 自动安装失败: {e}')  # i18n:tech — 启动诊断
 
         # 自动禁用已被替代的弃用插件（如旧 dev_accounts）
         try:
             self._auto_disable_deprecated()
         except Exception as e:
-            print(f'[PluginManager] ⚠️ 自动禁用弃用插件失败: {e}')
+            print(f'[PluginManager] ⚠️ 自动禁用弃用插件失败: {e}')  # i18n:tech — 启动诊断
 
         # ── 预注册已启用/激活插件的蓝图与钩子 ──────────────────
         # Flask 不允许 app 处理首个请求后调用 register_blueprint，
         # 因此必须在此（app 首个请求前）一次性挂载所有 ENABLED/ACTIVE 插件的路由。
         self._preload_routes()
-        self._profile_mark('预注册路由与钩子')
+        self._profile_mark('预注册路由与钩子')  # i18n:tech — 启动画像阶段名
 
         # 记录到 app 扩展
         if not hasattr(app, 'extensions'):
             app.extensions = {}
         app.extensions['plugin_manager'] = self
 
-        print(f'[PluginManager] ✅ 已初始化 (plugins: {self.plugins_dir}, '
+        print(f'[PluginManager] ✅ 已初始化 (plugins: {self.plugins_dir}, '  # i18n:tech — 启动诊断
               f'cached: {len(self._cache)})')
         self._profile_report()
 
@@ -710,7 +719,7 @@ class PluginManager:
                 self._save_to_db(cached)
                 synced.append(disk_info.identifier)
                 print(f'[PluginManager] 🔄 {disk_info.identifier}: synced v{disk_info.version} '
-                      f'to DB（变更字段: {", ".join(changed)}）')
+                      f'to DB（变更字段: {", ".join(changed)}）')  # i18n:tech — 启动诊断
         return synced
 
     def _converge_excluded_rows(self, hidden, edition: str) -> List[str]:
@@ -747,9 +756,9 @@ class PluginManager:
             try:
                 self._save_to_db(info)
                 converged.append(pid)
-                print(f'[PluginManager] 🔒 {pid}: 注册表存量状态收口为 disabled（{edition} 版不提供）')
+                print(f'[PluginManager] 🔒 {pid}: 注册表存量状态收口为 disabled（{edition} 版不提供）')  # i18n:tech — 启动诊断
             except Exception as e:
-                print(f'[PluginManager] ⚠️ {pid}: 收口 disabled 失败: {e}')
+                print(f'[PluginManager] ⚠️ {pid}: 收口 disabled 失败: {e}')  # i18n:tech — 启动诊断
         return converged
 
     def _release_previously_excluded(self, hidden, edition: str) -> List[str]:
@@ -789,10 +798,10 @@ class PluginManager:
                 #   ② 当前版本的 hidden 集合不含该插件（历史收口来自**另一条版本路径**，
                 #      如 research/omni 排除 stock_analysis，切回金融版后它已在 include 内）。
                 # 旧文案一律写「运行时白名单已关闭」，在 ② 场景下把人误导到版配置文件。
-                print(f'[PluginManager] 🔓 {pid}: 版侧收口已不适用（本版不排除该插件）'
-                      f'→ 注册表状态由 disabled 放回 installed，交由自动启用流程')
+                print(f'[PluginManager] 🔓 {pid}: 版侧收口已不适用（本版不排除该插件）'  # i18n:tech — 启动诊断
+                      f'→ 注册表状态由 disabled 放回 installed，交由自动启用流程')  # i18n:tech — 启动诊断
             except Exception as e:
-                print(f'[PluginManager] ⚠️ {pid}: 释放 disabled 失败: {e}')
+                print(f'[PluginManager] ⚠️ {pid}: 释放 disabled 失败: {e}')  # i18n:tech — 启动诊断
         return released
 
     # ── error 状态插件启动期自愈重试 ───────────────────────────────────
@@ -823,10 +832,10 @@ class PluginManager:
             try:
                 self.enable(cached.identifier)
                 recovered += 1
-                print(f'[PluginManager] ♻️ error 自愈: {cached.identifier} '
+                print(f'[PluginManager] ♻️ error 自愈: {cached.identifier} '  # i18n:tech — 启动诊断
                       f'→ {self._cache[cached.identifier].status.value}')
             except Exception as e:
-                print(f'[PluginManager] ⚠️ error 自愈重试失败 {cached.identifier}: {e}')
+                print(f'[PluginManager] ⚠️ error 自愈重试失败 {cached.identifier}: {e}')  # i18n:tech — 启动诊断
         return recovered
 
     @staticmethod
@@ -852,8 +861,8 @@ class PluginManager:
         declared = set(getattr(info, 'permissions', None) or [])
         if required in declared:
             return True
-        print(f'[PluginManager] ⚠️ {info.identifier}: 未声明权限 "{required}"，'
-              f'跳过能力 {capability}（最小权限降级）')
+        print(f'[PluginManager] ⚠️ {info.identifier}: 未声明权限 "{required}"，'  # i18n:tech — 启动诊断
+              f'跳过能力 {capability}（最小权限降级）')  # i18n:tech — 启动诊断
         # P0-1 审核修复：降级落库（last_error 持久化），管理页可见，避免静默功能缺失
         try:
             reason = f'capability {capability} blocked: missing permission "{required}"'
@@ -1024,7 +1033,8 @@ class PluginManager:
             return
         if info.status == PluginStatus.ERROR:
             return
-        reason = f'circuit breaker: 连续失败 ≥ {CIRCUIT_BREAKER_THRESHOLD} 次 ({context})'
+        reason = _('circuit breaker: {count} consecutive failures ({context})',
+                   count=CIRCUIT_BREAKER_THRESHOLD, context=context)
         info.last_error = reason
         info.status = PluginStatus.ERROR
         info.updated_at = datetime.now().isoformat()
@@ -1034,7 +1044,7 @@ class PluginManager:
             # PF-07：熔断摘除钩子与 EventBus 双通道订阅（原仅清 HookRegistry）
             self._unregister_plugin_handlers(info.identifier)
         finally:
-            print(f'[PluginManager] 🧯 {info.identifier} 熔断自动禁用: {reason}')
+            print(f'[PluginManager] 🧯 {info.identifier} 熔断自动禁用: {reason}')  # i18n:tech — 运维日志
 
     def _edition_hidden_map(self, candidates) -> tuple:
         """本版"不提供"的插件集合 → {identifier: 原因文本}（与服务器产物口径对齐）。
@@ -1064,11 +1074,13 @@ class PluginManager:
             runtime_whitelist = edition_runtime_whitelist()
             edition = current_edition()
         except Exception as e:
-            print(f'[PluginManager] ⚠️ edition 门控取数失败（按不排除处理）: {e}')
+            print(f'[PluginManager] ⚠️ edition 门控取数失败（按不排除处理）: {e}')  # i18n:tech — 启动诊断
             return {}, 'unknown'
 
-        hidden = {pid: f'excluded_in_edition: {edition}（deploy/editions 显式排除）'
-                  for pid in excluded}
+        hidden = {pid: _(
+            'excluded_in_edition: {edition} (explicitly excluded by deploy/editions)',
+            edition=edition)
+            for pid in excluded}
         # ★ include 的"默认拒绝"分支受 plugins.runtime_whitelist 控制。
         #   金融桌面版 2026-09-21 曾声明 runtime_whitelist: false（include 只做发包裁剪、
         #   运行期默认放行，不适用插件改用 exclude / 动态分流显式表达）；2026-10-06 决策
@@ -1082,8 +1094,10 @@ class PluginManager:
         if included and runtime_whitelist:
             for pid in candidates:
                 if pid not in included and pid not in hidden:
-                    hidden[pid] = (f'not_in_edition_include: {edition}'
-                                   '（未列入本版 plugins.include 白名单，服务器版亦不随包分发）')
+                    hidden[pid] = _(
+                        'not_in_edition_include: {edition} (not listed in this edition\'s '
+                        'plugins.include whitelist; the server edition also does not ship it)',
+                        edition=edition)
         return hidden, edition
 
     def _dist_hidden_map(self, candidates, edition: str = '') -> dict:
@@ -1111,11 +1125,11 @@ class PluginManager:
             _, hidden = resolve_visible_set(
                 edition, list(candidates or []), current_profile())
             if hidden:
-                print(f'[PluginManager] 🔀 分流规则隐藏 {len(hidden)} 个插件（仅挂载门控）: '
+                print(f'[PluginManager] 🔀 分流规则隐藏 {len(hidden)} 个插件（仅挂载门控）: '  # i18n:tech — 启动诊断
                       f'{sorted(hidden)}')
             return hidden
         except Exception as e:
-            print(f'[PluginManager] ⚠️ 分流规则门控取数失败（按不隐藏处理）: {e}')
+            print(f'[PluginManager] ⚠️ 分流规则门控取数失败（按不隐藏处理）: {e}')  # i18n:tech — 启动诊断
             return {}
 
     def _preload_routes(self):
@@ -1153,7 +1167,7 @@ class PluginManager:
         try:
             self._release_previously_excluded(_hidden, _edition_name)
         except Exception as e:
-            print(f'[PluginManager] ⚠️ 释放历史收口行失败（不影响本次启动）: {e}')
+            print(f'[PluginManager] ⚠️ 释放历史收口行失败（不影响本次启动）: {e}')  # i18n:tech — 启动诊断
 
         # v1.8 动态分流：仅并入**挂载门控**（决定是否装载实例 / 挂路由与钩子），不写库。
         # 规则表为空或 resolver 关闭时 _gate == _hidden，行为与 v1.7 完全一致。
@@ -1163,7 +1177,7 @@ class PluginManager:
             if isinstance(_dist_hidden, dict) and _dist_hidden:
                 _gate.update(_dist_hidden)
         except Exception as e:
-            print(f'[PluginManager] ⚠️ 分流门控合并失败（仅按版侧处理）: {e}')
+            print(f'[PluginManager] ⚠️ 分流门控合并失败（仅按版侧处理）: {e}')  # i18n:tech — 启动诊断
 
         for row in rows:
             pid = row['identifier']
@@ -1175,7 +1189,7 @@ class PluginManager:
             # 在本路径仍会被预加载并挂载路由与钩子（实测 finance 版 /admin/veroscholar
             # 依然 308 可访问）→ 门控必须同样约束启动期装载，否则「不提供」只是 UI 层隐藏。
             if pid in _gate:
-                print(f'[PluginManager] ⏭ {pid}: {_gate[pid]} → 跳过装载与路由挂载')
+                print(f'[PluginManager] ⏭ {pid}: {_gate[pid]} → 跳过装载与路由挂载')  # i18n:tech — 启动诊断
                 continue
             # 已加载实例直接复用；否则按启用流程加载（setup）
             instance = self._instances.get(pid)
@@ -1213,7 +1227,7 @@ class PluginManager:
                     from agent_matrix.models import attach_plugin_capabilities
                     attach_plugin_capabilities(pid, info.metadata or {})
                 except Exception as e:
-                    print(f'[PluginManager] ⚠️ {pid}: 启动网关注册补挂载失败: {e}')
+                    print(f'[PluginManager] ⚠️ {pid}: 启动网关注册补挂载失败: {e}')  # i18n:tech — 启动诊断
             try:
                 # 注册路由（如插件提供 Blueprint；P0-1 权限门控）
                 if self._capability_allowed(info, 'register_routes') and hasattr(instance, 'register_routes'):
@@ -1223,7 +1237,7 @@ class PluginManager:
                         prefix = self._get_route_prefix(pid, bp)
                         # 与 mount_all_routes 一致：插件不得抢占 admin 核心根前缀
                         if prefix in ('', '/', '/admin', '/admin/'):
-                            print(f'[PluginManager] ⚠️ {pid}: 插件前缀 {prefix!r} 抢占 admin 核心域，跳过预挂载')
+                            print(f'[PluginManager] ⚠️ {pid}: 插件前缀 {prefix!r} 抢占 admin 核心域，跳过预挂载')  # i18n:tech — 启动诊断
                             continue
                         self.app.register_blueprint(bp, url_prefix=prefix)
                         print(f'[PluginManager] {pid}: preloaded {prefix}')
@@ -1266,6 +1280,22 @@ class PluginManager:
         """扫描并返回所有插件（含已注册的）"""
         return self._discovery.discover()
 
+    def _sync_i18n_enabled_plugins(self) -> None:
+        """把「当前已启用插件集合」同步给 i18n，用于词条命名空间隔离。
+
+        只在解析层过滤：禁用插件的词条不参与合并（不占用内存、不参与翻译）；
+        词条行本身保留在库中，再启用可立即生效（卸载才物理清除）。
+        """
+        try:
+            from i18n import set_enabled_plugins
+            _enabled = [
+                p.identifier for p in self.list_plugins()
+                if p.status in (PluginStatus.ENABLED, PluginStatus.ACTIVE)
+            ]
+            set_enabled_plugins(_enabled)
+        except Exception as e:
+            print(f'[PluginManager] ⚠️ 同步 i18n 启用插件集合失败: {e}')  # i18n:tech — 运维日志
+
     # ── 安装 ────────────────────────────────────────────────────────────
 
     def install(self, identifier: str) -> PluginInfo:
@@ -1279,7 +1309,7 @@ class PluginManager:
             if db_info is not None and db_info.status in (
                     PluginStatus.INSTALLED, PluginStatus.ENABLED,
                     PluginStatus.ACTIVE):
-                print(f'[PluginManager] {identifier} 已安装，跳过')
+                print(f'[PluginManager] {identifier} 已安装，跳过')  # i18n:tech — 运维日志
                 self._cache[identifier] = db_info
                 return db_info
             if db_info is None:
@@ -1316,9 +1346,10 @@ class PluginManager:
                     _edition_ok = True
                     print(f'[PluginManager] {identifier} edition gate check skipped: {_e}')
                 if not _edition_ok:
-                    raise PluginError(
-                        f'插件 "{identifier}" 不兼容当前发行版: '
-                        f'compatible_editions={_eds}, 当前发行版={_deploy_edition}')
+                    raise PluginError(_(
+                        'Plugin "{identifier}" is not compatible with the current edition: '
+                        'compatible_editions={eds}, current edition={edition}',
+                        identifier=identifier, eds=_eds, edition=_deploy_edition))
 
             # 2026-10-20：发行版 plugins.include 白名单同样闸住**安装**，不只闸启用。
             # 此前该口径只在 discover()（列表可见性）与 enable()（启用）生效：
@@ -1334,13 +1365,15 @@ class PluginManager:
                 _ed_excl = set(edition_plugin_excludes())
                 _ed_incl = set(edition_plugin_includes())
                 if identifier in _ed_excl:
-                    raise PluginError(
-                        f'插件 "{identifier}" 已被当前发行版显式排除，不允许安装')
+                    raise PluginError(_(
+                        'Plugin "{identifier}" is explicitly excluded by the current edition '
+                        'and cannot be installed', identifier=identifier))
                 if (_ed_incl and edition_runtime_whitelist()
                         and identifier not in _ed_incl):
-                    raise PluginError(
-                        f'插件 "{identifier}" 未列入当前发行版 plugins.include 白名单，'
-                        f'不允许安装（本版不提供该插件）')
+                    raise PluginError(_(
+                        'Plugin "{identifier}" is not listed in the current edition\'s '
+                        'plugins.include whitelist and cannot be installed '
+                        '(not provided in this edition)', identifier=identifier))
             except PluginError:
                 raise
             except Exception as _e:
@@ -1381,7 +1414,7 @@ class PluginManager:
 
             # 幂等：已是 ENABLED/ACTIVE 直接返回当前状态（D-IDEMPOTENT-01）
             if info.status in (PluginStatus.ENABLED, PluginStatus.ACTIVE):
-                print(f'[PluginManager] {identifier} 已启用，跳过')
+                print(f'[PluginManager] {identifier} 已启用，跳过')  # i18n:tech — 运维日志
                 return info
 
             # 验证状态转换
@@ -1464,11 +1497,13 @@ class PluginManager:
                 _hidden_by = None
                 if identifier in _ed_excl:
                     _hidden_by = 'excluded_in_edition'
-                    _why = '发行版 plugins.exclude 显式排除，不适用于本版安装'
+                    _why = _('explicitly excluded by edition plugins.exclude; '
+                             'not installable in this edition')
                 elif _ed_incl and _ed_runtime_whitelist and identifier not in _ed_incl:
                     _hidden_by = 'not_in_edition_include'
-                    _why = ('未列入本版 plugins.include 白名单（服务器版亦不随包分发）；'
-                            '如需提供请先登记到 deploy/editions/<edition>.yaml')
+                    _why = _('not listed in this edition\'s plugins.include whitelist '
+                             '(the server edition also does not ship it); to provide it, '
+                             'register it in deploy/editions/<edition>.yaml first')
                 if _hidden_by:
                     info.last_error = f'{_hidden_by}: {identifier}（{_why}）'
                     info.status = PluginStatus.ERROR
@@ -1509,15 +1544,16 @@ class PluginManager:
                     f'enabled(blocked: ownership lookup unavailable, retry later: {exc})'
                 )
             if not _roles:
-                info.last_error = ('missing/invalid agent_role: '
-                                   f'{(info.metadata or {}).get("agent_role")!r} '
-                                   '（既不属本版核心角色，也无核心角色的 managed_modules 认领）')
+                info.last_error = _(
+                    'missing/invalid agent_role: {role!r} '
+                    '(not a core role of this edition, and not claimed by any core role via managed_modules)',
+                    role=(info.metadata or {}).get('agent_role'))
                 info.status = PluginStatus.ERROR
                 self._save_to_db(info)
                 raise PluginStateError(
                     identifier, 'missing_agent_role',
-                    'enable failed: 插件在本版无归属角色（plugin.json 的 agent_role 与'
-                    '本版角色的 managed_modules 均未命中）'
+                    _('enable failed: plugin has no owning role in this edition '
+                      '(neither its agent_role nor the managed_modules of this edition\'s roles match)')
                 )
 
             # 执行插件 setup()
@@ -1581,6 +1617,16 @@ class PluginManager:
             self._emit('plugin.enabled', plugin_id=identifier)
             print(f'[PluginManager] ✅ {identifier} enabled')
 
+            # ── i18n：播种本插件词条并纳入解析集合 ──
+            try:
+                from i18n import seed_plugin_translations
+                _locale_dir = os.path.join(info.path or '', 'i18n')
+                if info.path and os.path.isdir(_locale_dir):
+                    seed_plugin_translations(identifier, _locale_dir)
+            except Exception as e:
+                print(f'[PluginManager] ⚠️ {identifier} 播种 i18n 词条失败: {e}')  # i18n:tech — 运维日志
+            self._sync_i18n_enabled_plugins()
+
             # P2-5: 启用时恢复插件 MCP server（disable 时置 0，此处覆盖为 1）
             try:
                 from .mcp import sync_plugin_mcp
@@ -1594,16 +1640,16 @@ class PluginManager:
                 from agent_matrix.models import attach_plugin_capabilities
                 attach_plugin_capabilities(identifier, _meta)
             except ImportError as e:
-                print(f'[PluginManager] ⚠️ {identifier}: agent_matrix.models 不可用, 跳过网关注册 ({e})')
+                print(f'[PluginManager] ⚠️ {identifier}: agent_matrix.models 不可用, 跳过网关注册 ({e})')  # i18n:tech — 启动诊断
             except Exception as e:
-                print(f'[PluginManager] ⚠️ {identifier}: 网关注册失败 ({type(e).__name__}: {e})')
+                print(f'[PluginManager] ⚠️ {identifier}: 网关注册失败 ({type(e).__name__}: {e})')  # i18n:tech — 启动诊断
 
             # ── 敏感权限软检查（软执行：仅警告，不阻断）────────────
             sensitive = [p for p in (_meta.get('permissions') or [])
                          if p in SENSITIVE_PERMISSIONS]
             if sensitive:
-                print(f'[PluginManager] ⚠️ {identifier} 声明敏感权限 {sensitive}，'
-                      f'请管理员启用前审查（软执行：仅提醒）')
+                print(f'[PluginManager] ⚠️ {identifier} 声明敏感权限 {sensitive}，'  # i18n:tech — 启动诊断
+                      f'请管理员启用前审查（软执行：仅提醒）')  # i18n:tech — 启动诊断
 
             # ── 自动激活: enable 后立即挂载钩子/任务 ────────────
             # Flask 不允许 app 处理首个请求后动态注册蓝图，因此不再在此 register_blueprint；
@@ -1730,8 +1776,8 @@ class PluginManager:
                     _known = True
                 except Exception as exc:  # noqa: BLE001
                     _roles, _known = [], False
-                    print(f'[PluginManager] ⚠️ {identifier}: 归属预检不可用，'
-                          f'按未知放行 disable: {exc}')
+                    print(f'[PluginManager] ⚠️ {identifier}: 归属预检不可用，'  # i18n:tech — 运维日志
+                          f'按未知放行 disable: {exc}')  # i18n:tech — 运维日志
                 if _known and not _roles:
                     raise PluginStateError(
                         identifier, info.status.value,
@@ -1775,13 +1821,16 @@ class PluginManager:
             self._emit('plugin.disabled', plugin_id=identifier)
             print(f'[PluginManager] ✅ {identifier} disabled')
 
+            # ── i18n：移出解析集合（词条行保留，再启用即恢复）──
+            self._sync_i18n_enabled_plugins()
+
             # ── 注销插件 Agent（§4）：从核心角色移除聚合能力 ─────
             _meta = info.metadata or {}
             try:
                 from agent_matrix.models import detach_plugin_capabilities
                 detach_plugin_capabilities(identifier, _meta)
             except ImportError as e:
-                print(f'[PluginManager] ⚠️ {identifier}: agent_matrix.models 不可用, 跳过 Agent 清理 ({e})')
+                print(f'[PluginManager] ⚠️ {identifier}: agent_matrix.models 不可用, 跳过 Agent 清理 ({e})')  # i18n:tech — 运维日志
 
             return info
 
@@ -1859,7 +1908,8 @@ class PluginManager:
                     # 清理失败：保留 registry 记录供排障/重试，状态留 DISABLED
                     # （上方 disable 已生效），落 last_error 并中止卸载。
                     info.status = PluginStatus.DISABLED
-                    info.last_error = f'卸载清理失败，插件数据可能残留: {cleanup_err}'
+                    info.last_error = _('Uninstall cleanup failed, plugin data may remain: {error}',
+                                        error=cleanup_err)
                     info.updated_at = datetime.now().isoformat()
                     self._save_to_db(info)
                     self._cache[identifier] = info
@@ -1902,15 +1952,25 @@ class PluginManager:
                     info.updated_at = datetime.now().isoformat()
                     self._save_to_db(info)
                     self._cache[identifier] = info
-                    print(f'[PluginManager] 🔁 {identifier} 卸载失败，已恢复状态 {orig_status.value}')
+                    print(f'[PluginManager] 🔁 {identifier} 卸载失败，已恢复状态 {orig_status.value}')  # i18n:tech — 运维日志
                 except Exception as e:
-                    print(f'[PluginManager] ⚠️ {identifier} 卸载回滚持久化失败: {e}')
+                    print(f'[PluginManager] ⚠️ {identifier} 卸载回滚持久化失败: {e}')  # i18n:tech — 运维日志
                 import traceback
                 traceback.print_exc()
                 raise
 
             self._emit('plugin.uninstalled', plugin_id=identifier)
             print(f'[PluginManager] ✅ {identifier} uninstalled')
+
+            # ── i18n：卸载即物理清除该插件词条（禁用不删，卸载才删）──
+            try:
+                from i18n import delete_plugin_translations
+                _removed = delete_plugin_translations(identifier)
+                if _removed:
+                    print(f'[PluginManager] 🧹 {identifier}: 已清理 {_removed} 条 i18n 词条')  # i18n:tech — 运维日志
+            except Exception as e:
+                print(f'[PluginManager] ⚠️ {identifier} 清理 i18n 词条失败: {e}')  # i18n:tech — 运维日志
+            self._sync_i18n_enabled_plugins()
 
     def _remove_plugin_jobs(self, identifier: str):
         """卸载前经 SchedulerEngine 摘除插件 cron（生产实例注入在
@@ -1963,7 +2023,8 @@ class PluginManager:
         if missing:
             raise PluginDependencyError(
                 identifier,
-                [f'依赖宿主共享模块缺失: {m}（该模块由 VeroRun 基础系统提供）' for m in missing])
+                [_('Missing host shared module dependency: {module} '
+                   '(provided by the VeroRun base system)', module=m) for m in missing])
 
     # ── 在线升级 ─────────────────────────────────────────────────────────
 
@@ -1995,11 +2056,13 @@ class PluginManager:
                 raise PluginStateError(identifier, 'store', 'store client not available')
             detail = self._store_client.get_detail(identifier)
             if not detail or not detail.get('download_url'):
-                raise ValueError(f'商店中不存在 {identifier} 的更新包')
+                raise ValueError(_('No update package for {identifier} exists in the store',
+                                  identifier=identifier))
             latest = str(detail.get('version') or '').strip()
             old_version = str(info.version or '').strip()
             if not latest:
-                raise ValueError(f'商店未提供 {identifier} 的目标版本号')
+                raise ValueError(_('The store did not provide a target version for {identifier}',
+                                  identifier=identifier))
 
             # 版本比较：同版本视为「已是最新」幂等返回；降级拒绝
             latest_ver = parse_version(latest)
@@ -2055,16 +2118,18 @@ class PluginManager:
             # 校验 staging 内 plugin.json（JSON 合法 + identifier 一致）
             json_path = os.path.join(staging_dir, 'plugin.json')
             if not os.path.isfile(json_path):
-                raise ValueError('插件包缺少 plugin.json')
+                raise ValueError(_('Plugin package is missing plugin.json'))
             try:
                 with open(json_path, 'r', encoding='utf-8') as f:
                     new_meta = json.load(f)
             except (json.JSONDecodeError, IOError) as e:
-                raise ValueError(f'插件包 plugin.json 解析失败: {e}')
+                raise ValueError(_('Failed to parse plugin.json in the plugin package: {error}',
+                                  error=e))
             if new_meta.get('identifier') != identifier:
-                raise ValueError(
-                    f'包内 identifier {new_meta.get("identifier")!r} '
-                    f'与目标 {identifier!r} 不一致，拒绝替换')
+                raise ValueError(_(
+                    'Package identifier {package_identifier!r} does not match '
+                    'the target {identifier!r}, replacement refused',
+                    package_identifier=new_meta.get('identifier'), identifier=identifier))
 
             # 宿主共享模块静态校验（D-INSTALL-01）
             self._validate_shared_imports(staging_dir, identifier)
@@ -2090,7 +2155,8 @@ class PluginManager:
                 # 用磁盘新 plugin.json 刷新 registry
                 disk_info = self._discovery.discover_one(identifier)
                 if disk_info is None:
-                    raise ValueError(f'替换后无法从磁盘发现 {identifier}')
+                    raise ValueError(_('Unable to discover {identifier} from disk after replacement',
+                                      identifier=identifier))
                 info.metadata = disk_info.metadata
                 info.version = disk_info.version
                 info.name = disk_info.name
@@ -2122,9 +2188,9 @@ class PluginManager:
                     if os.path.isdir(plugin_dir):
                         shutil.rmtree(plugin_dir)
                     shutil.copytree(backup_dir, plugin_dir)
-                    print(f'[PluginManager] 🔁 {identifier} 升级失败，已回滚到 v{old_version}')
+                    print(f'[PluginManager] 🔁 {identifier} 升级失败，已回滚到 v{old_version}')  # i18n:tech — 运维日志
                 except Exception as e:
-                    print(f'[PluginManager] ⚠️ {identifier} 回滚失败（保留备份 {backup_dir}）: {e}')
+                    print(f'[PluginManager] ⚠️ {identifier} 回滚失败（保留备份 {backup_dir}）: {e}')  # i18n:tech — 运维日志
             # 清理残留 staging（备份保留供人工处理）
             if os.path.isdir(staging_dir):
                 try:
@@ -2148,9 +2214,9 @@ class PluginManager:
                     shutil.rmtree(path)
                 else:
                     os.unlink(path)
-                print(f'[PluginManager] 🧹 清理旧备份 {identifier}/{name}')
+                print(f'[PluginManager] 🧹 清理旧备份 {identifier}/{name}')  # i18n:tech — 运维日志
             except OSError as e:
-                print(f'[PluginManager] ⚠️ 清理备份 {path} 失败: {e}')
+                print(f'[PluginManager] ⚠️ 清理备份 {path} 失败: {e}')  # i18n:tech — 运维日志
 
     # ── Dashboard 统计聚合（§6.4 / §10.5）──────────────────────────
 
@@ -2202,19 +2268,19 @@ class PluginManager:
                 continue
             except Exception as e:
                 self._guard_failure(info, 'register_dag_nodes')
-                print(f'[PluginManager] ⚠️ {pid}: register_dag_nodes() 调用失败: {e}')
+                print(f'[PluginManager] ⚠️ {pid}: register_dag_nodes() 调用失败: {e}')  # i18n:tech — 运维日志
                 continue
             for node_type, handler in nodes.items():
                 if not callable(handler):
-                    print(f'[PluginManager] ⚠️ {pid}: DAG 节点 {node_type} 处理器不可调用，跳过')
+                    print(f'[PluginManager] ⚠️ {pid}: DAG 节点 {node_type} 处理器不可调用，跳过')  # i18n:tech — 运维日志
                     continue
                 if not _dag_handler_conforms(handler):
-                    print(f'[PluginManager] ⚠️ {pid}: DAG 节点 {node_type} 处理器签名不符合'
-                          f' handler(node_def, input_data) 约定，跳过')
+                    print(f'[PluginManager] ⚠️ {pid}: DAG 节点 {node_type} 处理器签名不符合'  # i18n:tech — 运维日志
+                          f' handler(node_def, input_data) 约定，跳过')  # i18n:tech — 运维日志
                     continue
                 engine.register_node_handler(node_type, handler)
                 count += 1
-                print(f'[PluginManager] ✅ {pid}: DAG 节点 {node_type} 已注册')
+                print(f'[PluginManager] ✅ {pid}: DAG 节点 {node_type} 已注册')  # i18n:tech — 运维日志
         return count
 
     def register_all_plugin_jobs(self, scheduler) -> int:
@@ -2240,11 +2306,11 @@ class PluginManager:
                 continue
             except Exception as e:
                 self._guard_failure(info, 'register_jobs')
-                print(f'[PluginManager] ⚠️ {pid}: register_jobs() 调用失败: {e}')
+                print(f'[PluginManager] ⚠️ {pid}: register_jobs() 调用失败: {e}')  # i18n:tech — 运维日志
                 continue
             for job in jobs:
                 if not isinstance(job, dict) or not callable(job.get('func')):
-                    print(f'[PluginManager] ⚠️ {pid}: job {job} 无 func 或不可调用，跳过')
+                    print(f'[PluginManager] ⚠️ {pid}: job {job} 无 func 或不可调用，跳过')  # i18n:tech — 运维日志
                     continue
                 if scheduler.add_plugin_job(job, plugin_id=pid):
                     count += 1
@@ -2320,12 +2386,12 @@ class PluginManager:
                 continue
             if replacement.status in (PluginStatus.ENABLED, PluginStatus.ACTIVE) and \
                     old.status in (PluginStatus.INSTALLED, PluginStatus.ENABLED, PluginStatus.ACTIVE):
-                print(f'[PluginManager] ⚠️ 自动禁用已弃用插件 {old_id}（由 {new_id} 替代）')
+                print(f'[PluginManager] ⚠️ 自动禁用已弃用插件 {old_id}（由 {new_id} 替代）')  # i18n:tech — 运维日志
                 try:
                     # 弃用迁移属系统路径：旧插件本就不该再启用，跳过回得去预检。
                     self.disable(old_id, _skip_reenable_check=True)
                 except Exception as e:
-                    print(f'[PluginManager] ⚠️ 禁用弃用插件 {old_id} 失败: {e}')
+                    print(f'[PluginManager] ⚠️ 禁用弃用插件 {old_id} 失败: {e}')  # i18n:tech — 运维日志
 
     def mount_active_routes(self):
         """启动期挂载所有 enabled/active 插件的路由（必须在首个请求前调用）。
@@ -2347,12 +2413,12 @@ class PluginManager:
             if isinstance(_dist_hidden, dict) and _dist_hidden:
                 _gate.update(_dist_hidden)
         except Exception as e:
-            print(f'[PluginManager] ⚠️ 分流门控合并失败（仅按版侧处理）: {e}')
+            print(f'[PluginManager] ⚠️ 分流门控合并失败（仅按版侧处理）: {e}')  # i18n:tech — 运维日志
         mounted = []
         for identifier, info in self._cache.items():
             if identifier in _gate:
                 print(f'[PluginManager] ⏭ {identifier}: {_gate[identifier]}'
-                      '（mount_active_routes 同样跳过）')
+                      '（mount_active_routes 同样跳过）')  # i18n:tech — 运维日志
                 continue
             if info.status not in (PluginStatus.ENABLED, PluginStatus.ACTIVE):
                 continue
@@ -2373,7 +2439,7 @@ class PluginManager:
             except Exception as e:
                 print(f'[PluginManager] ⚠️ mount {identifier} failed: {e}')
         if mounted:
-            print(f'[PluginManager] ✅ 启动挂载路由: {mounted}')
+            print(f'[PluginManager] ✅ 启动挂载路由: {mounted}')  # i18n:tech — 启动诊断
 
     def mount_all_routes(self):
         """启动期挂载**所有已安装插件**（含 disabled）的路由 + 注册前缀映射。
@@ -2408,7 +2474,7 @@ class PluginManager:
                         # 插件不得抢占 admin 核心根前缀（/admin），否则门卫会把整个
                         # /admin 域误判为插件路径（曾导致 admin 登录页/插件管理全部 404）
                         if prefix in ('', '/', '/admin', '/admin/'):
-                            print(f'[PluginManager] ⚠️ {identifier}: 插件前缀 {prefix!r} 抢占 admin 核心域，跳过挂载（请改用专属前缀）')
+                            print(f'[PluginManager] ⚠️ {identifier}: 插件前缀 {prefix!r} 抢占 admin 核心域，跳过挂载（请改用专属前缀）')  # i18n:tech — 启动诊断
                             continue
                         self._plugin_prefixes[prefix] = identifier
                         if bp.name in self.app.blueprints:
@@ -2418,7 +2484,7 @@ class PluginManager:
             except Exception as e:
                 print(f'[PluginManager] ⚠️ mount-all {identifier} failed: {e}')
         if mounted:
-            print(f'[PluginManager] ✅ 启动挂载全部插件路由: {mounted}')
+            print(f'[PluginManager] ✅ 启动挂载全部插件路由: {mounted}')  # i18n:tech — 启动诊断
         # PF-05：标记启动挂载已完成。此后 enable 的插件若蓝图不在
         # app.blueprints 中，即运行时新安装插件，路由需重启生效。
         self._routes_mounted = True
@@ -2577,7 +2643,7 @@ class PluginManager:
             try:
                 self._load_cache()
             except Exception as e:
-                print(f'[PluginManager] ⚠️ 缓存同步失败（保留现有缓存）: {e}')
+                print(f'[PluginManager] ⚠️ 缓存同步失败（保留现有缓存）: {e}')  # i18n:tech — 运维日志
                 return False
             self._cache_fp = fp
             self._fp_state['checked_at'] = time.time()
@@ -3166,13 +3232,13 @@ class PluginManager:
             # 避免已缓存插件因 path 永久失效而无法挂载（科研版无数据根因 §6.1 / 出厂复测）。
             fallback = os.path.join(self.plugins_dir, identifier)
             if os.path.isdir(fallback):
-                print(f'[PluginManager] ⚠️ {identifier} 修复过期 path: '
+                print(f'[PluginManager] ⚠️ {identifier} 修复过期 path: '  # i18n:tech — 运维日志
                       f'{plugin_dir!r} -> {fallback!r}')
                 info.path = fallback
                 try:
                     self._save_to_db(info)
                 except Exception as _e:
-                    print(f'[PluginManager] ⚠️ {identifier} path 回写失败: {_e}')
+                    print(f'[PluginManager] ⚠️ {identifier} path 回写失败: {_e}')  # i18n:tech — 运维日志
             else:
                 raise PluginNotFoundError(identifier)
             plugin_dir = fallback

@@ -20,6 +20,8 @@ from .models_store import (
 )
 from .discovery import parse_version
 
+from i18n import _
+
 # ── 商店目录源（P0-2 多源回退）────────────────────────────────────
 # STORE_CATALOG_URLS: 逗号分隔的多源列表（主源优先，逐个回退）
 # STORE_CATALOG_URL:  兼容单源配置（APP_STORE_CATALOG_URL 为更早别名）
@@ -269,7 +271,7 @@ class StoreAPIClient:
                 (identifier,)
             ).fetchone()
         if not row or not row.get('download_url'):
-            raise ValueError(f'商店中不存在 {identifier} 的下载地址')
+            raise ValueError(_('No download URL for {identifier} in store', identifier=identifier))
         from .downloader import download_plugin
         primary = self._apply_mirror(row['download_url'])
         fallback = None
@@ -403,6 +405,7 @@ class StoreAPIClient:
         """插入或更新本地缓存"""
         with self._cache_lock:
             with get_registry_db() as conn:
+                # i18n:tech:begin — SQL UPSERT 语句及内联中文注释，非用户可见文案
                 conn.execute("""
                     INSERT INTO store_plugins (
                         identifier, name, name_i18n_key, description, version, author,
@@ -456,6 +459,7 @@ class StoreAPIClient:
                     -- ★ P0-A：catalog_managed=0 为直写条目（--local-only 兜底），sync 跳过覆盖防清除
                     WHERE store_plugins.catalog_managed = 1
                 """, (
+                    # i18n:tech:end
                     pdata.get('identifier', ''),
                     pdata.get('name', ''),
                     pdata.get('name_i18n_key', ''),
@@ -515,9 +519,9 @@ class StoreAPIClient:
                         'SELECT COUNT(*) AS cnt FROM store_plugins'
                     ).fetchone()['cnt']
             except Exception as e:
-                print(f'[StoreAPIClient] sync_all: 查询本地缓存失败: {e}')
+                print(f'[StoreAPIClient] sync_all: 查询本地缓存失败: {e}')  # i18n:tech — 运维日志
             if cached and cached > 0:
-                print(f'[StoreAPIClient] sync_all: 目录拉取失败，保留本地缓存 {cached} 条 (return -1)')
+                print(f'[StoreAPIClient] sync_all: 目录拉取失败，保留本地缓存 {cached} 条 (return -1)')  # i18n:tech — 运维日志
                 return -1
             print('[StoreAPIClient] sync_all: 目录拉取失败，且无本地缓存 (return 0)')
             return 0
@@ -539,7 +543,7 @@ class StoreAPIClient:
                 conn.execute("UPDATE store_plugins SET last_sync_ts=NOW()::text")
                 conn.commit()
         except Exception as e:
-            print(f'[StoreAPIClient] sync_all: 更新 last_sync_ts 失败: {e}')
+            print(f'[StoreAPIClient] sync_all: 更新 last_sync_ts 失败: {e}')  # i18n:tech — 运维日志
         return len(plugins_data)
 
     def check_updates(self, local_versions: dict) -> dict:
@@ -557,7 +561,7 @@ class StoreAPIClient:
         """
         # 每次调用复位；失败时在 except 中写入原因（供上层展示"更新检查不可用"）
         self._last_check_error = ''
-        print(f'[StoreAPIClient] check_updates: 收到本地已安装插件 {len(local_versions)} 个: {local_versions}')
+        print(f'[StoreAPIClient] check_updates: 收到本地已安装插件 {len(local_versions)} 个: {local_versions}')  # i18n:tech — 运维日志
         if not local_versions:
             print('[StoreAPIClient] check_updates: local_versions 为空，无可对比项，直接返回空结果')
             return {}
@@ -576,9 +580,9 @@ class StoreAPIClient:
                 ).fetchall()
         except Exception as e:
             self._last_check_error = str(e)
-            print(f'[StoreAPIClient] check_updates: 查询 store_plugins 失败: {e}，返回空结果')
+            print(f'[StoreAPIClient] check_updates: 查询 store_plugins 失败: {e}，返回空结果')  # i18n:tech — 运维日志
             return {}
-        print(f'[StoreAPIClient] check_updates: 商店目录上架插件 {len(rows)} 条')
+        print(f'[StoreAPIClient] check_updates: 商店目录上架插件 {len(rows)} 条')  # i18n:tech — 运维日志
 
         result = {}
         matched = 0
@@ -591,7 +595,7 @@ class StoreAPIClient:
             installed = local_versions.get(identifier)
             if installed is None:
                 skipped += 1
-                print(f'[StoreAPIClient] check_updates: 跳过 {identifier} — 本地未安装（商店 v{latest}）')
+                print(f'[StoreAPIClient] check_updates: 跳过 {identifier} — 本地未安装（商店 v{latest}）')  # i18n:tech — 运维日志
                 continue
             matched += 1
 
@@ -599,8 +603,8 @@ class StoreAPIClient:
             latest_ver = parse_version(latest)
             installed_ver = parse_version(installed)
             if latest_ver is None or installed_ver is None:
-                print(f'[StoreAPIClient] check_updates: ⚠️ {identifier} 版本号无法解析 '
-                      f'(installed={installed!r}, latest={latest!r})，退化为字符串比较')
+                print(f'[StoreAPIClient] check_updates: ⚠️ {identifier} 版本号无法解析 '  # i18n:tech — 运维日志
+                      f'(installed={installed!r}, latest={latest!r})，退化为字符串比较')  # i18n:tech — 运维日志
                 has_update = latest != installed
                 catalog_behind = False
             else:
@@ -621,8 +625,8 @@ class StoreAPIClient:
             }
 
         updatable = sum(1 for v in result.values() if v['has_update'])
-        print(f'[StoreAPIClient] check_updates: 完成 — 匹配 {matched} 个已安装插件，跳过 {skipped} 个未安装，'
-              f'其中可更新 {updatable} 个')
+        print(f'[StoreAPIClient] check_updates: 完成 — 匹配 {matched} 个已安装插件，跳过 {skipped} 个未安装，'  # i18n:tech — 运维日志
+              f'其中可更新 {updatable} 个')  # i18n:tech — 运维日志
         return result
 
 

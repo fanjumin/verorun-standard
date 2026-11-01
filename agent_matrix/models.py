@@ -402,6 +402,7 @@ def get_master_agent_config():
 def init_agent_matrix_tables():
     """创建 4 张新表（幂等）"""
     with get_db() as conn:
+        # i18n:tech:begin — 建表 DDL 的 -- 注释属 SQL 字面量，不翻译
         conn.executescript("""
             -- ================================================
             -- 1. Agent 矩阵配置表
@@ -662,6 +663,7 @@ def init_agent_matrix_tables():
             CREATE INDEX IF NOT EXISTS idx_apb_prompt ON agent_prompt_bindings(prompt_id);
             CREATE INDEX IF NOT EXISTS idx_apb_type ON agent_prompt_bindings(binding_type);
         """)
+        # i18n:tech:end
         conn.commit()
 
     # 会话标题字段 (v2 迁移) — 单独执行，不能放 executescript 内
@@ -1217,7 +1219,7 @@ def resolve_agent_roles(plugin_id: str, metadata: dict, strict: bool = False) ->
             if row['slug'] in core and plugin_id in _json_list(row.get('managed_modules')):
                 owned.append(row['slug'])
     except Exception as exc:                                    # noqa: BLE001
-        logger.warning(f'[PluginRoles] WARNING: {plugin_id} 角色侧认领查询失败: {exc}')
+        logger.warning(f'[PluginRoles] WARNING: {plugin_id} 角色侧认领查询失败: {exc}')  # i18n:tech — 运维日志
         # strict=True：把"查询失败"与"本版明确无归属（[]）"区分开。调用方（enable 门禁）
         # 据此避免把瞬时故障持久化成 ERROR 永久锁死（P5-1 成因之一）。
         if strict:
@@ -1233,9 +1235,9 @@ def attach_plugin_capabilities(plugin_id: str, metadata: dict) -> int:
     """
     roles = resolve_agent_roles(plugin_id, metadata or {})
     if not roles:
-        logger.warning(f'[PluginRoles] WARNING: {plugin_id} 在本版无归属角色'
+        logger.warning(f'[PluginRoles] WARNING: {plugin_id} 在本版无归属角色'  # i18n:tech — 运维日志
               f'（agent_role={(metadata or {}).get("agent_role")!r}，'
-              f'且无核心角色的 managed_modules 认领），跳过网关注册')
+              f'且无核心角色的 managed_modules 认领），跳过网关注册')  # i18n:tech — 运维日志
         return -1
     caps = _json_list((metadata or {}).get('capabilities', []))
     attached = 0

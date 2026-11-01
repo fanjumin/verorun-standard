@@ -8,6 +8,7 @@ Image: agent_matrix.UnifiedLLM.image()（配图网关，替代直连 DashScope�
 import logging, json, os, requests, time, ipaddress, socket
 from urllib.parse import urlparse
 from models import get_db
+from i18n import _
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ def _qwen_chat(messages, model=None, temperature=0.7):
     )
 
 
+# i18n:tech:begin — LLM 提示词模板（中文指令与“标题：/摘要：/正文：”输出标记需与解析逻辑逐字匹配，禁止翻译）
 CONTENT_PROMPTS = {
     'article': '''请帮我写一篇微信公众号文章，主题是：{topic}
 
@@ -117,6 +119,7 @@ CONTENT_PROMPTS = {
 【正文内容】
 ---''',
 }
+# i18n:tech:end
 
 
 def generate_article(topic, content_type='article', temperature=0.7):
@@ -125,7 +128,7 @@ def generate_article(topic, content_type='article', temperature=0.7):
     prompt = prompt_template.replace('{topic}', topic)
 
     messages = [
-        {'role': 'system', 'content': '你是一个专业的中文内容创作者。'},
+        {'role': 'system', 'content': '你是一个专业的中文内容创作者。'},  # i18n:tech — LLM 系统提示词，禁止翻译
         {'role': 'user', 'content': prompt},
     ]
 
@@ -141,6 +144,7 @@ def _parse_output(text, content_type='article'):
     body_lines = []
     current_section = None
 
+    # i18n:tech:begin — 解析 AI 输出的中文标记（标题：/摘要：/正文：），需与提示词输出格式逐字匹配，翻译会导致解析失败
     for line in text.strip().split('\n'):
         stripped = line.strip()
         if stripped.startswith('标题：') or stripped.startswith('标题:'):
@@ -155,6 +159,7 @@ def _parse_output(text, content_type='article'):
             continue
         elif current_section == 'body':
             body_lines.append(stripped)
+    # i18n:tech:end
 
     body = '\n'.join(body_lines).strip()
     if not title and not body:
@@ -166,7 +171,7 @@ def _parse_output(text, content_type='article'):
 
     if content_type == 'weibo':
         return {
-            'title': title or '微博',
+            'title': title or _('Weibo'),
             'summary': summary or body[:100],
             'body': body,
             'body_html': body,
@@ -179,7 +184,7 @@ def _parse_output(text, content_type='article'):
             body_html += f'<p>{para}</p>\n'
 
     return {
-        'title': title or '未命名',
+        'title': title or _('Untitled'),
         'summary': summary or title[:100],
         'body': body,
         'body_html': body_html or body,
@@ -207,12 +212,13 @@ def generate_image(prompt, size='1024x1024', reference_image_url=None):
 
 def generate_cover_image(title, topic=''):
     """Generate cover image for article."""
-    prompt = f'公众号封面：{topic or title}，简约设计'
+    prompt = f'公众号封面：{topic or title}，简约设计'  # i18n:tech — 图像模型提示词，禁止翻译
     return generate_image(prompt, size='1280x720')
 
 
 def _validate_image_url(image_url):
     """校验图片 URL，防止 SSRF 攻击。只允许 http/https 公网地址。"""
+    # i18n:tech:begin — 内部 SSRF 校验错误（安全诊断信息，非界面文案）
     parsed = urlparse(image_url)
     if parsed.scheme not in ('http', 'https'):
         raise ValueError(f'不支持的 URL 协议: {parsed.scheme}')
@@ -228,6 +234,7 @@ def _validate_image_url(image_url):
         raise ValueError(f'禁止访问内网地址: {hostname}')
     if ip.is_multicast or ip.is_reserved:
         raise ValueError(f'禁止访问保留地址: {hostname}')
+    # i18n:tech:end
 
 def download_image_to_file(image_url, filepath):
     """Download image URL to local file."""
@@ -240,7 +247,7 @@ def download_image_to_file(image_url, filepath):
     return filepath
 
 
-def analyze_image(image_url, question='请详细描述这张图片的内容、布局、颜色和文字信息'):
+def analyze_image(image_url, question='请详细描述这张图片的内容、布局、颜色和文字信息'):  # i18n:tech — 多模态模型默认提示词，禁止翻译
     """Analyze image via UnifiedLLM (multimodal). Provider from system_config, not hardcoded."""
     _validate_image_url(image_url)
     from agent_matrix.engine import get_gateway

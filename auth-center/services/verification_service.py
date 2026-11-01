@@ -160,7 +160,7 @@ class AlipayVerificationProvider(BaseVerificationProvider):
             text = raw.decode('utf-8')
         except UnicodeDecodeError:
             text = raw.decode('gbk')
-        logger.info(f"[支付宝API] {method} 原始响应: {text[:500]}")
+        logger.info(f"[支付宝API] {method} 原始响应: {text[:500]}")  # i18n:tech — 运维日志
         result = json.loads(text)
         return result
 
@@ -213,7 +213,7 @@ class AlipayVerificationProvider(BaseVerificationProvider):
         init_resp = result.get('alipay_user_certify_open_initialize_response', {})
 
         if init_resp.get('code') != '10000':
-            logger.error(f"支付宝认证初始化失败: 完整响应={json.dumps(init_resp, ensure_ascii=False)[:500]}")
+            logger.error(f"支付宝认证初始化失败: 完整响应={json.dumps(init_resp, ensure_ascii=False)[:500]}")  # i18n:tech — 运维日志
             err_msg = init_resp.get('sub_msg', init_resp.get('msg', _('Unknown error')))
             raise RuntimeError(_('Alipay certification initialization failed: {msg}', msg=err_msg))
 
@@ -247,7 +247,7 @@ class AlipayVerificationProvider(BaseVerificationProvider):
         conn.close()
 
         if location:
-            logger.info(f"[支付宝Certify] 认证URL: {location[:200]}")
+            logger.info(f"[支付宝Certify] 认证URL: {location[:200]}")  # i18n:tech — 运维日志
             self._last_gateway = self.GATEWAY
             self._last_params = dict(certify_params)
             self._last_certify_url = location
@@ -258,7 +258,7 @@ class AlipayVerificationProvider(BaseVerificationProvider):
             html_text = raw.decode('utf-8')
         except UnicodeDecodeError:
             html_text = raw.decode('gbk')
-        logger.warning(f"[支付宝Certify] 无302跳转，body前300字符: {html_text[:300]}")
+        logger.warning(f"[支付宝Certify] 无302跳转，body前300字符: {html_text[:300]}")  # i18n:tech — 运维日志
         raise RuntimeError(_('Alipay certification API did not return a valid redirect URL'))
 
     def verify_signature(self, params: Dict[str, Any]) -> bool:
@@ -268,12 +268,12 @@ class AlipayVerificationProvider(BaseVerificationProvider):
             sign_type = params.pop('sign_type', 'RSA2')
 
             if not sign:
-                logger.warning("支付宝验签失败: 签名为空")
+                logger.warning("支付宝验签失败: 签名为空")  # i18n:tech — 运维日志
                 return False
 
             alipay_public_key = self._get_config('verification.alipay.alipay_public_key')
             if not alipay_public_key:
-                logger.warning("支付宝验签失败: 未配置支付宝公钥")
+                logger.warning("支付宝验签失败: 未配置支付宝公钥")  # i18n:tech — 运维日志
                 return False
 
             alipay_public_key = self._ensure_pem_format(alipay_public_key, 'PUBLIC KEY')
@@ -295,7 +295,7 @@ class AlipayVerificationProvider(BaseVerificationProvider):
             )
             return True
         except Exception as e:
-            logger.error(f"支付宝验签失败: {e}")
+            logger.error(f"支付宝验签失败: {e}")  # i18n:tech — 运维日志
             return False
 
     def extract_real_name(self, params: Dict[str, Any]) -> str:
@@ -314,7 +314,7 @@ class AlipayVerificationProvider(BaseVerificationProvider):
         # 从回调参数提取 certify_id，调用查询 API
         certify_id = (params.get('certify_id') or '').strip()
         if not certify_id:
-            logger.warning("支付宝认证回调缺少 certify_id，无法查询认证结果")
+            logger.warning("支付宝认证回调缺少 certify_id，无法查询认证结果")  # i18n:tech — 运维日志
             return ''
 
         try:
@@ -334,13 +334,13 @@ class AlipayVerificationProvider(BaseVerificationProvider):
             cert_no = query_resp.get('cert_no', '')
             if cert_no and len(cert_no) > 4:
                 masked = cert_no[0] + '***' + cert_no[-1]
-                logger.info(f"支付宝实名认证成功: name={cert_name}, cert_no(masked)={masked}")
+                logger.info(f"支付宝实名认证成功: name={cert_name}, cert_no(masked)={masked}")  # i18n:tech — 运维日志
             elif cert_no:
-                logger.info(f"支付宝实名认证成功: name={cert_name}")
+                logger.info(f"支付宝实名认证成功: name={cert_name}")  # i18n:tech — 运维日志
 
             return cert_name
         except Exception as e:
-            logger.error(f"查询支付宝认证结果异常: {e}")
+            logger.error(f"查询支付宝认证结果异常: {e}")  # i18n:tech — 运维日志
             return ''
 
 
@@ -366,7 +366,7 @@ class StubVerificationProvider(BaseVerificationProvider):
             f"{return_url}{separator}"
             f"request_id={request_id}&"
             f"stub=true&"
-            f"real_name=测试用户"
+            f"real_name=测试用户"  # i18n:tech — stub 模式模拟数据
         )
 
     def verify_signature(self, params: Dict[str, Any]) -> bool:
@@ -374,7 +374,7 @@ class StubVerificationProvider(BaseVerificationProvider):
         return bool(params.get('request_id'))
 
     def extract_real_name(self, params: Dict[str, Any]) -> str:
-        return (params.get('real_name') or '测试用户').strip()
+        return (params.get('real_name') or '测试用户').strip()  # i18n:tech — stub 模式模拟数据
 
 
 # ═══════════════════════════════════════════════════════════════════

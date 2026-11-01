@@ -39,7 +39,7 @@ from plugins.im_gateway.secure_config import (  # noqa: E402
 
 def _print_table(rows) -> None:
     width = max((len(r[0]) for r in rows), default=20)
-    print(f"  {'key'.ljust(width)} | 已加密 | 结果")
+    print(f"  {'key'.ljust(width)} | 已加密 | 结果")  # i18n:tech — CLI 输出
     print(f"  {'-' * width}-+--------+------------------")
     for key, encrypted, result in rows:
         print(f"  {key.ljust(width)} | {encrypted.center(6)} | {result}")
@@ -61,7 +61,7 @@ def _scan_channels(conn):
         if not isinstance(cfg, dict):
             cfg = {}
         if not fields:
-            rows_out.append((channel, '-', 'skipped: 无敏感字段'))
+            rows_out.append((channel, '-', 'skipped: 无敏感字段'))  # i18n:tech — CLI 输出
             continue
         need = False
         for key in fields:
@@ -69,9 +69,9 @@ def _scan_channels(conn):
             if not isinstance(val, str) or not val.strip():
                 continue
             if is_encrypted(val):
-                rows_out.append((f'{channel}.{key}', 'yes', 'skipped: 已是密文'))
+                rows_out.append((f'{channel}.{key}', 'yes', 'skipped: 已是密文'))  # i18n:tech — CLI 输出
             else:
-                rows_out.append((f'{channel}.{key}', 'no', 'pending: 待加密'))
+                rows_out.append((f'{channel}.{key}', 'no', 'pending: 待加密'))  # i18n:tech — CLI 输出
                 need = True
         if need:
             pending[channel] = cfg
@@ -92,39 +92,40 @@ def _scan_login_providers(conn):
         provider = r['provider']
         secret = r['client_secret'] or ''
         if not secret:
-            rows_out.append((f'login.{provider}', '-', 'skipped: 未配置'))
+            rows_out.append((f'login.{provider}', '-', 'skipped: 未配置'))  # i18n:tech — CLI 输出
         elif is_encrypted(secret):
-            rows_out.append((f'login.{provider}', 'yes', 'skipped: 已是密文'))
+            rows_out.append((f'login.{provider}', 'yes', 'skipped: 已是密文'))  # i18n:tech — CLI 输出
         else:
-            rows_out.append((f'login.{provider}', 'no', 'pending: 待加密'))
+            rows_out.append((f'login.{provider}', 'no', 'pending: 待加密'))  # i18n:tech — CLI 输出
             pending[provider] = secret
     return rows_out, pending
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description='将 IM Gateway 历史明文凭据收敛为密文（P0-03）')
-    ap.add_argument('--apply', action='store_true', help='真正写库（默认 dry-run 只报告）')
+    ap = argparse.ArgumentParser(description='将 IM Gateway 历史明文凭据收敛为密文（P0-03）')  # i18n:tech — CLI 输出
+    ap.add_argument('--apply', action='store_true', help='真正写库（默认 dry-run 只报告）')  # i18n:tech — CLI 输出
     args = ap.parse_args()
 
     if args.apply and not _crypto_available():
-        print('[migrate] 拒绝写库：未配置 ENCRYPTION_KEY。请配置后重试。')
+        print('[migrate] 拒绝写库：未配置 ENCRYPTION_KEY。请配置后重试。')  # i18n:tech — CLI 输出
         return 2
 
     with get_im_db() as conn:
         ch_rows, ch_pending = _scan_channels(conn)
         lg_rows, lg_pending = _scan_login_providers(conn)
 
-        print('[migrate] channel_configs.config_json 凭据状态：')
+        print('[migrate] channel_configs.config_json 凭据状态：')  # i18n:tech — CLI 输出
         _print_table(ch_rows)
-        print('[migrate] login_providers.client_secret 状态：')
+        print('[migrate] login_providers.client_secret 状态：')  # i18n:tech — CLI 输出
         _print_table(lg_rows)
 
         if not ch_pending and not lg_pending:
-            print('[migrate] 无明文凭据，无需迁移。')
+            print('[migrate] 无明文凭据，无需迁移。')  # i18n:tech — CLI 输出
             return 0
         if not args.apply:
+            # i18n:tech:begin — CLI 输出
             print('[migrate] dry-run：未写库。确认无误后加 --apply；'
-                  '写库前请先备份 channel_configs / login_providers 两表。')
+                  '写库前请先备份 channel_configs / login_providers 两表。')  # i18n:tech:end
             return 0
 
         count = 0
@@ -132,7 +133,7 @@ def main() -> int:
             try:
                 stored = encrypt_fields(channel, cfg)
             except SecureConfigUnavailable as exc:
-                print(f'[migrate] 失败 {channel}: {exc} —— 未写库；请配置 ENCRYPTION_KEY 后重试。')
+                print(f'[migrate] 失败 {channel}: {exc} —— 未写库；请配置 ENCRYPTION_KEY 后重试。')  # i18n:tech — CLI 输出
                 return 2
             conn.execute(
                 'UPDATE channel_configs SET config_json=%s, updated_at=NOW() WHERE channel=%s',
@@ -142,7 +143,7 @@ def main() -> int:
             try:
                 enc = encrypt_secret(secret)
             except SecureConfigUnavailable as exc:
-                print(f'[migrate] 失败 login.{provider}: {exc} —— 未写库。')
+                print(f'[migrate] 失败 login.{provider}: {exc} —— 未写库。')  # i18n:tech — CLI 输出
                 return 2
             conn.execute(
                 'UPDATE login_providers SET client_secret=%s, updated_at=NOW() WHERE provider=%s',
@@ -150,7 +151,7 @@ def main() -> int:
             count += 1
         conn.commit()
 
-    print(f'[migrate] 已加密并写回 {count} 项。建议重启相关服务使进程内缓存失效。')
+    print(f'[migrate] 已加密并写回 {count} 项。建议重启相关服务使进程内缓存失效。')  # i18n:tech — CLI 输出
     return 0
 
 

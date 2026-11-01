@@ -31,7 +31,7 @@ try:
 except ImportError:  # pragma: no cover - urllib3 随 requests 必装，仅防御
     _HAS_RETRY = False
 
-from .constants import DEFAULT_TIMEOUT, USER_AGENT
+from .constants import DEFAULT_TIMEOUT, USER_AGENT, _
 from .exceptions import APIError, AuthError, VeroRunError
 
 _DEFAULT_BASE_URL = "http://localhost:8084"
@@ -47,22 +47,25 @@ def quote_segment(value: Any) -> str:
     """
     raw = "" if value is None else str(value)
     if not raw:
-        raise VeroRunError("路径参数不能为空")
+        raise VeroRunError(_("Path parameter must not be empty"))
     if raw.strip(".") == "":
-        raise VeroRunError(f"非法路径参数（纯点号段）：{raw!r}")
+        raise VeroRunError(_("Invalid path parameter (dot-only segment): {raw!r}", raw=raw))
     if "/" in raw or "\\" in raw or ".." in raw:
-        raise VeroRunError(f"路径参数含非法字符（/、\\ 或 ..）：{raw!r}")
+        raise VeroRunError(_(
+            "Path parameter contains illegal characters (slash, backslash or ..): {raw!r}",
+            raw=raw,
+        ))
     return quote(raw, safe="")
 
 
 def _validate_path(path: str) -> None:
     if not path.startswith("/"):
-        raise VeroRunError(f"请求路径必须以 / 开头：{path!r}")
+        raise VeroRunError(_("Request path must start with /: {path!r}", path=path))
     if any(ord(ch) < 0x20 for ch in path):
-        raise VeroRunError("请求路径包含控制字符，已拒绝（防止请求头注入）")
+        raise VeroRunError(_("Request path contains control characters; rejected to prevent header injection"))
     for segment in path.split("/"):
         if segment in (".", ".."):
-            raise VeroRunError(f"请求路径包含目录穿越段：{path!r}")
+            raise VeroRunError(_("Request path contains a directory traversal segment: {path!r}", path=path))
 
 
 class VeroRunClient:
@@ -145,7 +148,7 @@ class VeroRunClient:
             headers["Authorization"] = f"Bearer {self._token}"
             return headers
         raise AuthError(
-            "未登录：请先执行 `verorun login`（或用 `verorun login --api-key ek-...`）"
+            _("Not logged in: run `verorun login` first (or `verorun login --api-key ek-...`)")
         )
 
     # ---- 底层请求 ----
@@ -181,11 +184,12 @@ class VeroRunClient:
                 allow_redirects=follow_redirects,
             )
         except requests.exceptions.SSLError as exc:
-            raise APIError(495, f"SSL 校验失败（开发自签证书可加 --insecure）：{exc}")
+            raise APIError(495, _("SSL verification failed (use --insecure for self-signed dev certificates): {exc}", exc=exc))
         except requests.exceptions.ConnectionError as exc:
-            raise APIError(0, f"无法连接服务器 {self.base_url}：{exc}")
+            raise APIError(0, _("Cannot connect to server {base_url}: {exc}", base_url=self.base_url, exc=exc))
         except requests.exceptions.Timeout:
-            raise APIError(408, f"请求超时（>{timeout or self.timeout}s）：{path}")
+            raise APIError(408, _("Request timed out (>{timeout}s): {path}",
+                                  timeout=timeout or self.timeout, path=path))
 
         if allow_non_ok:
             return resp
@@ -200,9 +204,10 @@ class VeroRunClient:
                 location = ""
             raise APIError(
                 status,
-                "服务端返回重定向，已按 fail-closed 拒绝跟随"
-                f"（Location={location or '未提供'}）。"
-                "常见原因：未登录、会话失效，或实例订阅/许可门禁要求续费。",
+                _("Server returned a redirect; refusing to follow it (fail-closed) "
+                  "(Location={location}). Common causes: not logged in, session expired, "
+                  "or the instance subscription/license gate requires renewal.",
+                  location=location or _("not provided")),
             )
         # 4xx/5xx：流式与非流式一视同仁（修复原先流式 4xx 无法自动捕获的问题）
         if status >= 400:
@@ -237,7 +242,7 @@ class VeroRunClient:
                 or (data_field if isinstance(data_field, str) else None)
             )
             if not msg and body.get("success") is False:
-                msg = "请求失败"
+                msg = _("Request failed")
             if not msg:
                 msg = resp.text
         else:

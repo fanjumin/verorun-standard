@@ -33,6 +33,8 @@ import hashlib
 import hmac
 from typing import Any, Dict
 
+from i18n import _
+
 # ── 官方插件白名单（50 个已上线官方插件 identifier）────────────────
 # 单一事实源：必须与 plugins/ 下全部 plugin.json 的 identifier 一致，
 # 由 plugin_manager/tests/test_upload_reserved_identifier.py 逐项锁定。
@@ -238,7 +240,7 @@ def detect_official_watermark(plugin_dir: str, secret: str = None) -> Dict[str, 
                     result.update({'official': True, 'identifier': identifier,
                                    'version': version, 'build_id': build_id,
                                    'method': 'signature',
-                                   'reason': '官方签名验签通过（verorun.signature）'})
+                                   'reason': _('Official signature verified (verorun.signature)')})
                     return result
             # VR-SEC (V7): 清单存在但签名缺失/无效时，校验清单哈希 vs 实际文件。
             # 不匹配 → 确凿篡改（tampered，硬拒）；匹配 → 官方无签名构建（manifest，复核队列）。
@@ -247,13 +249,14 @@ def detect_official_watermark(plugin_dir: str, secret: str = None) -> Dict[str, 
                 result.update({'official': True, 'identifier': identifier,
                                'version': version, 'build_id': build_id,
                                'method': 'tampered',
-                               'reason': '官方清单哈希校验失败，文件已被篡改'
-                                         f'（{", ".join(integrity.get("mismatched", [])[:5])}）'})
+                               'reason': _('Official manifest hash verification failed, '
+                                           'files have been tampered with ({files})',
+                                           files=', '.join(integrity.get("mismatched", [])[:5]))})
                 return result
             result.update({'official': True, 'identifier': identifier,
                            'version': version, 'build_id': build_id,
                            'method': 'manifest',
-                           'reason': '存在官方打包清单 verorun.manifest（哈希一致）'})
+                           'reason': _('Official packaging manifest verorun.manifest found (hashes match)')})
             return result
         except (json.JSONDecodeError, OSError):
             pass
@@ -275,8 +278,8 @@ def detect_official_watermark(plugin_dir: str, secret: str = None) -> Dict[str, 
                         _bid = _bm.group(1)
                     result.update({'official': True, 'build_id': _bid,
                                    'method': 'wm_comment',
-                                   'reason': '命中隐藏注释水印 vr-wm:'
-                                             f'（{os.path.relpath(path, plugin_dir)}）'})
+                                   'reason': _('Hidden comment watermark vr-wm: matched ({path})',
+                                               path=os.path.relpath(path, plugin_dir))})
                     return result
             except OSError:
                 continue
@@ -295,7 +298,7 @@ def detect_official_watermark(plugin_dir: str, secret: str = None) -> Dict[str, 
                                'version': str(meta.get('version') or ''),
                                'build_id': str(_build) if isinstance(_build, str) else '',
                                'method': 'wm_meta',
-                               'reason': 'plugin.json 含官方水印字段 _wm'})
+                               'reason': _('plugin.json contains the official watermark field _wm')})
                 return result
         except (json.JSONDecodeError, OSError):
             pass
@@ -311,12 +314,13 @@ def detect_official_watermark(plugin_dir: str, secret: str = None) -> Dict[str, 
                 result.update({'official': True, 'identifier': identifier,
                                'version': str(meta.get('version') or ''),
                                'method': 'whitelist',
-                               'reason': f'identifier {identifier} 命中官方插件白名单'})
+                               'reason': _('identifier {identifier} matches the official plugin whitelist',
+                                           identifier=identifier)})
             elif author in OFFICIAL_AUTHORS and identifier:
                 result.update({'official': True, 'identifier': identifier,
                                'version': str(meta.get('version') or ''),
                                'method': 'whitelist',
-                               'reason': f'author={author} 为官方作者'})
+                               'reason': _('author={author} is an official author', author=author)})
         except (json.JSONDecodeError, OSError):
             pass
 

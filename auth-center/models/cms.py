@@ -2,6 +2,7 @@
 """CMS Models — cms_blocks, cms_posts, cms_settings, cms_categories tables for the database"""
 import json
 from models import get_db
+from i18n import _
 
 
 def init_cms_tables():
@@ -120,6 +121,7 @@ def init_cms_tables():
         cur.execute("SELECT COUNT(*) FROM cms_categories")
         existing = cur.fetchone()[0]
         if existing == 0:
+            # i18n:tech:begin — CMS 默认分类种子数据（入库后由后台维护），翻译即失效
             cats = [
                 # ── 公开分类 ──
                 ('快速入门', '🔰', 'getting-started', 'public', 1),
@@ -130,6 +132,7 @@ def init_cms_tables():
                 ('帮助中心', '❓', 'help', 'public', 6),
                 ('法律合规', '⚖️', 'legal', 'public', 90),
             ]
+            # i18n:tech:end
             for name, icon, slug, audience, sort in cats:
                 conn.execute(
                     "INSERT INTO cms_categories (name, icon, slug, audience, sort_order) VALUES (%s,%s,%s,%s,%s)",
@@ -518,7 +521,7 @@ def delete_category(cat_id: int):
             (cat_id,)
         ).fetchone()['count']
         if ref_count > 0:
-            raise ValueError(f'该分类下有 {ref_count} 篇文章，请先移除或更改文章分类后再删除')
+            raise ValueError(_('This category has {count} post(s); remove or reassign them before deleting the category', count=ref_count))
         conn.execute("DELETE FROM cms_categories WHERE id=%s", (cat_id,))
         conn.commit()
 

@@ -1,0 +1,27 @@
+{#
+  Cookie 同意横幅（/static/js/cookie-consent.js）的 JS 词典 — source-string-as-key。
+  仅注入 window.__I18N__，不产生可见输出；需在 cookie-consent.js 之前引入。
+  全文案由本 partial 从 i18n/en.yml + zh-CN.yml 取，JS 内不再硬编码中文。
+  注：文件名不带下划线前缀 —— .gitignore 的 `_*.html` 规则会忽略核心目录下的此类文件。
+#}
+<script>
+window.__I18N__ = Object.assign(window.__I18N__ || {}, {
+  {{ 'Necessary cookies' | tojson }}: {{ _('Necessary cookies') | tojson }},
+  {{ 'Login state, security checks and session management. Core site features depend on these cookies and cannot be disabled.' | tojson }}: {{ _('Login state, security checks and session management. Core site features depend on these cookies and cannot be disabled.') | tojson }},
+  {{ 'Analytics and performance cookies' | tojson }}: {{ _('Analytics and performance cookies') | tojson }},
+  {{ 'Help us understand how visitors use the site so we can improve the experience. Data is anonymized.' | tojson }}: {{ _('Help us understand how visitors use the site so we can improve the experience. Data is anonymized.') | tojson }},
+  {{ 'Marketing cookies' | tojson }}: {{ _('Marketing cookies') | tojson }},
+  {{ 'Used to deliver relevant ads and measure their performance. May be shared with third-party advertisers.' | tojson }}: {{ _('Used to deliver relevant ads and measure their performance. May be shared with third-party advertisers.') | tojson }},
+  {{ 'Cookie notice' | tojson }}: {{ _('Cookie notice') | tojson }},
+  {{ 'This site uses cookies to keep essential features working, analyze traffic and improve your experience. For details, please read our' | tojson }}: {{ _('This site uses cookies to keep essential features working, analyze traffic and improve your experience. For details, please read our') | tojson }},
+  {{ 'Privacy Policy' | tojson }}: {{ _('Privacy Policy') | tojson }},
+  {{ 'Always enabled' | tojson }}: {{ _('Always enabled') | tojson }},
+  {{ 'Cookie consent notice' | tojson }}: {{ _('Cookie consent notice') | tojson }},
+  {{ 'Customize settings' | tojson }}: {{ _('Customize settings') | tojson }},
+  {{ 'Decline all' | tojson }}: {{ _('Decline all') | tojson }},
+  {{ 'Accept all' | tojson }}: {{ _('Accept all') | tojson }},
+  {{ 'Save settings' | tojson }}: {{ _('Save settings') | tojson }},
+  {{ 'Cookie settings' | tojson }}: {{ _('Cookie settings') | tojson }},
+  {{ '.' | tojson }}: {{ _('.') | tojson }}
+});
+</script>

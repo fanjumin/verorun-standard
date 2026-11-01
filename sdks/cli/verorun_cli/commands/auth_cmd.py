@@ -11,22 +11,23 @@ from typing import Any
 
 import click
 
+from ..constants import _
 from ..output import warn
 from ._base import wants_json, show
 
 
 def register(group: Any) -> None:
     @group.command("login")
-    @click.option("--username", "-u", help="管理员账号")
+    @click.option("--username", "-u", help=_("Admin username"))
     @click.option("--password", "-p",
-                  help="密码（不安全：会暴露在进程列表与 shell 历史中，建议用 --password-stdin）")
+                  help=_("Password (insecure: it is exposed in the process list and shell history; prefer --password-stdin)"))
     @click.option("--password-stdin", is_flag=True,
-                  help="从标准输入读取密码（推荐用于 CI / 脚本）")
-    @click.option("--phone", help="手机号（短信登录）")
-    @click.option("--code", help="短信验证码")
-    @click.option("--api-key", help="agent API Key（ek-...）")
+                  help=_("Read the password from stdin (recommended for CI / scripts)"))
+    @click.option("--phone", help=_("Phone number (SMS login)"))
+    @click.option("--code", help=_("SMS verification code"))
+    @click.option("--api-key", help=_("agent API Key (ek-...)"))
     @click.option("--captcha", "captcha_id",
-                  help="图形验证码 token（连续登录失败被服务端频控拦截时使用）")
+                  help=_("CAPTCHA token (used when repeated login failures are rate-limited by the server)"))
     @click.pass_context
     def login(ctx, username, password, password_stdin, phone, code, api_key,
               captcha_id):
@@ -38,48 +39,50 @@ def register(group: Any) -> None:
 
         if api_key:
             auth.login_apikey(api_key)
-            click.echo("已保存 API Key。")
+            click.echo(_("API Key saved."))
             return
 
         if phone or code:
             if not (phone and code):
-                raise click.UsageError("短信登录需同时提供 --phone 与 --code")
+                raise click.UsageError(_("SMS login requires both --phone and --code"))
             auth.login_sms(phone, code)
-            click.echo("短信登录成功。")
+            click.echo(_("SMS login succeeded."))
             return
 
         if password and password_stdin:
-            raise click.UsageError("--password 与 --password-stdin 互斥，请只用其中一个")
+            raise click.UsageError(_("--password and --password-stdin are mutually exclusive; use only one"))
 
         if not username:
-            username = click.prompt("用户名")
+            username = click.prompt(_("Username"))
 
         if password_stdin:
             password = sys.stdin.readline().rstrip("\r\n")
             if not password:
-                raise click.UsageError("--password-stdin 未能从标准输入读到密码")
+                raise click.UsageError(_("--password-stdin could not read a password from stdin"))
         elif password:
-            warn(
-                "--password 会把明文密码暴露在进程列表与 shell 历史中，"
-                "建议改用 `--password-stdin`（例如 `echo $PWD_VAR | verorun login -u admin --password-stdin`）"
-                "或省略该参数以交互方式输入。"
-            )
+            warn(_(
+                "--password exposes the plaintext password in the process list and shell "
+                "history. Prefer `--password-stdin` (for example `echo $PWD_VAR | verorun "
+                "login -u admin --password-stdin`), or omit the option to enter the "
+                "password interactively."
+            ))
         else:
-            password = click.prompt("密码", hide_input=True)
+            password = click.prompt(_("Password"), hide_input=True)
 
         auth.login_password(username, password, captcha_id=captcha_id)
         state = auth.token_state()
         if state.get("expires_at_text"):
-            click.echo(f"登录成功，token 有效期至 {state['expires_at_text']}。")
+            click.echo(_("Login succeeded; the token is valid until {expires_at}.",
+                         expires_at=state["expires_at_text"]))
         else:
-            click.echo("登录成功。")
+            click.echo(_("Login succeeded."))
 
     @group.command("logout")
     @click.pass_context
     def logout(ctx):
         """登出并清除本地凭证"""
         ctx.obj["auth"].logout()
-        click.echo("已登出。")
+        click.echo(_("Logged out."))
 
     @group.command("whoami")
     @click.pass_context
@@ -91,11 +94,12 @@ def register(group: Any) -> None:
         if wants_json(ctx):
             show(ctx, {"profile": data, "token": auth.token_state()})
             return
-        click.echo(f"已登录：{_extract_user(data)}")
+        click.echo(_("Logged in as: {user}", user=_extract_user(data)))
         state = auth.token_state()
         if state.get("expires_at_text"):
-            suffix = "（已过期）" if state.get("expired") else ""
-            click.echo(f"token 有效期至：{state['expires_at_text']}{suffix}")
+            suffix = _("(expired)") if state.get("expired") else ""
+            click.echo(_("Token valid until: {expires_at}{suffix}",
+                         expires_at=state["expires_at_text"], suffix=suffix))
 
 
 def _extract_user(payload: Any) -> Any:

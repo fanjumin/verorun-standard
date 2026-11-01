@@ -54,6 +54,39 @@ def _load_yaml(locale: str = None) -> dict:
         return {}
 
 
+def _kernel_sources() -> set:
+    """内核词典的源串集合（判断词条归属的依据）。
+
+    键集跨语言一致（en 为 identity 映射），故用 en 判定即可。
+    """
+    return set(_load_yaml('en').keys())
+
+
+# ─── 词条命名空间（插件隔离） ───
+# 由 PluginManager 在启动与启停时注入「当前已启用插件」集合。
+# None 表示未注册（命令行 / 单测 / 迁移脚本等无插件上下文），保持旧行为：
+# 不按插件过滤，只依赖 plugin_id 归属表本身。
+_enabled_plugins = None
+
+KERNEL_SCOPE = '__kernel__'
+
+
+def set_enabled_plugins(plugin_ids) -> None:
+    """注册当前已启用的插件集合。
+
+    解析时只合并「内核 + 已启用插件」的词条；被禁用/卸载的插件即使
+    词条还留在库里，也不参与合并（不占用内存、不参与翻译解析）。
+    """
+    global _enabled_plugins
+    _enabled_plugins = frozenset(plugin_ids or ())
+    get_all_translations.cache_clear()
+
+
+def get_enabled_plugins():
+    """返回当前已注册的启用插件列表；未注册时返回 None。"""
+    return None if _enabled_plugins is None else sorted(_enabled_plugins)
+
+
 # ─── DB 连接 ───
 def _get_db_path() -> str:
     """获取数据库路径，与环境变量和项目结构一致"""
@@ -247,7 +280,7 @@ def format_date(value, locale: str = None, fmt: str = '%Y-%m-%d') -> str:
             return value
     if isinstance(value, (_date_cls, datetime)):
         if locale == 'zh-CN':
-            return value.strftime('%Y年%m月%d日')
+            return value.strftime('%Y年%m月%d日')  # i18n:tech — zh-CN 本地化日期格式，翻译即失效
         return value.strftime(fmt)
     return str(value)
 
@@ -319,27 +352,50 @@ def delete_translation(translation_id: int) -> bool:
 @functools.lru_cache(maxsize=4)
 def get_all_translations(locale: str = None) -> dict:
     """
-    返回完整翻译字典（用于前端注入）。
-    优先从 DB 读，缺失的从 YAML 补。
+    返回完整翻译字典（用于前端注入 / `_()` 解析）。
+
+    合并顺序（后者覆盖前者，结果完全确定）：
+      1. 根 YAML：内核与 shared 词条，常驻；
+      2. 已启用插件的 DB 词条：按 plugin_id 升序合并；
+      3. 内核 DB 词条（plugin_id='__kernel__'，含管理后台人工编辑）。
+
+    命名空间隔离：未启用的插件（`_enabled_plugins` 之外）的词条不参与合并。
+    `_enabled_plugins is None` 表示无插件上下文（CLI / 单测），退化为不按插件过滤。
     """
     locale = locale or DEPLOY_LANG
     result = {}
-
-    # YAML 基础
     result.update(_load_yaml(locale))
 
-    # DB 覆盖
+    rows = []
     try:
         conn = _get_db()
-        rows = conn.execute(
-            'SELECT source, translation FROM i18n_strings WHERE locale=%s',
-            (locale,)
-        ).fetchall()
+        if _enabled_plugins is None:
+            rows = conn.execute(
+                'SELECT plugin_id, source, translation FROM i18n_strings '
+                'WHERE locale=%s ORDER BY plugin_id',
+                (locale,)
+            ).fetchall()
+        else:
+            scopes = sorted(_enabled_plugins)
+            placeholders = ','.join(['%s'] * (len(scopes) + 1))
+            rows = conn.execute(
+                'SELECT plugin_id, source, translation FROM i18n_strings '
+                f"WHERE locale=%s AND plugin_id IN ({placeholders}) "
+                'ORDER BY plugin_id',
+                (locale, KERNEL_SCOPE, *scopes)
+            ).fetchall()
         conn.close()
-        for row in rows:
-            result[row['source']] = row['translation']
     except Exception:
         pass
+
+    # 先应用插件词条，最后应用内核词条 —— 同一源串以内核措辞为准，
+    # 插件若需不同措辞必须使用不同源串，避免跨命名空间相互覆盖。
+    for row in rows:
+        if row['plugin_id'] != KERNEL_SCOPE:
+            result[row['source']] = row['translation']
+    for row in rows:
+        if row['plugin_id'] == KERNEL_SCOPE:
+            result[row['source']] = row['translation']
 
     return result
 
@@ -441,13 +497,23 @@ def get_lang() -> str:
 
 # ─── 插件翻译支持 ──────────────────────────────────────────
 
-def seed_plugin_translations(plugin_id: str, locale_dir: str) -> int:
+def seed_plugin_translations(plugin_id: str, locale_dir: str,
+                             claim_legacy: bool = True) -> int:
     """
-    将插件 locale 目录下的 YAML 翻译文件写入 i18n DB。
-    每次调用都会 UPSERT（根据 locale+source_hash 去重），幂等安全。
-    返回本次写入的条目数。
+    将插件 locale 目录下的 YAML 翻译文件写入 i18n DB（按 plugin_id 归属）。
+
+    归属规则：
+      - 新词条 → 写入 plugin_id = 本插件；
+      - 已属于本插件 → 更新译文；
+      - 已属于内核且源串在根词典中 → 不覆盖（内核措辞为准）；
+      - 已属于内核但源串不在根词典中，且是历史自动播种行 → 判定为插件词条，
+        回收归属（claim_legacy）。历史版本把所有词条都写成内核行，无法区分来源，
+        这条规则让归属自愈，且不会抢走根词典已有键。
+
+    幂等安全；返回本次写入的条目数。
     """
     count = 0
+    kernel_sources = _kernel_sources() if claim_legacy else set()
     for locale in ('zh-CN', 'en'):
         yml_path = os.path.join(locale_dir, f'{locale}.yml')
         if not os.path.isfile(yml_path):
@@ -473,16 +539,39 @@ def seed_plugin_translations(plugin_id: str, locale_dir: str) -> int:
                 if not source or not translation:
                     continue
                 s_hash = _source_hash(source)
-                conn.execute(
-                    '''INSERT INTO i18n_strings
-                       (locale, source_hash, source, translation, is_auto)
-                       VALUES (%s,%s,%s,%s,%s)
-                       ON CONFLICT(locale, source_hash) DO UPDATE SET
-                           translation=EXCLUDED.translation,
-                           is_auto=EXCLUDED.is_auto''',
-                    (locale, s_hash, source, translation, 1)
-                )
-                count += 1
+                exist = conn.execute(
+                    'SELECT id, plugin_id, is_auto FROM i18n_strings '
+                    'WHERE locale=%s AND source_hash=%s',
+                    (locale, s_hash)
+                ).fetchone()
+                if exist is None:
+                    conn.execute(
+                        'INSERT INTO i18n_strings '
+                        '(locale, source_hash, source, translation, is_auto, plugin_id) '
+                        'VALUES (%s,%s,%s,%s,%s,%s)',
+                        (locale, s_hash, source, translation, 1, plugin_id)
+                    )
+                    count += 1
+                    continue
+                exist_scope = exist['plugin_id']
+                if exist_scope == plugin_id:
+                    conn.execute(
+                        'UPDATE i18n_strings SET translation=%s, is_auto=1, '
+                        'updated_at=NOW() WHERE id=%s',
+                        (translation, exist['id'])
+                    )
+                    count += 1
+                elif (claim_legacy and exist_scope == KERNEL_SCOPE
+                      and int(exist['is_auto'] or 0) == 1
+                      and source not in kernel_sources):
+                    # 历史遗留：插件词条曾被写成内核行 → 回收归属
+                    conn.execute(
+                        'UPDATE i18n_strings SET plugin_id=%s, translation=%s, '
+                        'is_auto=1, updated_at=NOW() WHERE id=%s',
+                        (plugin_id, translation, exist['id'])
+                    )
+                    count += 1
+                # 其余情况：内核已拥有该源串（或已被其他插件占用）→ 不覆盖
             conn.commit()
         except Exception as e:
             print(f'[i18n] plugin {plugin_id} {locale} db error: {e}')
@@ -500,3 +589,31 @@ def seed_plugin_translations(plugin_id: str, locale_dir: str) -> int:
         print(f'[i18n] plugin {plugin_id}: seeded {count} translations')
     get_all_translations.cache_clear()  # 无论播种/跳过都清缓存，防多 worker 竞态缓存空字典
     return count
+
+
+def delete_plugin_translations(plugin_id: str) -> int:
+    """删除某个插件的全部词条（卸载时调用），返回删除行数。
+
+    禁用不调用本函数：禁用只是把它移出 `_enabled_plugins`，
+    词条留在库里以便秒级再启用；卸载才是真正移除。
+    """
+    conn = None
+    try:
+        conn = _get_db()
+        rows = conn.execute(
+            'SELECT id FROM i18n_strings WHERE plugin_id=%s', (plugin_id,)
+        ).fetchall()
+        n = len(rows)
+        conn.execute('DELETE FROM i18n_strings WHERE plugin_id=%s', (plugin_id,))
+        conn.commit()
+        return n
+    except Exception as e:
+        print(f'[i18n] delete_plugin_translations error: {e}')
+        return 0
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        get_all_translations.cache_clear()

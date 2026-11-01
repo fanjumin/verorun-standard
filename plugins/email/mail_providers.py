@@ -11,7 +11,11 @@ Mail Provider Registry — 邮件服务商预置清单（单一数据源）
 - 域名推导只填充「空配置字段」，绝不覆盖用户在设置页显式填写的值。
 - Proton Mail 无公网 SMTP/IMAP 服务，必须通过官方 Proton Bridge 提供
   的本机端口收发邮件，故其服务器地址指向 127.0.0.1 并附说明。
+- name / note 为展示文案，以英文源串存放；模块级常量不可求值翻译，
+  由 localized_providers() 在使用处按当前语言翻译。
 """
+
+from i18n import _
 
 # each item: id, name, domains, smtp_host, smtp_port, smtp_ssl,
 #            imap_host, imap_port, imap_ssl, note (optional)
@@ -19,97 +23,97 @@ MAIL_PROVIDERS = [
     # ── 国内邮箱 ──────────────────────────────────────────────
     {
         "id": "aliyun",
-        "name": "阿里邮箱",
+        "name": "Alibaba Mail",
         "domains": ["aliyun.com", "aliyunmail.com"],
         "smtp_host": "smtp.aliyun.com", "smtp_port": 465, "smtp_ssl": True,
         "imap_host": "imap.aliyun.com", "imap_port": 993, "imap_ssl": True,
     },
     {
         "id": "aliyun-qiye",
-        "name": "阿里云企业邮箱",
+        "name": "Alibaba Cloud Enterprise Mail",
         "domains": ["qiye.aliyun.com"],
         "smtp_host": "smtp.qiye.aliyun.com", "smtp_port": 465, "smtp_ssl": True,
         "imap_host": "imap.qiye.aliyun.com", "imap_port": 993, "imap_ssl": True,
     },
     {
         "id": "tencent-ex",
-        "name": "腾讯企业邮箱",
+        "name": "Tencent Exmail",
         "domains": ["exmail.qq.com"],
         "smtp_host": "smtp.exmail.qq.com", "smtp_port": 465, "smtp_ssl": True,
         "imap_host": "imap.exmail.qq.com", "imap_port": 993, "imap_ssl": True,
     },
     {
         "id": "qq",
-        "name": "QQ邮箱",
+        "name": "QQ Mail",
         "domains": ["qq.com"],
         "smtp_host": "smtp.qq.com", "smtp_port": 465, "smtp_ssl": True,
         "imap_host": "imap.qq.com", "imap_port": 993, "imap_ssl": True,
-        "note": "需在 QQ 邮箱网页端开启 SMTP/IMAP 服务并获取授权码",
+        "note": "Enable SMTP/IMAP in QQ Mail web settings and use the authorization code",
     },
     {
         "id": "foxmail",
-        "name": "Foxmail 邮箱",
+        "name": "Foxmail",
         "domains": ["foxmail.com"],
         "smtp_host": "smtp.foxmail.com", "smtp_port": 465, "smtp_ssl": True,
         "imap_host": "imap.foxmail.com", "imap_port": 993, "imap_ssl": True,
-        "note": "密码处填 Foxmail 授权码而非登录密码",
+        "note": "Use the Foxmail authorization code instead of your login password",
     },
     {
         "id": "netease-163",
-        "name": "网易 163 邮箱",
+        "name": "NetEase 163 Mail",
         "domains": ["163.com"],
         "smtp_host": "smtp.163.com", "smtp_port": 465, "smtp_ssl": True,
         "imap_host": "imap.163.com", "imap_port": 993, "imap_ssl": True,
-        "note": "需开启 SMTP/IMAP 服务并获取授权码",
+        "note": "Enable SMTP/IMAP and use the authorization code",
     },
     {
         "id": "netease-126",
-        "name": "网易 126 邮箱",
+        "name": "NetEase 126 Mail",
         "domains": ["126.com"],
         "smtp_host": "smtp.126.com", "smtp_port": 465, "smtp_ssl": True,
         "imap_host": "imap.126.com", "imap_port": 993, "imap_ssl": True,
-        "note": "需开启 SMTP/IMAP 服务并获取授权码",
+        "note": "Enable SMTP/IMAP and use the authorization code",
     },
     {
         "id": "netease-188",
-        "name": "网易 188 邮箱",
+        "name": "NetEase 188 Mail",
         "domains": ["188.com"],
         "smtp_host": "smtp.188.com", "smtp_port": 465, "smtp_ssl": True,
         "imap_host": "imap.188.com", "imap_port": 993, "imap_ssl": True,
-        "note": "需开启 SMTP/IMAP 服务并获取授权码",
+        "note": "Enable SMTP/IMAP and use the authorization code",
     },
     {
         "id": "sina",
-        "name": "新浪邮箱",
+        "name": "Sina Mail",
         "domains": ["sina.com", "sina.cn"],
         "smtp_host": "smtp.sina.com", "smtp_port": 465, "smtp_ssl": True,
         "imap_host": "imap.sina.com", "imap_port": 993, "imap_ssl": True,
-        "note": "需开启 SMTP/IMAP 服务，独立密码用于客户端登录",
+        "note": "Enable SMTP/IMAP; a separate password is required for client login",
     },
     {
         "id": "sohu",
-        "name": "搜狐邮箱",
+        "name": "Sohu Mail",
         "domains": ["sohu.com"],
         "smtp_host": "smtp.sohu.com", "smtp_port": 465, "smtp_ssl": True,
         "imap_host": "imap.sohu.com", "imap_port": 993, "imap_ssl": True,
     },
     {
         "id": "cmcc-139",
-        "name": "中国移动 139 邮箱",
+        "name": "China Mobile 139 Mail",
         "domains": ["139.com"],
         "smtp_host": "smtp.139.com", "smtp_port": 465, "smtp_ssl": True,
         "imap_host": "imap.139.com", "imap_port": 993, "imap_ssl": True,
     },
     {
         "id": "net263",
-        "name": "263 企业邮箱",
+        "name": "263 Enterprise Mail",
         "domains": ["263.net", "263xmail.com"],
         "smtp_host": "smtp.263.net", "smtp_port": 465, "smtp_ssl": True,
         "imap_host": "imap.263.net", "imap_port": 993, "imap_ssl": True,
     },
     {
         "id": "cn-21cn",
-        "name": "21CN 邮箱",
+        "name": "21CN Mail",
         "domains": ["21cn.com"],
         "smtp_host": "smtp.21cn.com", "smtp_port": 465, "smtp_ssl": True,
         "imap_host": "imap.21cn.com", "imap_port": 993, "imap_ssl": True,
@@ -121,7 +125,7 @@ MAIL_PROVIDERS = [
         "domains": ["gmail.com", "googlemail.com"],
         "smtp_host": "smtp.gmail.com", "smtp_port": 587, "smtp_ssl": False,
         "imap_host": "imap.gmail.com", "imap_port": 993, "imap_ssl": True,
-        "note": "2025-05 起关闭密码直连，需 OAuth 或 Google 应用专用密码",
+        "note": "Password sign-in was disabled in May 2025; use OAuth or a Google app password",
     },
     {
         "id": "outlook",
@@ -129,7 +133,7 @@ MAIL_PROVIDERS = [
         "domains": ["outlook.com", "hotmail.com", "live.com", "msn.com"],
         "smtp_host": "smtp-mail.outlook.com", "smtp_port": 587, "smtp_ssl": False,
         "imap_host": "outlook.office365.com", "imap_port": 993, "imap_ssl": True,
-        "note": "开启两步验证后需应用专用密码；2022-10 起弃用 IMAP 基本认证",
+        "note": "Requires an app password after enabling two-step verification; IMAP basic auth is deprecated since October 2022",
     },
     {
         "id": "yahoo",
@@ -137,7 +141,7 @@ MAIL_PROVIDERS = [
         "domains": ["yahoo.com"],
         "smtp_host": "smtp.mail.yahoo.com", "smtp_port": 465, "smtp_ssl": True,
         "imap_host": "imap.mail.yahoo.com", "imap_port": 993, "imap_ssl": True,
-        "note": "需开启两步验证并使用应用专用密码",
+        "note": "Requires two-step verification and an app password",
     },
     {
         "id": "icloud",
@@ -145,7 +149,7 @@ MAIL_PROVIDERS = [
         "domains": ["icloud.com", "me.com", "mac.com"],
         "smtp_host": "smtp.mail.me.com", "smtp_port": 587, "smtp_ssl": False,
         "imap_host": "imap.mail.me.com", "imap_port": 993, "imap_ssl": True,
-        "note": "需使用 Apple ID 专用密码",
+        "note": "Requires an Apple ID app-specific password",
     },
     {
         "id": "aol",
@@ -167,7 +171,7 @@ MAIL_PROVIDERS = [
         "domains": ["yandex.com", "yandex.ru"],
         "smtp_host": "smtp.yandex.com", "smtp_port": 465, "smtp_ssl": True,
         "imap_host": "imap.yandex.com", "imap_port": 993, "imap_ssl": True,
-        "note": "需生成应用专用密码",
+        "note": "Requires generating an app password",
     },
     {
         "id": "fastmail",
@@ -175,17 +179,29 @@ MAIL_PROVIDERS = [
         "domains": ["fastmail.com", "fastmail.fm"],
         "smtp_host": "smtp.fastmail.com", "smtp_port": 465, "smtp_ssl": True,
         "imap_host": "imap.fastmail.com", "imap_port": 993, "imap_ssl": True,
-        "note": "需使用应用专用密码",
+        "note": "Requires an app password",
     },
     {
         "id": "proton",
-        "name": "Proton Mail（需 Bridge）",
+        "name": "Proton Mail (Bridge Required)",
         "domains": ["proton.me", "protonmail.com", "protonmail.ch"],
         "smtp_host": "127.0.0.1", "smtp_port": 1025, "smtp_ssl": False,
         "imap_host": "127.0.0.1", "imap_port": 1143, "imap_ssl": False,
-        "note": "Proton 无公网 SMTP/IMAP，须运行官方 Proton Bridge 后经本机 1025/1143 端口收发",
+        "note": "Proton has no public SMTP/IMAP; run the official Proton Bridge and connect through local ports 1025/1143",
     },
 ]
+
+
+def localized_providers(locale=None):
+    """返回展示用服务商清单：name / note 按当前语言翻译，其余字段原样。"""
+    out = []
+    for p in MAIL_PROVIDERS:
+        item = dict(p)
+        item['name'] = _(p['name'], locale=locale)
+        if p.get('note'):
+            item['note'] = _(p['note'], locale=locale)
+        out.append(item)
+    return out
 
 
 def get_provider_by_domain(email_or_domain):

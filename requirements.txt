@@ -38,6 +38,10 @@ bcrypt>=4.0
 pdfplumber>=0.11.0
 python-docx>=1.1.0
 python-pptx>=0.6.23
+# deck 导出（T1）：agent_matrix/export/xlsx.py 把 ResearchDeck 渲染成工作簿。
+# 纯 Python，无二进制依赖（老 CPU 上不会 SIGILL）；此前环境已装但未声明，
+# 私有化部署会漏装，故在此补登记。
+openpyxl>=3.1
 
 # ── assessment 插件 PDF 报告导出（PLAN-04 B2）──
 # 纯 Python 主体 + 可选 C accel，在无 SSE4.2/AVX 的老 CPU 上实测可用

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VeroRun 桌面客户端</title>
+<title>{{ _('VeroRun Desktop Client') }}</title>
 <style>
   html,body{margin:0;padding:0;height:100%;background:#0b1420;color:#dfe8f2;
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
@@ -20,13 +20,14 @@
 <body>
   <div class="box">
     <div class="logo">VeroRun</div>
-    <div class="title">请使用 VeroRun 桌面客户端</div>
+    <div class="title">{{ _('Please use the VeroRun desktop client') }}</div>
     <p class="desc">
-      此页面为 {{ edition_label }} 的本地核心服务。管理功能集成在专属的
-      <b>VeroRun 桌面客户端</b> 中，请勿通过浏览器直接访问。
-      <br>请关闭本页面，打开 VeroRun 桌面客户端使用。
+      {{ _('This page serves only the local core. Edition:') }} {{ edition_label }}
+      {{ _('Management features are integrated in the dedicated') }}
+      <b>{{ _('VeroRun Desktop Client') }}</b>{{ _('. Do not access it through a browser directly.') }}
+      <br>{{ _('Close this page and open the VeroRun desktop client.') }}
     </p>
-    <p class="hint">本提示由本地核心自动生成 · {{ edition }}</p>
+    <p class="hint">{{ _('Generated automatically by the local core') }} · {{ edition }}</p>
   </div>
 </body>
 </html>

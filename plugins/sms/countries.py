@@ -9,6 +9,7 @@ SMS Countries — 国际手机号国家数据
   - phone_prefix：号码首数字要求（如 CN 必须 1 开头）
   - 当 phone_min == phone_max 时使用固定长度校验
 """
+# i18n:tech:begin — name_zh 是国家/地区名称数据字段，由前端按 locale 使用，非 UI 文案
 # 国家数据：按使用频率排序
 COUNTRIES = [
     # ── 大中华区 ──
@@ -122,6 +123,7 @@ COUNTRIES = [
      "name_en": "Brazil", "name_zh": "巴西",
      "phone_min": 10, "phone_max": 11},
 ]
+# i18n:tech:end
 
 
 def find_country(dial='', code=''):

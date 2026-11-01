@@ -84,7 +84,7 @@ def build_map():
         if k in en and en[k]:
             zh_to_en[k] = en[k]
 
-    print(f'映射表: {len(zh_to_en)} 条')
+    print(f'映射表: {len(zh_to_en)} 条')  # i18n:tech — 运维/构建 CLI 输出
 
     # 验证多行翻译完整性
     test_keys = [
@@ -93,7 +93,7 @@ def build_map():
         'Too many requests, please retry in one hour',
         'Too many attempts, please request a new code',
     ]
-    print('\n多行翻译验证:')
+    print('\n多行翻译验证:')  # i18n:tech — 运维/构建 CLI 输出
     all_ok = True
     for k in test_keys:
         if k in zh_to_en:
@@ -110,13 +110,13 @@ def build_map():
             all_ok = False
 
     if not all_ok:
-        print('\nWARNING: 部分多行翻译不完整！')
+        print('\nWARNING: 部分多行翻译不完整！')  # i18n:tech — 运维/构建 CLI 输出
 
     # 保存映射表
     map_path = I18N_DIR / '_zh_to_en_map.json'
     with open(map_path, 'w', encoding='utf-8') as f:
         json.dump(zh_to_en, f, ensure_ascii=False)
-    print(f'\n映射表: {map_path} ({len(zh_to_en)} 条)')
+    print(f'\n映射表: {map_path} ({len(zh_to_en)} 条)')  # i18n:tech — 运维/构建 CLI 输出
 
     return zh_to_en
 

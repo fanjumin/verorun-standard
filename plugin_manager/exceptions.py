@@ -4,6 +4,8 @@ Plugin Manager — 自定义异常
 =============================
 """
 
+from i18n import _
+
 
 class PluginError(Exception):
     """插件系统基础异常"""
@@ -13,28 +15,29 @@ class PluginError(Exception):
 class PluginNotFoundError(PluginError):
     """插件未找到"""
     def __init__(self, identifier: str):
-        super().__init__(f'插件 "{identifier}" 未找到')
+        super().__init__(_('Plugin "{identifier}" not found', identifier=identifier))
         self.identifier = identifier
 
 
 class PluginNotInstalledError(PluginError):
     """插件未安装"""
     def __init__(self, identifier: str):
-        super().__init__(f'插件 "{identifier}" 未安装')
+        super().__init__(_('Plugin "{identifier}" not installed', identifier=identifier))
         self.identifier = identifier
 
 
 class PluginNotEnabledError(PluginError):
     """插件未启用"""
     def __init__(self, identifier: str):
-        super().__init__(f'插件 "{identifier}" 未启用')
+        super().__init__(_('Plugin "{identifier}" not enabled', identifier=identifier))
         self.identifier = identifier
 
 
 class PluginDependencyError(PluginError):
     """插件依赖错误"""
     def __init__(self, identifier: str, missing_deps: list):
-        super().__init__(f'插件 "{identifier}" 依赖缺失: {", ".join(missing_deps)}')
+        super().__init__(_('Plugin "{identifier}" missing dependencies: {deps}',
+                           identifier=identifier, deps=', '.join(missing_deps)))
         self.identifier = identifier
         self.missing_deps = missing_deps
 
@@ -42,14 +45,15 @@ class PluginDependencyError(PluginError):
 class PluginCircularDependencyError(PluginError):
     """循环依赖错误"""
     def __init__(self, cycle: list):
-        super().__init__(f'检测到循环依赖: {" → ".join(cycle)}')
+        super().__init__(_('Circular dependency detected: {cycle}', cycle=' → '.join(cycle)))
         self.cycle = cycle
 
 
 class PluginStateError(PluginError):
     """状态转换非法"""
     def __init__(self, identifier: str, current: str, target: str):
-        super().__init__(f'插件 "{identifier}" 状态 {current} 不能转换到 {target}')
+        super().__init__(_('Plugin "{identifier}" cannot transition from {current} to {target}',
+                           identifier=identifier, current=current, target=target))
         self.identifier = identifier
         self.current = current
         self.target = target
@@ -58,21 +62,23 @@ class PluginStateError(PluginError):
 class PluginVersionError(PluginError):
     """版本不兼容"""
     def __init__(self, identifier: str, required: str, installed: str):
-        super().__init__(f'插件 "{identifier}" 需要版本 {required}，当前 {installed}')
+        super().__init__(_('Plugin "{identifier}" requires version {required}, current {installed}',
+                           identifier=identifier, required=required, installed=installed))
         self.required = required
         self.installed = installed
 
 
 class PluginBusyError(PluginError):
     """插件系统繁忙（锁获取超时）"""
-    def __init__(self, message: str = '插件系统正忙，请稍后重试'):
-        super().__init__(message)
+    def __init__(self, message: str = ''):
+        super().__init__(message or _('Plugin system is busy, please try again later'))
 
 
 class PluginUninstallError(PluginError):
     """卸载失败"""
     def __init__(self, identifier: str, detail: str = ''):
-        super().__init__(f'插件 "{identifier}" 卸载失败: {detail}')
+        super().__init__(_('Plugin "{identifier}" uninstall failed: {detail}',
+                           identifier=identifier, detail=detail))
         self.identifier = identifier
 
 
@@ -83,6 +89,7 @@ class PluginInstallError(PluginError):
     避免出现"状态 ACTIVE 但所有触库端点 500"的半成品。
     """
     def __init__(self, identifier: str, detail: str = ''):
-        super().__init__(f'插件 "{identifier}" 安装初始化失败: {detail}')
+        super().__init__(_('Plugin "{identifier}" install initialization failed: {detail}',
+                           identifier=identifier, detail=detail))
         self.identifier = identifier
         self.detail = detail

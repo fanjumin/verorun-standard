@@ -394,7 +394,8 @@ def check_ai_budget(scene: str = '') -> tuple:
                 logger.warning("[AIBudget] rate limit hit (scene=%s): %d/%ds "
                                "(per-worker share of %d over %d worker(s))",
                                scene, per_worker, window, max_calls, workers)
-                return False, f'AI 调用速率超限（{max_calls} 次/{window} 秒），请稍后再试'
+                return False, _('AI call rate limit exceeded ({calls} calls / {window}s), please try again later',
+                                calls=max_calls, window=window)
             _AI_CALL_TIMES.append(now)
 
     # 2) 日预算熔断
@@ -495,7 +496,7 @@ def aggregate_stream_message(chunk_iter):
             except (ValueError, TypeError):
                 logger.warning(
                     '[aggregate_stream_message] tool_call #%s arguments '
-                    '非完整 JSON，跳过该工具批（name=%s）',
+                    '非完整 JSON，跳过该工具批（name=%s）',  # i18n:tech — 运维日志
                     idx, slot['function']['name'])
                 continue
         tool_calls.append({

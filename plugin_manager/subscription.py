@@ -71,6 +71,7 @@ CREATE INDEX IF NOT EXISTS idx_plugin_subs_status
 """
 
 # 订阅事件审计表：生命周期变更落库（幂等键 sub_id+event_type+order_no）
+# i18n:tech:begin — SQL DDL 语句及内联中文注释，非用户可见文案
 SUBSCRIPTION_EVENTS_DDL = """
 CREATE TABLE IF NOT EXISTS subscription_events (
     id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -86,6 +87,7 @@ CREATE INDEX IF NOT EXISTS idx_sub_events_sub ON subscription_events(sub_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_sub_events_idem
     ON subscription_events(sub_id, event_type, order_no);
 """
+# i18n:tech:end
 
 # 存量库幂等迁移（启动自动执行，重复执行无副作用）
 PLUGIN_SUB_MIGRATIONS = [

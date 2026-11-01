@@ -28,11 +28,11 @@ def require_auth():
     """认证装饰器辅助函数 — 返回完整 JWT payload（含 role）"""
     auth = request.headers.get('Authorization', '')
     if not auth.startswith('Bearer '):
-        return None, api_err('未提供有效的Token', 401)
+        return None, api_err(_('Valid authorization token is required'), 401)
     token = auth.replace('Bearer ', '')
     payload = validate_token(token)
     if not payload:
-        return None, api_err('无效或过期的Token', 401)
+        return None, api_err(_('Invalid or expired token'), 401)
     return payload, None
 
 # =============================================
@@ -57,10 +57,10 @@ def _build_rag_context(knowledge: list) -> str:
     """将检索到的知识片段格式化为系统提示上下文"""
     if not knowledge:
         return ''
-    ctx = '\n\n以下是与用户问题相关的内部知识库内容，请优先参考这些信息回答：\n'
+    ctx = '\n\n以下是与用户问题相关的内部知识库内容，请优先参考这些信息回答：\n'  # i18n:tech — 注入 LLM 的提示词
     for i, k in enumerate(knowledge, 1):
         ctx += f'\n[{i}] {k["title"]}\n{k["content"]}\n'
-    ctx += '\n请基于以上知识回答用户问题。如果知识库中没有相关信息，请如实告知用户。'
+    ctx += '\n请基于以上知识回答用户问题。如果知识库中没有相关信息，请如实告知用户。'  # i18n:tech — 提示词
     return ctx
 
 # ── 简易IP限流 ──
@@ -101,12 +101,12 @@ def save_messages():
     messages = data.get('messages', [])
 
     if not openid:
-        return api_err('openid是必需的', 400)
+        return api_err(_('openid is required'), 400)
 
     # IP限流
     _ensure_rate_limit()
     if not _check_rate_limit(request.remote_addr or 'unknown'):
-        return api_err('请求太频繁', 429)
+        return api_err(_('Too many requests'), 429)
 
     from models import get_db
     import json
@@ -134,7 +134,7 @@ def get_chat_history():
     openid = data.get('openid')
     
     if not openid:
-        return api_err('openid是必需的', 400)
+        return api_err(_('openid is required'), 400)
     
     from models import get_db
     import json
@@ -159,7 +159,7 @@ def chat_request():
     skip_rag = data.get('skip_rag', False)  # 可选跳过RAG
 
     if not messages:
-        return api_err('messages是必需的', 400)
+        return api_err(_('messages is required'), 400)
 
     # ── RAG 知识增强 ──
     knowledge_injected = False
@@ -182,7 +182,7 @@ def chat_request():
                         has_system = True
                         break
                 if not has_system:
-                    messages.insert(0, {'role': 'system', 'content': '你是一个智能客服助手。' + ctx})
+                    messages.insert(0, {'role': 'system', 'content': '你是一个智能客服助手。' + ctx})  # i18n:tech — LLM 提示词
                 knowledge_injected = True
 
     try:
@@ -217,7 +217,7 @@ def chat_request():
                 api_key = os.environ.get(f'{provider.upper()}_API_KEY', '')
 
         if not api_key:
-            return api_err(f'AI API Key 未配置，请在系统设置「小程序 AI 配置」中设置', 500)
+            return api_err(_('AI API Key is not configured. Set it in System Settings > Mini Program AI Config'), 500)
 
         # 调用 AI API
         from openai import OpenAI
@@ -236,7 +236,7 @@ def chat_request():
             try:
                 from agent_matrix.engine import _log_token_usage
                 threading.Thread(target=_log_token_usage, args=(
-                    0, 'AI客服', model, provider,
+                    0, 'AI客服', model, provider,  # i18n:tech — token 日志的 module 标签
                     resp.usage.prompt_tokens or 0,
                     resp.usage.completion_tokens or 0,
                     resp.usage.total_tokens or 0,
@@ -251,7 +251,7 @@ def chat_request():
         })
 
     except Exception as e:
-        return api_err(f'AI对话请求失败: {str(e)}', 500)
+        return api_err(_('AI chat request failed: {error}', error=str(e)), 500)
 
 
 @api_v1_bp.route('/chat/public', methods=['POST'])
@@ -264,13 +264,13 @@ def chat_public():
     source = data.get('source', 'website')  # website / douyin / tiktok
 
     if not messages:
-        return api_err('messages是必需的', 400)
+        return api_err(_('messages is required'), 400)
 
     # 简易IP限流（每IP每分钟10次）
     ip = request.remote_addr or 'unknown'
     _ensure_rate_limit()
     if not _check_rate_limit(ip):
-        return api_err('请求太频繁，请稍后再试', 429)
+        return api_err(_('Too many requests, please try again later'), 429)
 
     # ── RAG 知识增强 ──
     last_user_msg = ''
@@ -289,9 +289,9 @@ def chat_public():
                     has_system = True
                     break
             if not has_system:
-                messages.insert(0, {'role': 'system',
+                messages.insert(0, {'role': 'system',  # i18n:tech:begin — 商务助手 LLM 提示词
                     'content': f'你是VeroRun 维洛智能的商务助手。用户来自: {source}。'
-                               f'请用中文友好地回答关于产品、价格、功能的问题。' + ctx})
+                               f'请用中文友好地回答关于产品、价格、功能的问题。' + ctx})  # i18n:tech:end
 
     try:
         from models import get_db
@@ -318,7 +318,7 @@ def chat_public():
                 api_key = os.environ.get('DEEPSEEK_API_KEY', '')
 
         if not api_key:
-            return api_err('AI 服务暂未配置', 500)
+            return api_err(_('AI service is not configured'), 500)
 
         from openai import OpenAI
         client = OpenAI(api_key=api_key, base_url=base_url)
@@ -332,7 +332,7 @@ def chat_public():
         return api_ok({'content': resp.choices[0].message.content})
 
     except Exception as e:
-        return api_err(f'请求失败: {str(e)}', 500)
+        return api_err(_('Request failed: {error}', error=str(e)), 500)
 
 def _get_chatbot_config():
     """从独立库 chatbot.db 读取 AI Advisor 配置。"""
@@ -359,7 +359,7 @@ def _get_chatbot_config():
         return merged
     except Exception as e:
         import logging
-        logging.warning(f"[chatbot] 读取配置失败，使用默认值: {e}")
+        logging.warning(f"[chatbot] 读取配置失败，使用默认值: {e}")  # i18n:tech — 内部日志
         return defaults
 
 
@@ -373,7 +373,7 @@ def _get_chatbot_agent(agent_id):
         return get_agent(agent_id)
     except Exception as e:
         import logging
-        logging.warning(f"[chatbot] 读取 Agent 失败: {e}")
+        logging.warning(f"[chatbot] 读取 Agent 失败: {e}")  # i18n:tech — 内部日志
         return None
 
 
@@ -402,7 +402,7 @@ def _route_agent_by_intent(intent):
         return dict(row) if row else None
     except Exception as e:
         import logging
-        logging.warning(f"[chatbot] 意图路由失败: {e}")
+        logging.warning(f"[chatbot] 意图路由失败: {e}")  # i18n:tech — 内部日志
         return None
 
 
@@ -572,7 +572,7 @@ def chat_stream():
                 messages.append({'role': h[0], 'content': h[1]})
 
     if not messages:
-        return api_err('messages是必需的', 400)
+        return api_err(_('messages is required'), 400)
 
     # 提取用户首条消息作为 user_query（供意图分类/会话落库/会话ID使用）
     user_query = next(
@@ -588,6 +588,7 @@ def chat_stream():
             sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
             # 读取转人工规则配置
+            # i18n:tech — 转人工关键词需与用户消息原文匹配
             handoff_keywords = "人工, 客服, 转人工, 联系真人, 联系工作人员, 商务, 合作, 投诉, 定制, 开发"
             handoff_max_fails = "3"
             try:
@@ -607,12 +608,14 @@ def chat_stream():
             except Exception as e:
                 logging.warning(f"[Chatbot] Failed to load handoff rules: {e}")
 
+            # i18n:tech:begin — 注入 LLM 的转人工规则提示词
             handoff_rules_text = f"""
 转人工触发规则（当消息包含以下关键词时，必须输出转人工提示）：
 {handoff_keywords}
 
 如果连续 {handoff_max_fails} 次无法回答用户问题，也必须转人工。
 """
+            # i18n:tech:end
 
             # ── 意图分类 + 多 Agent 路由 ──
             route_intent = 'other'
@@ -634,6 +637,7 @@ def chat_stream():
                 provider = agent.get('provider') or cfg.get('provider', 'dashscope')
                 model_name = agent.get('model_name') or cfg.get('model_name', 'qwen-turbo')
             else:
+                # i18n:tech:begin — 默认 AI Advisor 系统提示词
                 system_prompt = f"""
 你是 AI Advisor。请根据用户的问题进行回答。
 
@@ -646,6 +650,7 @@ def chat_stream():
 
 如果连续 {handoff_max_fails} 次无法回答用户问题，也必须转人工。
 """
+                # i18n:tech:end
                 provider = cfg.get('provider', 'dashscope')
                 model_name = cfg.get('model_name', 'qwen-turbo')
 
@@ -715,7 +720,7 @@ def chat_stream():
                     if result['success']:
                         yield _sse_event('escalated',
                                          ticket_id=result['ticket_id'],
-                                         message='已为您创建工单，客服将尽快联系您')
+                                         message=_('A support ticket has been created; our team will contact you shortly'))
                         logging.info(f'[Chatbot] Escalation auto-ticket #{result["ticket_id"]} created')
                     else:
                         logging.warning(f'[Chatbot] Escalation auto-ticket failed: {result.get("error")}')
@@ -746,8 +751,8 @@ def chat_stream():
 
         except Exception as e:
             import logging
-            logging.error(f"[API] 流式对话失败: {e}")
-            yield _sse_event('error', content=f'对话失败: {str(e)}')
+            logging.error(f"[API] 流式对话失败: {e}")  # i18n:tech — 内部日志
+            yield _sse_event('error', content=_('Chat failed: {error}', error=str(e)))
 
     return Response(stream_with_context(generate()),
                    mimetype='text/event-stream',
@@ -765,7 +770,7 @@ def save_profile():
     profile = data.get('profile', {})
     
     if not openid:
-        return api_err('openid是必需的', 400)
+        return api_err(_('openid is required'), 400)
     
     from models import get_db
     import json
@@ -793,7 +798,7 @@ def get_profile():
     openid = data.get('openid')
     
     if not openid:
-        return api_err('openid是必需的', 400)
+        return api_err(_('openid is required'), 400)
     
     from models import get_db
     import json
@@ -811,7 +816,7 @@ def save_summary():
     summary = data.get('summary', '')
     
     if not openid:
-        return api_err('openid是必需的', 400)
+        return api_err(_('openid is required'), 400)
     
     from models import get_db
     with get_db() as conn:
@@ -964,8 +969,8 @@ def list_knowledge():
             })
     except Exception as e:
         import logging
-        logging.error(f"[API] 获取知识库列表失败: {e}")
-        return api_err(f'获取知识库失败: {str(e)}', 500)
+        logging.error(f"[API] 获取知识库列表失败: {e}")  # i18n:tech — 内部日志
+        return api_err(_('Failed to retrieve knowledge base: {error}', error=str(e)), 500)
 
 @api_v1_bp.route('/knowledge/save', methods=['POST'])
 def save_knowledge():
@@ -993,7 +998,7 @@ def save_knowledge():
         confidentiality = 'internal'
     
     if not kb_id or not title or not content:
-        return api_err('id, title和content是必需的', 400)
+        return api_err(_('id, title and content are required'), 400)
     
     # 权限检查
     from services.kb_permission import check_kb_permission
@@ -1003,7 +1008,7 @@ def save_knowledge():
     
     # 科研版密级约束：secret 仅超级管理员可授予
     if confidentiality == 'secret' and payload.get('role') != 'super_admin':
-        return api_err('保密级(secret)知识仅超级管理员可设置', 403)
+        return api_err(_('Secret-level knowledge can only be set by super administrators'), 403)
     
     # 知识块保存逻辑
     try:
@@ -1039,7 +1044,7 @@ def save_knowledge():
                     store_embedding(kb_id, title, content)
                 except Exception:
                     pass
-                return api_ok({'id': kb_id, 'message': '知识块已更新'})
+                return api_ok({'id': kb_id, 'message': _('Knowledge block updated')})
             else:
                 # 新增
                 db.execute("""
@@ -1059,8 +1064,8 @@ def save_knowledge():
                 return api_ok({'id': kb_id, 'message': _('Knowledge block created')})
     except Exception as e:
         import logging
-        logging.error(f"[API] 保存知识块失败: {e}")
-        return api_err(f'保存知识块失败: {str(e)}', 500)
+        logging.error(f"[API] 保存知识块失败: {e}")  # i18n:tech — 运维日志
+        return api_err(_('Failed to save knowledge block: {error}', error=str(e)), 500)
 
 @api_v1_bp.route('/knowledge/delete', methods=['POST'])
 def delete_knowledge():
@@ -1132,7 +1137,7 @@ def system_kb_version():
             'system_blocks_count': block_count
         })
     except Exception as e:
-        return api_err(f'获取版本失败: {str(e)}', 500)
+        return api_err(_('Failed to retrieve version: {error}', error=str(e)), 500)
 
 
 @api_v1_bp.route('/kb/system-update', methods=['POST'])
@@ -1160,7 +1165,7 @@ def system_kb_update():
     update_url = data.get('update_url', '')
 
     if not version or not blocks:
-        return api_err('version和blocks是必需的', 400)
+        return api_err(_('version and blocks are required'), 400)
 
     # 校验 checksum
     import json, hashlib
@@ -1285,7 +1290,7 @@ def rag_search():
         
     except Exception as e:
         logger = __import__('logging').getLogger(__name__)
-        logger.error(f'[api_v1] RAG检索失败: {e}')
+        logger.error(f'[api_v1] RAG检索失败: {e}')  # i18n:tech — 内部日志
         return api_ok([])
 
 # =============================================
@@ -1311,15 +1316,16 @@ def send_feishu_notify():
             headers = {'Content-Type': 'application/json'}
             response = requests.post(webhook_url, headers=headers, json=card_data, timeout=10)
             if response.status_code == 200:
-                return api_ok({'result': 'success', 'message': '飞书通知已发送'})
+                return api_ok({'result': 'success', 'message': _('Feishu notification sent')})
             else:
-                return api_ok({'result': 'failed', 'message': f'飞书返回错误: {response.status_code}'})
+                return api_ok({'result': 'failed',
+                               'message': _('Feishu returned error: {status}', status=response.status_code)})
         except Exception as e:
             import logging
-            logging.warning(f"[API] 飞书通知发送失败: {e}")
+            logging.warning(f"[API] 飞书通知发送失败: {e}")  # i18n:tech — 内部日志
             return api_ok({'result': 'error', 'message': str(e)})
     
-    return api_ok({'result': 'skipped', 'message': '未提供webhookUrl'})
+    return api_ok({'result': 'skipped', 'message': _('webhookUrl is not provided')})
 
 @api_v1_bp.route('/feedback/save', methods=['POST'])
 def save_feedback():
@@ -1337,17 +1343,17 @@ def save_feedback():
 
     # 验证必填字段
     if not openid:
-        return api_err('openid是必需的', 400)
+        return api_err(_('openid is required'), 400)
     if not message_id:
-        return api_err('messageId是必需的', 400)
+        return api_err(_('messageId is required'), 400)
     if not feedback:
-        return api_err('feedback是必需的', 400)
+        return api_err(_('feedback is required'), 400)
     if not content:
-        return api_err('content是必需的', 400)
+        return api_err(_('content is required'), 400)
     if not query:
         return api_err(_('query is required'), 400)
     if not ai_reply:
-        return api_err('aiReply是必需的', 400)
+        return api_err(_('aiReply is required'), 400)
     
     # 用户反馈保存逻辑
     try:
@@ -1362,19 +1368,19 @@ def save_feedback():
                 None,  # user_id (抖音用户无 user_id)
                 'rating',  # type
                 'chat',  # category
-                f'来自抖音小程序的聊天反馈',  # title
-                f'问题: {query}\nAI回复: {ai_reply}\n用户反馈: {feedback or ""}\n评价: {content or ""}',  # content
+                f'来自抖音小程序的聊天反馈',  # title  # i18n:tech — 落库记录内容（数据存档，非界面固定文案）
+                f'问题: {query}\nAI回复: {ai_reply}\n用户反馈: {feedback or ""}\n评价: {content or ""}',  # content  # i18n:tech — 落库记录内容（数据存档，非界面固定文案）
                 openid or '',  # contact (使用 openid)
                 'pending'
             ))
             row = db.fetchone()
             db.commit()
             feedback_id = row['id'] if row else None
-            return api_ok({'feedbackId': feedback_id, 'message': '反馈已保存'})
+            return api_ok({'feedbackId': feedback_id, 'message': _('Feedback saved')})
     except Exception as e:
         import logging
-        logging.error(f"[API] 保存用户反馈失败: {e}")
-        return api_ok({'feedbackId': None, 'message': f'保存失败: {str(e)}'})
+        logging.error(f"[API] 保存用户反馈失败: {e}")  # i18n:tech — 运维日志
+        return api_ok({'feedbackId': None, 'message': _('Save failed: {error}', error=str(e))})
 
 @api_v1_bp.route('/visit/increment', methods=['POST'])
 def increment_visit():
@@ -1383,7 +1389,7 @@ def increment_visit():
     openid = data.get('openid')
     
     if not openid:
-        return api_err('openid是必需的', 400)
+        return api_err(_('openid is required'), 400)
     
     # 访问计数递增逻辑
     try:
@@ -1415,7 +1421,7 @@ def increment_visit():
             return api_ok({'visitCount': visit_count, 'openid': openid})
     except Exception as e:
         import logging
-        logging.error(f"[API] 访问计数更新失败: {e}")
+        logging.error(f"[API] 访问计数更新失败: {e}")  # i18n:tech — 运维日志
         return api_ok({'visitCount': 1, 'openid': openid, 'error': str(e)})
 
 

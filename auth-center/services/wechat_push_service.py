@@ -4,6 +4,7 @@
 
 import json, time, logging, requests
 from models import get_db
+from i18n import _
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ def _get_access_token():
     app_id = cfg.get('wechat_app_id', '')
     app_secret = cfg.get('wechat_app_secret', '')
     if not app_id or not app_secret:
-        raise ValueError('微信公众号配置不完整，请在系统设置中配置 AppID 和 AppSecret')
+        raise ValueError(_('WeChat Official Account configuration is incomplete; configure AppID and AppSecret in system settings'))
 
     # Check existing cached token
     with get_db() as conn:
@@ -51,13 +52,13 @@ def _get_access_token():
     )
     data = resp.json()
     if 'access_token' not in data:
-        raise ValueError(f'获取 access_token 失败: {data.get("errmsg", str(data))}')
+        raise ValueError(_('Failed to get access_token: {error}', error=data.get('errmsg', str(data))))
 
     token = data['access_token']
     with get_db() as conn:
         conn.execute(
             "INSERT INTO system_config (key, value, description) VALUES (%s, %s, %s) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, description=EXCLUDED.description",
-            ('wechat_access_token', token, '微信 AccessToken (自动缓存)')
+            ('wechat_access_token', token, '微信 AccessToken (自动缓存)')  # i18n:tech — 运行时缓存行描述，非文案
         )
         conn.commit()
     return token
@@ -240,7 +241,7 @@ def delete_published(article_id, index=0):
 def preview_draft(media_id, openid='', wxname=''):
     """Preview a draft to a specific user's phone."""
     if not openid and not wxname:
-        raise ValueError('需要提供 openid 或 wxname')
+        raise ValueError(_('Either openid or wxname is required'))
     body = {'touser': openid or wxname, 'msgtype': 'mpnews',
             'mpnews': {'media_id': media_id}}
     result = _call_api('POST', '/message/mass/preview', data=body)

@@ -12,6 +12,7 @@ from typing import Any
 
 import click
 
+from ..constants import _
 from ._base import exclusive, get, post, seg
 
 PREFIX = "/admin/agent-matrix/tasks"
@@ -19,9 +20,9 @@ PREFIX = "/admin/agent-matrix/tasks"
 
 def register(group: Any) -> None:
     @group.command("tasks")
-    @click.option("--recent", is_flag=True, help="仅查看最近任务（/tasks/recent）")
+    @click.option("--recent", is_flag=True, help=_("Only show recent tasks (/tasks/recent)"))
     @click.option("--limit", type=int, default=None,
-                  help="返回条数（服务端默认 50）")
+                  help=_("Number of results (server default 50)"))
     @click.pass_context
     def tasks(ctx, recent, limit):
         """列出任务（GET /admin/agent-matrix/tasks[/recent]）"""
@@ -30,18 +31,18 @@ def register(group: Any) -> None:
 
     @group.command("task")
     @click.argument("task_id")
-    @click.option("--cancel", is_flag=True, help="取消任务")
-    @click.option("--retry", is_flag=True, help="重试任务")
-    @click.option("--logs", "logs", is_flag=True, help="查看任务日志")
+    @click.option("--cancel", is_flag=True, help=_("Cancel the task"))
+    @click.option("--retry", is_flag=True, help=_("Retry the task"))
+    @click.option("--logs", "logs", is_flag=True, help=_("Show task logs"))
     @click.pass_context
     def task(ctx, task_id, cancel, retry, logs):
         """查看 / 取消 / 重试 / 日志 某个任务"""
         action = exclusive(cancel=cancel, retry=retry, logs=logs)
         tid = seg(task_id)
         if action == "cancel":
-            post(ctx, f"{PREFIX}/{tid}/cancel", "取消")
+            post(ctx, f"{PREFIX}/{tid}/cancel", _("Cancel"))
         elif action == "retry":
-            post(ctx, f"{PREFIX}/{tid}/retry", "重试")
+            post(ctx, f"{PREFIX}/{tid}/retry", _("Retry"))
         elif action == "logs":
             get(ctx, f"{PREFIX}/{tid}/logs")
         else:

@@ -141,6 +141,44 @@ def update_channel(channel):
     return jsonify({'success': True, 'message': f'{channel} configuration has been saved'})
 
 
+@im_bp.route('/<channel>/send', methods=['POST'])
+def send_channel_message(channel):
+    """向已启用的 IM 频道投递一条消息（文档管理「发送到」调用）。
+
+    只做单渠道投递，不做多渠道路由；接收方缺省时由适配器回落到配置的默认接收人。
+    """
+    admin, err = _require_admin()
+    if err:
+        return err
+    adapter = get_adapter(channel)
+    if adapter is None:
+        return jsonify({'success': False, 'error': _('Unsupported channel: {}').format(channel)}), 400
+    with get_im_db() as conn:
+        row = conn.execute(
+            'SELECT is_enabled FROM channel_configs WHERE channel=%s',
+            (channel,)
+        ).fetchone()
+    if not row or not row['is_enabled']:
+        return jsonify({
+            'success': False,
+            'error': _('Channel {channel} is not enabled').format(channel=channel),
+        }), 400
+    data = request.get_json(force=True) or {}
+    content = str(data.get('content') or '').strip()
+    if not content:
+        return jsonify({'success': False, 'error': _('Content required')}), 400
+    # IM 单条消息普遍有长度上限；超长截断并明确标注，不静默丢内容。
+    if len(content) > 20000:
+        content = content[:20000] + '\n…'
+    from .gateway import gateway
+    result = gateway.send_message(channel=channel, to=data.get('to') or '', content=content)
+    if not (isinstance(result, dict) and result.get('success')):
+        error = (result or {}).get('error') if isinstance(result, dict) else None
+        return jsonify({'success': False, 'error': error or _('Send failed')}), 400
+    _log(admin['user_id'], 'send', 'im_channel', channel, _('Document pushed to IM channel'))
+    return jsonify({'success': True, 'data': result})
+
+
 @im_bp.route('/<channel>/test', methods=['POST'])
 def test_channel(channel):
     """测试频道连接"""

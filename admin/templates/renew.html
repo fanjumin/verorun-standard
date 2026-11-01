@@ -346,7 +346,7 @@ body::after {
       </div>
       <div class="tm-status-label">{{ _('Expired') }}</div>
       <div class="tm-status-days">{{ _('Expired') }} {{ license.days_remaining|abs }} {{ _('days ago') }}</div>
-      <div class="tm-status-msg">{{ license.message or '请续费以恢复管理后台和AI功能' }}</div>
+      <div class="tm-status-msg">{{ license.message or _('Please renew to restore the admin console and AI features') }}</div>
     </div>
     {% endif %}
 

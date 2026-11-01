@@ -26,6 +26,8 @@ if AUTH_DIR not in sys.path:
 
 from flask import Flask
 
+from i18n import _
+
 # plugins/health_check 仅在 verorun-code（完整版）中存在；
 # verorun-pro 精简版无 plugins 目录，跳过 health check blueprint 注册。
 from shared.plugin_access import get_attr
@@ -78,7 +80,8 @@ def guardian_status():
             data = _json.load(f)
         return {'status': 'ok', 'data': data}
     except FileNotFoundError:
-        return {'status': 'not_running', 'error': 'guardian 未运行或状态文件不存在'}, 503
+        return {'status': 'not_running',
+                'error': _('Guardian is not running or the status file is missing')}, 503
 
 
 if __name__ == '__main__':

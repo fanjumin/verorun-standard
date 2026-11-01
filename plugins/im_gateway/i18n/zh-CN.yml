@@ -103,6 +103,11 @@ WeCom webhook_url is empty: 企业微信 webhook_url 为空
 'Telegram Connected! Bot: {}': 'Telegram 连接成功！机器人: {}'
 'WeCom returned: {} (errcode={})': '企业微信返回: {} (errcode={})'
 'Channel {channel} does not support media push': '渠道 {channel} 不支持媒体推送'
+# 文档管理「发送到」单渠道投递 (2026-11-01)
+'Channel {channel} is not enabled': '渠道 {channel} 未启用'
+'Content required': '内容不能为空'
+'Send failed': '发送失败'
+'Document pushed to IM channel': '文档已推送到通讯频道'
 # 卡片式多层级管理 UI (Phase 2)
 Instant Messaging: 通讯频道
 Third-party Login: 第三方登录
@@ -165,3 +170,9 @@ WeCom webhook_url or corp credentials are required: 企业微信需要 webhook_u
 'Discord returned HTTP {}': 'Discord 返回 HTTP {}'
 'Discord channel_id is not configured': 'Discord channel_id 未配置'
 'Discord send failed': 'Discord 消息发送失败'
+
+# ── 告警推送正文 ───────────────────────────────────────────
+'VeroRun Alert': '【VeroRun 告警】'
+'Current value: {observed} / threshold: {threshold}': '当前值: {observed} / 阈值: {threshold}'
+'Current value: {observed}': '当前值: {observed}'
+'Time: {time}': '时间: {time}'

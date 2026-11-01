@@ -191,7 +191,7 @@ def _save_brand_image(subdir, file_key):
     data = file.read()
     max_size = 500 * 1024  # 500KB
     if len(data) > max_size:
-        return None, f'文件过大 ({len(data)//1024}KB)，限制 {max_size//1024}KB'
+        return None, _('File is too large ({size}KB); limit is {max_size}KB', size=len(data) // 1024, max_size=max_size // 1024)
     # Safe filename
     ts = int(time.time() * 1000)
     fname = f'{subdir}_{ts}.{ext}'

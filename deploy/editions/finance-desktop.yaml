@@ -32,6 +32,10 @@ plugins:
   #      2026-10-26：hr_recruit、visitor_profile 移出（用户裁决「金融版不需要这两个
   #      插件，毫无关系」）→ 发包为 _base + 15 个业务插件（含 coupons/search_hub/
   #      neural_flow）。只改本清单与 ops.yaml 认领，源码目录不动。
+  #      2026-10-29：coupons 移出（用户裁决「coupons 这个不是」）→ 发包为
+  #      _base + 14 个业务插件。同一条落点纪律：只改门控层（本清单 + ops.yaml
+  #      认领 + plugin_manager/tests/test_registry_manifest_sync.py 期望集），
+  #      plugins/coupons 源码目录不动。
   #      2026-10-14：加入 chaos_engine（描述性混沌/非线性动力学风险原语，非交易信号；
   #      风控官 rs_risk 经 managed_modules 认领，plugin.json compatible_editions=["finance"]）
   #      后为 _base + 16 个业务插件。
@@ -43,7 +47,8 @@ plugins:
   #      plugin.json 已声明 compatible_editions 含 finance，且其余 6 项均不提供
   #      多资产行情，缺它则本版"能力声明与发行载荷"自相矛盾。
   #   ② 运行时：★ 2026-10-06 决策变更 —— 声明 runtime_whitelist: true，让 include
-  #      **兼任运行期白名单**。金融桌面版的插件集是**固定 12 个**（见下方 include），
+  #      **兼任运行期白名单**。金融桌面版的插件集以**下方 include 为准**（当前
+  #      _base + 14 个业务插件），
   #      插件中心 / discover / enable / unified 四处门控同源，只放行这 12 个；包外插件
   #      （ads / shop / site_builder …）不出现在列表、不可启用。
   #      代价（显式接受）：商店新上架的适用插件若不在 include 中即不可见，需随发行版
@@ -74,13 +79,16 @@ plugins:
     # 2026-10-22：neural_flow（神经中枢）整模块下线 —— 事件流仅有心跳、前端页面自承
     # 未接入业务埋点（用户裁决清理），故从本版 include 移除，为 _base + 16 个业务插件。
     - content_factory
-    # 2026-10-13 用户裁决：104 为测试机，「所有插件都应该能测到」；金融版角色与插件
-    # 清单随业务增减、不是固定量。放行以下项以在 104 管理端可测（归属走下方
-    # roles/finance-desktop/ops.yaml 的 managed_modules 认领通道，与 email /
-    # im_gateway / content_factory / project_workspace 同一既有惯例，
-    # 见 agent_matrix/models.py resolve_agent_roles ②）：
-    #   coupons         智能优惠券（奖励规则页 bridge 依赖，本版由 ops 认领）
-    - coupons
+    # ★ 2026-10-29 用户裁决：coupons（智能优惠券）「这个不是」→ 从本版 include 移除。
+    #   落点纪律同下（2026-10-26 hr_recruit/visitor_profile）：只改门控层
+    #   （本文件 include + roles/finance-desktop/ops.yaml 的 managed_modules 认领 +
+    #   配套测试期望集 test_registry_manifest_sync.py），**plugins/coupons 源码目录
+    #   一字不动**，它仍在 enterprise/standard/pro/minipro 等版本正常提供。
+    #   coupons 原属 ops 认领通道（agent_role=business，奖励规则页 bridge 依赖）；
+    #   移出后无角色归属，discovery 的「agent_role 须为本版核心角色」校验不再命中它，
+    #   且 include 白名单会把它收口为 disabled(not_in_edition_include)，不计入
+    #   /health 的 plugins_error。保留 ops.yaml 认领而不在 include 里只会让两份清单
+    #   各说一套，故认领同步删除（与 hr_recruit 处置同一条纪律）。
     # ★ 2026-10-26 用户裁决：hr_recruit（招聘管理）、visitor_profile（访客画像）
     #   「金融版不需要这两个插件，毫无关系」→ 从本版 include 移除。
     #   落点纪律：只改门控层（本文件 include + ops.yaml managed_modules + 配套测试

@@ -23,6 +23,8 @@ import stat
 import subprocess
 from typing import Any, Dict, List, Optional, Tuple
 
+from .constants import _
+
 IS_WINDOWS = os.name == "nt"
 
 # Windows 上被视为"过宽"的主体：出现其中任一即认为文件未受保护
@@ -78,7 +80,7 @@ def write_secret(path: str, payload: Any, *, indent: Optional[int] = None) -> Tu
 def harden(path: str, *, is_dir: bool = False) -> Tuple[bool, str]:
     """收紧单个路径的权限，返回 (是否确认已收紧, 说明)。"""
     if not os.path.exists(path):
-        return False, f"路径不存在：{path}"
+        return False, _("Path does not exist: {path}", path=path)
     if IS_WINDOWS:
         return _harden_windows(path)
     return _harden_posix(path, is_dir=is_dir)
@@ -92,11 +94,12 @@ def _harden_posix(path: str, *, is_dir: bool = False) -> Tuple[bool, str]:
     try:
         os.chmod(path, mode)
     except OSError as exc:
-        return False, f"chmod 失败：{exc}"
+        return False, _("chmod failed: {exc}", exc=exc)
     actual = stat.S_IMODE(os.stat(path).st_mode)
     if actual & 0o077:
-        return False, f"chmod 后权限仍为 {oct(actual)}（组/其他用户仍可访问）"
-    return True, f"已设置为 {oct(actual)}（仅所有者可访问）"
+        return False, _("Permissions are still {mode} after chmod (group/other users can still access)",
+                        mode=oct(actual))
+    return True, _("Set to {mode} (owner-only access)", mode=oct(actual))
 
 
 # --------------------------------------------------------------------------- #
@@ -118,14 +121,16 @@ def _run_icacls(args: List[str]) -> Tuple[bool, str]:
             timeout=_ICACLS_TIMEOUT,
         )
     except FileNotFoundError:
-        return False, "系统未提供 icacls 命令"
+        return False, _("The icacls command is not available on this system")
     except (subprocess.SubprocessError, OSError) as exc:
-        return False, f"icacls 执行异常：{exc}"
+        return False, _("icacls failed: {exc}", exc=exc)
     out = _decode(proc.stdout)
     err = _decode(proc.stderr)
     if proc.returncode != 0:
         raw = (err or out or "").strip().splitlines()
-        return False, f"icacls 返回码 {proc.returncode}：{raw[0] if raw else '无输出'}"
+        return False, _("icacls returned {code}: {output}",
+                        code=proc.returncode,
+                        output=raw[0] if raw else _("no output"))
     return True, out.strip()
 
 
@@ -147,24 +152,27 @@ def _decode(b: bytes) -> str:
 def _harden_windows(path: str) -> Tuple[bool, str]:
     principal = _current_windows_principal()
     if not principal:
-        return False, "无法确定当前 Windows 账户（USERNAME 环境变量为空）"
+        return False, _("Cannot determine the current Windows account (the USERNAME environment variable is empty)")
 
     # 顺序很关键：先授予当前用户，再断开继承。
     # 反过来做，一旦 grant 失败就可能把自己也锁在门外。
     ok, detail = _run_icacls([path, "/grant:r", f"{principal}:(R,W)"])
     if not ok:
-        return False, f"授予当前用户权限失败：{detail}"
+        return False, _("Failed to grant permissions to the current user: {detail}", detail=detail)
 
     ok, detail = _run_icacls([path, "/inheritance:r"])
     if not ok:
-        return False, f"断开 ACL 继承失败（文件可能仍被父目录 ACL 放行）：{detail}"
+        return False, _("Failed to disable ACL inheritance (the parent directory ACL may still apply): {detail}",
+                        detail=detail)
 
     # 复核：确认 ACL 中不再出现过宽主体
     entries = _windows_acl_principals(path)
     broad = [e for e in entries if _is_broad(e)]
     if broad:
-        return False, f"ACL 中仍存在过宽主体：{', '.join(broad)}"
-    return True, f"已通过 icacls 限定为 {principal} 独占读写"
+        return False, _("ACL still contains overly broad principals: {principals}",
+                        principals=", ".join(broad))
+    return True, _("Restricted to exclusive read/write access for {principal} via icacls",
+                   principal=principal)
 
 
 def _windows_acl_principals(path: str) -> List[str]:
@@ -212,7 +220,7 @@ def describe_protection(path: str) -> Dict[str, Any]:
         "detail": "",
     }
     if not info["exists"]:
-        info["detail"] = "文件不存在"
+        info["detail"] = _("File does not exist")
         return info
 
     if IS_WINDOWS:
@@ -221,8 +229,9 @@ def describe_protection(path: str) -> Dict[str, Any]:
         info["acl_principals"] = entries
         info["protected"] = not broad
         info["detail"] = (
-            f"ACL 存在过宽主体：{', '.join(broad)}" if broad
-            else "ACL 未包含 Everyone / Users / Authenticated Users 等过宽主体"
+            _("ACL contains overly broad principals: {principals}", principals=", ".join(broad))
+            if broad
+            else _("ACL does not contain overly broad principals such as Everyone / Users / Authenticated Users")
         )
         return info
 
@@ -230,7 +239,7 @@ def describe_protection(path: str) -> Dict[str, Any]:
     info["mode"] = oct(mode)
     info["protected"] = (mode & 0o077) == 0
     info["detail"] = (
-        f"权限 {oct(mode)}，仅所有者可访问" if info["protected"]
-        else f"权限 {oct(mode)}，组/其他用户仍可访问"
+        _("Permissions {mode}: owner-only access", mode=oct(mode)) if info["protected"]
+        else _("Permissions {mode}: group/other users can still access", mode=oct(mode))
     )
     return info

@@ -355,7 +355,7 @@ function aiSend(){
     }
     // Auto-preview markdown if detected in summary
     (function(){
-      var m=summary.match(/预览链接：([^\s\n]+)/);
+      var m=summary.match(/预览链接：([^\s\n]+)/);  // i18n:tech 匹配上游中文前缀，非展示文案
       if(m&&m[1]){ aiPreviewMd(m[1]); }
     })();
   }).catch(function(){
