@@ -2508,6 +2508,102 @@ def license_list():
 
 
 # ====================================================================
+# 豁免 Key API（管理员签发 → 用户站点兑换 → 动态授权）
+# ====================================================================
+
+
+def _get_exemption_mgr():
+    from .exemption import ExemptionKeyManager
+    return ExemptionKeyManager()
+
+
+# ── 25. 签发豁免 Key ─────────────────────────────────────
+
+@bp.route('/exemption-keys', methods=['POST'])
+def exemption_key_create():
+    """签发豁免 Key（明文仅在本次响应返回，不落库）"""
+    err = _require_admin()
+    if err:
+        return err
+    from i18n import _
+
+    data = request.json if request.is_json else {}
+    plugins = data.get('plugins')
+    if not isinstance(plugins, list) or not plugins:
+        return _json_result(False, error=_('plugins must be a non-empty list or ["*"]'), code=400)
+    try:
+        max_redemptions = int(data.get('max_redemptions', 1))
+    except (TypeError, ValueError):
+        return _json_result(False, error=_('max_redemptions must be >= 1'), code=400)
+    if max_redemptions < 1:
+        return _json_result(False, error=_('max_redemptions must be >= 1'), code=400)
+
+    mgr = _get_exemption_mgr()
+    try:
+        result = mgr.create_key(
+            plugins=plugins,
+            max_redemptions=max_redemptions,
+            expires_at=data.get('expires_at') or None,
+            granted_by=data.get('granted_by', ''),
+            note=data.get('note', ''),
+        )
+    except Exception as e:
+        return _json_result(False, error=str(e), code=400)
+    return _json_result(True, data=result)
+
+
+# ── 26. 豁免 Key 列表 ────────────────────────────────────
+
+@bp.route('/exemption-keys', methods=['GET'])
+def exemption_key_list():
+    err = _require_admin()
+    if err:
+        return err
+    mgr = _get_exemption_mgr()
+    return _json_result(True, data={'keys': mgr.list_keys()})
+
+
+# ── 27. 兑换豁免 Key ─────────────────────────────────────
+
+@bp.route('/exemption-keys/redeem', methods=['POST'])
+def exemption_key_redeem():
+    """在目标站点兑换：按 scope 激活插件 License"""
+    err = _require_admin()
+    if err:
+        return err
+    from i18n import _
+
+    data = request.json if request.is_json else {}
+    key = (data.get('key') or '').strip()
+    if not key:
+        return _json_result(False, error=_('key required'), code=400)
+
+    mgr = _get_exemption_mgr()
+    try:
+        result = mgr.redeem_key(key, customer_email=data.get('customer_email', ''))
+    except ValueError as e:
+        return _json_result(False, error=str(e), code=400)
+    except Exception as e:
+        return _json_result(False, error=str(e), code=500)
+    return _json_result(True, data=result)
+
+
+# ── 28. 吊销豁免 Key ─────────────────────────────────────
+
+@bp.route('/exemption-keys/<int:key_id>/revoke', methods=['POST'])
+def exemption_key_revoke(key_id: int):
+    err = _require_admin()
+    if err:
+        return err
+    from i18n import _
+
+    mgr = _get_exemption_mgr()
+    if mgr.revoke_key(key_id):
+        return _json_result(True, data={'revoked': True})
+    return _json_result(False, error=_('Exemption key not found or already revoked'), code=404)
+
+
+# ====================================================================
 # 优惠券 API
 # ====================================================================
 

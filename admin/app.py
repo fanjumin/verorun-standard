@@ -35,6 +35,7 @@ from routes.comments import comments_bp
 # 注意：admin/routes 下不能放 __init__.py，否则顶层 `routes` 会退化为常规包，
 # 导致 routes.auth / routes.admin 等全部导入失败。
 from admin.routes.theme_admin import theme_bp
+from admin.routes.veroguard_admin import veroguard_admin_bp
 from routes.cleaner_agent import cleaner_bp
 from models.cms import init_cms_tables
 from routes.douyin_miniprogram import douyin_mp_bp
@@ -281,6 +282,7 @@ app.register_blueprint(theme_bp)
 app.register_blueprint(douyin_mp_bp)  # Douyin Mini-Program API
 app.register_blueprint(cleaner_bp)     # 数据清洗智能体
 app.register_blueprint(knowledge_bp)   # 知识库管理后台
+app.register_blueprint(veroguard_admin_bp)  # VeroGuard 站点监控看板
 # 自动注册 Cleaner 为矩阵子 Agent
 try:
     from routes.cleaner_agent import auto_register_sub_agent

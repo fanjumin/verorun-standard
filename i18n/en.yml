@@ -4566,6 +4566,15 @@ Please enter a GitHub repo URL: Please enter a GitHub repo URL
 'Parameter {name} must be an integer': 'Parameter {name} must be an integer'
 ".{attr}() command execution ({path})": ".{attr}() command execution ({path})"
 "Administrator privileges required": "Administrator privileges required"
+"Exemption key has been revoked": "Exemption key has been revoked"
+"Exemption key has expired": "Exemption key has expired"
+"Exemption key has reached its redemption limit": "Exemption key has reached its redemption limit"
+"Exemption key not found or already revoked": "Exemption key not found or already revoked"
+"Invalid or unknown exemption key": "Invalid or unknown exemption key"
+"key required": "key required"
+"max_redemptions must be >= 1": "max_redemptions must be >= 1"
+"No paid plugins in store to exempt": "No paid plugins in store to exempt"
+"plugins must be a non-empty list or [\"*\"]": "plugins must be a non-empty list or [\"*\"]"
 "Audit failed (audit_status=reject) with dangerous code characteristics; installation is prohibited. To force approval, explicitly pass override=true": "Audit failed (audit_status=reject) with dangerous code characteristics; installation is prohibited. To force approval, explicitly pass override=true"
 "Cannot resolve plugin download host: {host}": "Cannot resolve plugin download host: {host}"
 "Circular dependency detected: {cycle}": "Circular dependency detected: {cycle}"
@@ -4892,3 +4901,63 @@ Please enter a GitHub repo URL: Please enter a GitHub repo URL
 'Model output: {model}': 'Model output: {model}'
 'Model estimate (no source recorded)': 'Model estimate (no source recorded)'
 'Evidence {hash}': 'Evidence {hash}'
+# ── VeroGuard Site Monitor（官方站点监控看板）──
+'VeroGuard Site Monitor': 'VeroGuard Site Monitor'
+'Official license center · client guardian heartbeat / integrity / remote commands': 'Official license center · client guardian heartbeat / integrity / remote commands'
+'Back to admin': 'Back to admin'
+'Registered Sites': 'Registered Sites'
+'Online Sites': 'Online Sites'
+'Integrity Alerts': 'Integrity Alerts'
+'Pending Commands': 'Pending Commands'
+'Site Overview': 'Site Overview'
+'Deployment Code': 'Deployment Code'
+'Name / Site': 'Name / Site'
+'Integrity': 'Integrity'
+'Last Heartbeat': 'Last Heartbeat'
+'Loading…': 'Loading…'
+'Register / Update Site': 'Register / Update Site'
+'e.g. TARKA-CN-001': 'e.g. TARKA-CN-001'
+'Matches DEPLOYMENT_CODE in the client site .env; sites auto-register on first heartbeat even if not pre-registered.': 'Matches DEPLOYMENT_CODE in the client site .env; sites auto-register on first heartbeat even if not pre-registered.'
+'Site-level PROBE_SECRET': 'Site-level PROBE_SECRET'
+'Empty = use global PROBE_SECRET / keep unchanged': 'Empty = use global PROBE_SECRET / keep unchanged'
+'Must exactly match PROBE_SECRET in the client site .env; used for heartbeat AES-GCM decryption.': 'Must exactly match PROBE_SECRET in the client site .env; used for heartbeat AES-GCM decryption.'
+'Site URL': 'Site URL'
+'Save Site': 'Save Site'
+'Send Remote Command': 'Send Remote Command'
+'Target Site': 'Target Site'
+'Command': 'Command'
+'warn — show warning banner': 'warn — show warning banner'
+'lock_ai — disable AI features': 'lock_ai — disable AI features'
+'lock_full — maintenance page / API 503': 'lock_full — maintenance page / API 503'
+'shutdown — stop all services (destructive)': 'shutdown — stop all services (destructive)'
+'self_destruct — self destruction (destructive)': 'self_destruct — self destruction (destructive)'
+'update_config — update runtime params': 'update_config — update runtime params'
+'Destructive commands only execute when the target site has VG_OPS_CONFIRM configured and params.ops_token matches (fail-closed).': 'Destructive commands only execute when the target site has VG_OPS_CONFIRM configured and params.ops_token matches (fail-closed).'
+'Send Command': 'Send Command'
+'Security Events (integrity alerts)': 'Security Events (integrity alerts)'
+'Subscription Licenses': 'Subscription Licenses'
+'Hostname': 'Hostname'
+'Expires At': 'Expires At'
+'Last Seen': 'Last Seen'
+'Expires At (ISO, optional)': 'Expires At (ISO, optional)'
+'Save Subscription': 'Save Subscription'
+'Command History': 'Command History'
+'Command ID': 'Command ID'
+'Site': 'Site'
+'Result': 'Result'
+'Acknowledged': 'Acknowledged'
+'Heartbeat History': 'Heartbeat History'
+'Heartbeats': 'Heartbeats'
+'No sites yet — sites auto-register once the client heartbeat arrives with PROBE_SECRET/DEPLOYMENT_CODE configured': 'No sites yet — sites auto-register once the client heartbeat arrives with PROBE_SECRET/DEPLOYMENT_CODE configured'
+'No records yet': 'No records yet'
+'No events yet — integrity warn/critical heartbeats generate events automatically': 'No events yet — integrity warn/critical heartbeats generate events automatically'
+'No subscription licenses yet — save one so client heartbeats receive valid/days_remaining': 'No subscription licenses yet — save one so client heartbeats receive valid/days_remaining'
+'No commands yet': 'No commands yet'
+'Site saved': 'Site saved'
+'Subscription saved': 'Subscription saved'
+'Command queued': 'Command queued'
+'Command queued (destructive command requires local site confirmation)': 'Command queued (destructive command requires local site confirmation)'
+'params is not valid JSON': 'params is not valid JSON'
+'Deployment code is required': 'Deployment code is required'
+'Never reported': 'Never reported'
+'Offline': 'Offline'

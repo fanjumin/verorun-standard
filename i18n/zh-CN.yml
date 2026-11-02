@@ -4497,6 +4497,15 @@ Please enter a GitHub repo URL: 请输入 GitHub 仓库地址
 'Parameter {name} must be an integer': '参数 {name} 必须为整数'
 ".{attr}() command execution ({path})": ".{attr}() 命令执行（{path}）"
 "Administrator privileges required": "需要管理员权限"
+"Exemption key has been revoked": "豁免 Key 已被吊销"
+"Exemption key has expired": "豁免 Key 已过期"
+"Exemption key has reached its redemption limit": "豁免 Key 已达到兑换次数上限"
+"Exemption key not found or already revoked": "豁免 Key 不存在或已吊销"
+"Invalid or unknown exemption key": "豁免 Key 无效或不存在"
+"key required": "请填写豁免 Key"
+"max_redemptions must be >= 1": "max_redemptions 必须 >= 1"
+"No paid plugins in store to exempt": "商店内暂无付费插件可豁免"
+"plugins must be a non-empty list or [\"*\"]": "plugins 必须为非空列表或 [\"*\"]"
 "Audit failed (audit_status=reject) with dangerous code characteristics; installation is prohibited. To force approval, explicitly pass override=true": "审计未通过（audit_status=reject），含危险代码特征，禁止安装；如需强制放行请显式传递 override=true"
 "Cannot resolve plugin download host: {host}": "无法解析插件下载主机: {host}"
 "Circular dependency detected: {cycle}": "检测到循环依赖: {cycle}"
@@ -4823,3 +4832,63 @@ Please enter a GitHub repo URL: 请输入 GitHub 仓库地址
 'Model output: {model}': '模型输出：{model}'
 'Model estimate (no source recorded)': '模型估算（无来源记录）'
 'Evidence {hash}': '证据 {hash}'
+# ── VeroGuard Site Monitor（官方站点监控看板）──
+'VeroGuard Site Monitor': 'VeroGuard 站点监控'
+'Official license center · client guardian heartbeat / integrity / remote commands': '官方授权中心 · 客户站点守护进程心跳 / 完整性 / 远程命令'
+'Back to admin': '返回管理后台'
+'Registered Sites': '接入站点'
+'Online Sites': '在线站点'
+'Integrity Alerts': '完整性告警'
+'Pending Commands': '待执行命令'
+'Site Overview': '站点总览'
+'Deployment Code': '部署码'
+'Name / Site': '名称 / 站点'
+'Integrity': '完整性'
+'Last Heartbeat': '最后心跳'
+'Loading…': '加载中…'
+'Register / Update Site': '注册 / 更新站点'
+'e.g. TARKA-CN-001': '例如 TARKA-CN-001'
+'Matches DEPLOYMENT_CODE in the client site .env; sites auto-register on first heartbeat even if not pre-registered.': '客户站点 .env 中的 DEPLOYMENT_CODE；未预注册的站点心跳到达时也会自动建档。'
+'Site-level PROBE_SECRET': '站点级 PROBE_SECRET'
+'Empty = use global PROBE_SECRET / keep unchanged': '留空 = 沿用全局 PROBE_SECRET / 不修改'
+'Must exactly match PROBE_SECRET in the client site .env; used for heartbeat AES-GCM decryption.': '需与客户站点 .env 的 PROBE_SECRET 完全一致，用于心跳 AES-GCM 解密。'
+'Site URL': '站点 URL'
+'Save Site': '保存站点'
+'Send Remote Command': '下发远程命令'
+'Target Site': '目标站点'
+'Command': '命令'
+'warn — show warning banner': 'warn — 显示警告横幅'
+'lock_ai — disable AI features': 'lock_ai — 禁用 AI 功能'
+'lock_full — maintenance page / API 503': 'lock_full — 维护页 / API 503'
+'shutdown — stop all services (destructive)': 'shutdown — 停止全部服务（破坏性）'
+'self_destruct — self destruction (destructive)': 'self_destruct — 自毁（破坏性）'
+'update_config — update runtime params': 'update_config — 更新运行参数'
+'Destructive commands only execute when the target site has VG_OPS_CONFIRM configured and params.ops_token matches (fail-closed).': '破坏性命令仅在目标站点配置了 VG_OPS_CONFIRM 且 params.ops_token 匹配时才会执行（fail-closed）。'
+'Send Command': '下发命令'
+'Security Events (integrity alerts)': '安全事件流（完整性告警）'
+'Subscription Licenses': '订阅授权'
+'Hostname': '主机'
+'Expires At': '到期'
+'Last Seen': '最后心跳'
+'Expires At (ISO, optional)': '到期时间（ISO，可空）'
+'Save Subscription': '保存订阅授权'
+'Command History': '命令历史'
+'Command ID': '命令 ID'
+'Site': '站点'
+'Result': '结果'
+'Acknowledged': '回执'
+'Heartbeat History': '心跳历史'
+'Heartbeats': '心跳'
+'No sites yet — sites auto-register once the client heartbeat arrives with PROBE_SECRET/DEPLOYMENT_CODE configured': '暂无站点 —— 客户站点配置 PROBE_SECRET/DEPLOYMENT_CODE 后心跳将自动建档'
+'No records yet': '暂无记录'
+'No events yet — integrity warn/critical heartbeats generate events automatically': '暂无事件 —— 完整性 warn/critical 心跳会自动生成事件'
+'No subscription licenses yet — save one so client heartbeats receive valid/days_remaining': '暂无订阅授权 —— 保存后客户站点心跳即可拿到 valid/days_remaining'
+'No commands yet': '暂无命令'
+'Site saved': '站点已保存'
+'Subscription saved': '订阅授权已保存'
+'Command queued': '命令已入队'
+'Command queued (destructive command requires local site confirmation)': '命令已入队（破坏性命令需站点本地确认）'
+'params is not valid JSON': 'params 不是合法 JSON'
+'Deployment code is required': '部署码必填'
+'Never reported': '未上报'
+'Offline': '离线'

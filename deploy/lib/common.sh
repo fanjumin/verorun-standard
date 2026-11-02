@@ -2389,6 +2389,61 @@ _sync_commerce_static() {
     fi
 }
 
+# ══════════════════════════════════════════════════════════════════════
+# Release artifact channel (INSTALL_SOURCE=release)
+# 生产部署从 Release 制品安装（edition tar.gz + 签名发布清单 + guardian 二进制），
+# git clone 仅作为开发通道。制品与清单来自同一 tag（publish-editions 流水线统一签名），
+# 后续 verify_release_manifest 按原样验签 —— 门禁零弱化。
+# 预期 RELEASE_DIR 布局：
+#   verorun-<edition>-v<semver>.tar.gz
+#   release_manifest.json / release_manifest.sig
+#   verorun-guardian.bin（可选；缺失时 guardian 不启用，与既有 STD-4 行为一致）
+# 限制：制品模式无 .git，install.sh rollback（基于 git）不可用。
+# ══════════════════════════════════════════════════════════════════════
+pull_release_artifact() {
+    step "Pull code (Release artifact channel)"
+    if [ ! -d "${RELEASE_DIR}" ]; then
+        echo -e "${FAIL} RELEASE_DIR not found: ${RELEASE_DIR}（INSTALL_SOURCE=release 需预置 Release 资产）"
+        echo -e "${INFO}   先下载 verorun-standard Release 资产到 ${RELEASE_DIR}："
+        echo -e "${INFO}     verorun-<edition>-v<semver>.tar.gz + release_manifest.json + release_manifest.sig [+ verorun-guardian.bin]"
+        exit 1
+    fi
+    local _tarball=""
+    _tarball=$(ls -1t "${RELEASE_DIR}"/verorun-*-v*.tar.gz 2>/dev/null | head -n1 || true)
+    if [ -z "${_tarball}" ]; then
+        echo -e "${FAIL} No verorun-*-v*.tar.gz found in ${RELEASE_DIR}"
+        exit 1
+    fi
+    if [ ! -f "${RELEASE_DIR}/release_manifest.json" ] || [ ! -f "${RELEASE_DIR}/release_manifest.sig" ]; then
+        echo -e "${FAIL} release_manifest.json/.sig missing in ${RELEASE_DIR} — refuse artifact install（无签名清单无法通过完整性门禁）"
+        exit 1
+    fi
+    # 目录处置：已是 verorun 安装（VERSION + .verorun-edition 在位）→ 原地重装/升级；
+    # 否则非空目录交由交互式冲突处理（与 clone 通道的 resolve_directory_conflict 一致）。
+    # 默认 RELEASE_DIR=${APP_HOME}-release 位于 APP_HOME 之外，清空不会误删制品。
+    if [ -d "${APP_HOME}" ] && [ -n "$(ls -A "${APP_HOME}" 2>/dev/null)" ]; then
+        if [ -f "${APP_HOME}/VERSION" ] && [ -f "${APP_HOME}/.verorun-edition" ]; then
+            find "${APP_HOME}" -mindepth 1 -delete 2>/dev/null || true
+        else
+            resolve_directory_conflict "${APP_HOME}"
+        fi
+    fi
+    mkdir -p "${APP_HOME}"
+    tar -xzf "${_tarball}" -C "${APP_HOME}"
+    cp "${RELEASE_DIR}/release_manifest.json" "${RELEASE_DIR}/release_manifest.sig" "${APP_HOME}/"
+    if [ -f "${RELEASE_DIR}/verorun-guardian.bin" ]; then
+        mkdir -p "${APP_HOME}/veroguard/dist"
+        cp "${RELEASE_DIR}/verorun-guardian.bin" "${APP_HOME}/veroguard/dist/"
+        chmod +x "${APP_HOME}/veroguard/dist/verorun-guardian.bin"
+    fi
+    if [ ! -f "${APP_HOME}/.verorun-edition" ] || [ ! -f "${APP_HOME}/VERSION" ]; then
+        echo -e "${FAIL} Extracted tarball is not a verorun edition package (.verorun-edition/VERSION missing) — aborting"
+        exit 1
+    fi
+    chown -R "${APP_USER}:${APP_USER}" "${APP_HOME}" 2>/dev/null || true
+    done_step "Release artifact installed: $(cat "${APP_HOME}/.verorun-edition") @ $(cat "${APP_HOME}/VERSION")"
+}
+
 # ── Fresh install: DEPLOY_TYPE drives domain prompt / pull messaging / cleanup / service startup ──
 do_install() {
     # 审计 DIR-1 fix：resolve_directory_conflict 必须最先执行，早于任何可能隐式创建
@@ -2588,6 +2643,17 @@ do_install() {
     step "${_pull_step}"
     # 审计 H3 fix：interactive three-way choice on directory conflict (backup/delete/abort), no longer a direct rm -rf
     # 目录冲突检测已提前到 "Create directories" 步骤（WEB-2 fix），此处不再重复调用。
+    local _code_label=""
+    # ── INSTALL_SOURCE=release：Release 制品通道（生产部署）；git clone 为开发通道 ──
+    if [ "${INSTALL_SOURCE:-git}" = "release" ]; then
+        pull_release_artifact
+        _code_label="artifact:$(cat "${APP_HOME}/.verorun-edition" 2>/dev/null || echo unknown)@$(cat "${APP_HOME}/VERSION" 2>/dev/null || echo '?')"
+    else
+    # Git repo auto-resolution (审计 Y-1)：automatically switch to a mirror when HTTPS direct is unreachable; SSH uses 443
+    _resolve_git_repo
+
+    ensure_git_auth
+
     if [ -d "${APP_HOME}/.git" ]; then
         git config --global --add safe.directory "${APP_HOME}" 2>/dev/null || true
         cd "${APP_HOME}"
@@ -2628,12 +2694,14 @@ do_install() {
     # 2026-09-16：白名单缺 plugins/<id> 会让被跟踪的插件源永不落盘（.104 路由 404 真因）；
     # 白名单缺 admin/main_site 则会把工作区裁坏。两种情况统一由守卫降级为全量检出。
     _apply_sparse_checkout "${APP_HOME}"
+    _code_label="$(git -C "${APP_HOME}" log --oneline -1)"
+    fi
     # No-domain scripts (install-local/code/dev) are kept on disk: deleting
     # git-tracked files leaves unstaged changes that break `git pull` / update.
     # Clean stale __pycache__ before chown (avoids race-condition failures)
     find "${APP_HOME}" -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null || true
     chown -R "${APP_USER}:${APP_USER}" "${APP_HOME}" 2>/dev/null || true
-    done_step "Code pulled${_pull_suffix}: $(git -C "${APP_HOME}" log --oneline -1)"
+    done_step "Code pulled${_pull_suffix}: ${_code_label}"
 
     # DEF-07：同步商务/客服前端 JS 到 main_site 根静态目录（install 路径）
     _sync_commerce_static
@@ -2874,13 +2942,20 @@ do_update() {
         done_step "Skipped (no .git directory)"
     fi
 
-    # Git repo auto-resolution (审计 Y-1)：automatically switch to a mirror when HTTPS direct is unreachable; SSH uses 443
-    _resolve_git_repo
+    if [ "${INSTALL_SOURCE:-git}" != "release" ]; then
+        # Git repo auto-resolution (审计 Y-1)：automatically switch to a mirror when HTTPS direct is unreachable; SSH uses 443
+        _resolve_git_repo
 
-    ensure_git_auth
+        ensure_git_auth
+    fi
 
     step "Pull latest code"
-    if [ ! -d "${APP_HOME}/.git" ]; then
+    local _code_label=""
+    # ── INSTALL_SOURCE=release：制品通道更新（重新解压新版本资产；无 .git → rollback 不可用）──
+    if [ "${INSTALL_SOURCE:-git}" = "release" ]; then
+        pull_release_artifact
+        _code_label="artifact:$(cat "${APP_HOME}/.verorun-edition" 2>/dev/null || echo unknown)@$(cat "${APP_HOME}/VERSION" 2>/dev/null || echo '?')"
+    elif [ ! -d "${APP_HOME}/.git" ]; then
         if [ "${DEPLOY_TYPE}" = "production" ]; then
             echo -e "${WARN} .git missing — re-cloning repository"
             # 审计 H3 fix：reuse the interactive conflict handler; direct rm -rf is forbidden
@@ -2922,13 +2997,18 @@ do_update() {
             }
         }
     fi
-    # Sparse-checkout 下发（含白名单守卫）：同 do_install —— 见 _apply_sparse_checkout。
-    _apply_sparse_checkout "${APP_HOME}"
-    # No-domain scripts (install-local/code/dev) are kept on disk: deleting
-    # git-tracked files leaves unstaged changes that break `git pull` / update.
-    local after_commit
-    after_commit=$(git log --oneline -1)
-    done_step "Code updated: ${before_commit:0:7} -> ${after_commit:0:7}"
+    if [ "${INSTALL_SOURCE:-git}" = "release" ]; then
+        # 制品通道：插件已随 tarball 内置，无需 sparse-checkout；无 .git → 跳过 commit 对比
+        done_step "Code updated: ${_code_label}"
+    else
+        # Sparse-checkout 下发（含白名单守卫）：同 do_install —— 见 _apply_sparse_checkout。
+        _apply_sparse_checkout "${APP_HOME}"
+        # No-domain scripts (install-local/code/dev) are kept on disk: deleting
+        # git-tracked files leaves unstaged changes that break `git pull` / update.
+        local after_commit
+        after_commit=$(git log --oneline -1)
+        done_step "Code updated: ${before_commit:0:7} -> ${after_commit:0:7}"
+    fi
 
     # DEF-07：同步商务/客服前端 JS 到 main_site 根静态目录（update 路径，修复存量部署）
     _sync_commerce_static
@@ -2938,7 +3018,7 @@ do_update() {
     script_md5=$(md5sum "${APP_HOME}/deploy/${INSTALL_SCRIPT}" | awk '{print $1}')
     if [ "${UPDATE_MD5}" != "${script_md5}" ]; then
         echo -e "${INFO} ${INSTALL_SCRIPT} updated, re-running with new version..."
-        exec sudo APP_USER="${APP_USER}" APP_HOME="${APP_HOME}" VENV_DIR="${VENV_DIR}" REGION="${REGION}" FORCE_UPDATE="${FORCE_UPDATE:-0}" AUTO_DIR_CONFLICT="${AUTO_DIR_CONFLICT:-}" bash "${APP_HOME}/deploy/${INSTALL_SCRIPT}" update
+        exec sudo APP_USER="${APP_USER}" APP_HOME="${APP_HOME}" VENV_DIR="${VENV_DIR}" REGION="${REGION}" FORCE_UPDATE="${FORCE_UPDATE:-0}" AUTO_DIR_CONFLICT="${AUTO_DIR_CONFLICT:-}" INSTALL_SOURCE="${INSTALL_SOURCE:-git}" RELEASE_DIR="${RELEASE_DIR:-}" bash "${APP_HOME}/deploy/${INSTALL_SCRIPT}" update
         exit
     fi
 

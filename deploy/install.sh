@@ -22,6 +22,14 @@
 #   --skip-deps: skip system + Python dependency installation (existing env re-deploy)
 #   --region=cn|global: region routing (default global)
 #
+# Code source channel (INSTALL_SOURCE env):
+#   git (default)     → clone/fetch from GIT_REPO — development channel
+#   release           → install from pre-downloaded Release assets in RELEASE_DIR
+#                       (artifact channel: verorun-<edition>-v*.tar.gz + release_manifest.json/.sig
+#                        [+ verorun-guardian.bin] — assets all from the same signed Release tag)
+#                       Note: no .git in artifact mode → `rollback` unavailable.
+#                       Default RELEASE_DIR=${APP_HOME}-release.
+#
 # Supported INSTALL_TYPE values: website | professional | development | educational | omni
 #   website      → DEPLOY_TYPE=production (domain + HTTPS)
 #   professional → DEPLOY_TYPE=lan         (no domain, LAN access)
@@ -45,6 +53,8 @@ else
     : "${APP_HOME:=/home/${APP_USER}/verorun}"
 fi
 : "${VENV_DIR:=${APP_HOME}/venv}"
+: "${INSTALL_SOURCE:=git}"                 # git | release — release: install from Release assets (artifact channel)
+: "${RELEASE_DIR:=${APP_HOME}-release}"    # staging dir holding Release assets (artifact channel)
 : "${LOG_DIR:=/var/log/verorun}"
 : "${SERVICE_DIR:=/etc/systemd/system}"
 : "${DOMAIN:=}"
@@ -76,12 +86,12 @@ else
         _COMMON_REMOTE="${EDU_COMMON_REMOTE:-https://raw.githubusercontent.com/fanjumin/verorun-edu/master/deploy/lib/common.sh}"
         _COMMON_MIRROR="${EDU_COMMON_MIRROR:-https://ghfast.top/https://raw.githubusercontent.com/fanjumin/verorun-edu/master/deploy/lib/common.sh}"
         # Computed and backfilled at release time by deploy/scripts/sign_release.py (LF-normalized hash)
-        _COMMON_SHA256="${EDU_COMMON_SHA256:-c9fc4746435387ec976f807a540fb2affb1979abca8de632f13cb91a1c613bfe}"
+        _COMMON_SHA256="${EDU_COMMON_SHA256:-5b6b9b01bbff5efb2968b7315e7c2cdc49f182249b9fa5432ee670b97baa9745}"
     else
         _COMMON_REMOTE="${COMMON_REMOTE:-https://raw.githubusercontent.com/fanjumin/verorun-pro/master/deploy/lib/common.sh}"
         _COMMON_MIRROR="${COMMON_MIRROR:-https://ghfast.top/https://raw.githubusercontent.com/fanjumin/verorun-pro/master/deploy/lib/common.sh}"
         # Computed and backfilled at release time by deploy/scripts/sign_release.py (LF-normalized hash)
-        _COMMON_SHA256="${COMMON_SHA256:-c9fc4746435387ec976f807a540fb2affb1979abca8de632f13cb91a1c613bfe}"
+        _COMMON_SHA256="${COMMON_SHA256:-5b6b9b01bbff5efb2968b7315e7c2cdc49f182249b9fa5432ee670b97baa9745}"
     fi
     _tmp_common="$(mktemp)"
     # Audit P3-2: clean up the temp file on Ctrl+C interruption

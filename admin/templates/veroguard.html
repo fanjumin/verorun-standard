@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>{{ _('VeroGuard Site Monitor') }} — VeroRun Admin</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
+<style>
+/* ═══════════════════════════════════════════════════════
+   VeroGuard Monitor — Dark Fintech, Glassmorphism
+   ═══════════════════════════════════════════════════════ */
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root {
+  --bg-deep: #060B18;
+  --bg-card: rgba(13, 21, 42, 0.75);
+  --border: rgba(47, 107, 255, 0.12);
+  --text: #E4E8F0;
+  --text-muted: #8894B0;
+  --text-dim: #4B5675;
+  --accent: #2F6BFF;
+  --accent2: #00C2FF;
+  --success: #00D68F;
+  --danger: #FF3D71;
+  --warning: #FFAA00;
+  --radius: 16px;
+  --radius-sm: 10px;
+}
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', system-ui, 'Noto Sans SC', sans-serif;
+  background: var(--bg-deep); color: var(--text);
+  min-height: 100vh; overflow-x: hidden;
+  padding: 28px clamp(16px, 4vw, 48px) 60px;
+}
+body::before {
+  content: ''; position: fixed; inset: 0;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 0%, rgba(47,107,255,.08) 0%, transparent 70%),
+    radial-gradient(ellipse 60% 50% at 80% 80%, rgba(0,194,255,.05) 0%, transparent 60%);
+  pointer-events: none; z-index: 0;
+}
+.wrap { position: relative; z-index: 1; max-width: 1280px; margin: 0 auto; }
+h1 { font-size: 22px; font-weight: 700; letter-spacing: .5px; display: flex; align-items: center; gap: 10px; }
+h1 .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--success); box-shadow: 0 0 12px var(--success); }
+.sub { color: var(--text-muted); font-size: 13px; margin: 6px 0 24px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 26px; }
+.card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; backdrop-filter: blur(14px); }
+.card .k { color: var(--text-muted); font-size: 12px; margin-bottom: 8px; }
+.card .v { font-size: 28px; font-weight: 700; }
+.card .v.ok { color: var(--success); } .card .v.warn { color: var(--warning); } .card .v.bad { color: var(--danger); }
+section { margin-bottom: 30px; }
+section > h2 { font-size: 15px; font-weight: 600; margin-bottom: 12px; color: var(--accent2); letter-spacing: .4px; }
+table { width: 100%; border-collapse: collapse; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; font-size: 13px; }
+th { text-align: left; padding: 11px 14px; color: var(--text-muted); font-weight: 500; font-size: 12px; border-bottom: 1px solid var(--border); background: rgba(47,107,255,.05); }
+td { padding: 11px 14px; border-bottom: 1px solid rgba(47,107,255,.06); vertical-align: top; }
+tr:last-child td { border-bottom: none; }
+.badge { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+.badge.online { background: rgba(0,214,143,.12); color: var(--success); }
+.badge.offline { background: rgba(255,61,113,.12); color: var(--danger); }
+.badge.never { background: rgba(136,148,176,.15); color: var(--text-muted); }
+.badge.int-ok { background: rgba(0,214,143,.12); color: var(--success); }
+.badge.int-warn { background: rgba(255,170,0,.12); color: var(--warning); }
+.badge.int-critical { background: rgba(255,61,113,.15); color: var(--danger); }
+.btn { display: inline-block; padding: 7px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: rgba(47,107,255,.14); color: var(--text); font-size: 12px; cursor: pointer; transition: .15s; }
+.btn:hover { background: rgba(47,107,255,.28); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.danger { background: rgba(255,61,113,.15); border-color: rgba(255,61,113,.4); color: var(--danger); }
+.btn.sm { padding: 4px 10px; font-size: 11px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 900px){ .grid2 { grid-template-columns: 1fr; } }
+.panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; }
+.panel h3 { font-size: 13px; font-weight: 600; color: var(--accent2); margin-bottom: 14px; }
+.field { margin-bottom: 12px; }
+.field label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 5px; }
+.field input, .field select, .field textarea { width: 100%; padding: 9px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: rgba(6,11,24,.6); color: var(--text); font-size: 13px; outline: none; font-family: inherit; }
+.field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent); }
+.hint { font-size: 11px; color: var(--text-dim); margin-top: 4px; line-height: 1.5; }
+.muted { color: var(--text-muted); }
+.mono { font-family: 'SF Mono', Consolas, monospace; font-size: 12px; }
+#toast { position: fixed; top: 20px; right: 20px; z-index: 99; display: flex; flex-direction: column; gap: 8px; }
+.toast-item { padding: 10px 16px; border-radius: var(--radius-sm); font-size: 13px; background: var(--bg-card); border: 1px solid var(--border); backdrop-filter: blur(10px); }
+.toast-item.err { border-color: rgba(255,61,113,.5); color: var(--danger); }
+.toast-item.ok { border-color: rgba(0,214,143,.5); color: var(--success); }
+dialog { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); padding: 22px; width: min(520px, 92vw); backdrop-filter: blur(18px); }
+dialog::backdrop { background: rgba(0,0,0,.55); }
+dialog h3 { margin-bottom: 14px; font-size: 15px; }
+.evt { padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); margin-bottom: 8px; font-size: 12px; background: var(--bg-card); }
+.evt .sev { font-weight: 700; }
+.evt .sev.critical { color: var(--danger); } .evt .sev.warn { color: var(--warning); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><span class="dot" id="pulse"></span>{{ _('VeroGuard Site Monitor') }}</h1>
+  <p class="sub">{{ _('Official license center · client guardian heartbeat / integrity / remote commands') }} · <a href="/admin" style="color:var(--accent2)">{{ _('Back to admin') }}</a></p>
+
+  <div class="cards">
+    <div class="card"><div class="k">{{ _('Registered Sites') }}</div><div class="v" id="c-total">–</div></div>
+    <div class="card"><div class="k">{{ _('Online Sites') }}</div><div class="v ok" id="c-online">–</div></div>
+    <div class="card"><div class="k">{{ _('Integrity Alerts') }}</div><div class="v warn" id="c-alerts">–</div></div>
+    <div class="card"><div class="k">{{ _('Pending Commands') }}</div><div class="v" id="c-pending">–</div></div>
+  </div>
+
+  <section>
+    <h2>{{ _('Site Overview') }}</h2>
+    <table>
+      <thead><tr>
+        <th>{{ _('Deployment Code') }}</th><th>{{ _('Name / Site') }}</th><th>{{ _('Status') }}</th><th>{{ _('Integrity') }}</th>
+        <th>{{ _('Last Heartbeat') }}</th><th>IP</th><th>{{ _('Version') }}</th><th>{{ _('Actions') }}</th>
+      </tr></thead>
+      <tbody id="dep-body"><tr><td colspan="8" class="muted">{{ _('Loading…') }}</td></tr></tbody>
+    </table>
+  </section>
+
+  <div class="grid2">
+    <section>
+      <h2>{{ _('Register / Update Site') }}</h2>
+      <div class="panel">
+        <div class="field"><label>{{ _('Deployment Code') }} *</label>
+          <input id="f-code" placeholder="{{ _('e.g. TARKA-CN-001') }}">
+          <div class="hint">{{ _('Matches DEPLOYMENT_CODE in the client site .env; sites auto-register on first heartbeat even if not pre-registered.') }}</div>
+        </div>
+        <div class="field"><label>{{ _('Site-level PROBE_SECRET') }}</label>
+          <input id="f-secret" placeholder="{{ _('Empty = use global PROBE_SECRET / keep unchanged') }}">
+          <div class="hint">{{ _('Must exactly match PROBE_SECRET in the client site .env; used for heartbeat AES-GCM decryption.') }}</div>
+        </div>
+        <div class="field"><label>{{ _('Display Name') }}</label><input id="f-name"></div>
+        <div class="field"><label>{{ _('Site URL') }}</label><input id="f-url" placeholder="https://tarka.cn"></div>
+        <div class="field"><label>{{ _('Notes') }}</label><input id="f-notes"></div>
+        <button class="btn primary" onclick="saveDeployment()">{{ _('Save Site') }}</button>
+      </div>
+    </section>
+    <section>
+      <h2>{{ _('Send Remote Command') }}</h2>
+      <div class="panel">
+        <div class="field"><label>{{ _('Target Site') }}</label><select id="cmd-code"></select></div>
+        <div class="field"><label>{{ _('Command') }}</label>
+          <select id="cmd-action">
+            <option value="warn">{{ _('warn — show warning banner') }}</option>
+            <option value="lock_ai">{{ _('lock_ai — disable AI features') }}</option>
+            <option value="lock_full">{{ _('lock_full — maintenance page / API 503') }}</option>
+            <option value="shutdown">{{ _('shutdown — stop all services (destructive)') }}</option>
+            <option value="self_destruct">{{ _('self_destruct — self destruction (destructive)') }}</option>
+            <option value="update_config">{{ _('update_config — update runtime params') }}</option>
+          </select>
+          <div class="hint">{{ _('Destructive commands only execute when the target site has VG_OPS_CONFIRM configured and params.ops_token matches (fail-closed).') }}</div>
+        </div>
+        <div class="field"><label>params (JSON)</label>
+          <textarea id="cmd-params" rows="3" placeholder='{"message": "...", "ops_token": ""}'></textarea>
+        </div>
+        <button class="btn danger" onclick="sendCommand()">{{ _('Send Command') }}</button>
+      </div>
+    </section>
+  </div>
+
+  <section>
+    <h2>{{ _('Security Events (integrity alerts)') }}</h2>
+    <div id="evt-list"><div class="muted">{{ _('Loading…') }}</div></div>
+  </section>
+
+  <section>
+    <h2>{{ _('Subscription Licenses') }} (subscription_deployments)</h2>
+    <table>
+      <thead><tr><th>{{ _('Deployment Code') }}</th><th>{{ _('Hostname') }}</th><th>{{ _('Valid') }}</th><th>{{ _('Days Remaining') }}</th><th>{{ _('Expires At') }}</th><th>{{ _('Last Seen') }}</th><th>{{ _('Actions') }}</th></tr></thead>
+      <tbody id="sub-body"><tr><td colspan="7" class="muted">{{ _('Loading…') }}</td></tr></tbody>
+    </table>
+    <div class="panel" style="margin-top:12px">
+      <div class="grid2">
+        <div class="field"><label>{{ _('Deployment Code') }} *</label><input id="s-code"></div>
+        <div class="field"><label>{{ _('Valid') }}</label><select id="s-valid"><option value="1">true</option><option value="0">false</option></select></div>
+        <div class="field"><label>{{ _('Days Remaining') }}</label><input id="s-days" type="number" value="365"></div>
+        <div class="field"><label>{{ _('Expires At (ISO, optional)') }}</label><input id="s-exp" placeholder="2027-11-02T00:00:00Z"></div>
+        <div class="field"><label>{{ _('Plan') }}</label><input id="s-plan"></div>
+        <div class="field"><label>{{ _('Message') }}</label><input id="s-msg"></div>
+      </div>
+      <button class="btn primary" onclick="saveSubscription()">{{ _('Save Subscription') }}</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>{{ _('Command History') }}</h2>
+    <table>
+      <thead><tr><th>{{ _('Command ID') }}</th><th>{{ _('Site') }}</th><th>{{ _('Action') }}</th><th>{{ _('Status') }}</th><th>{{ _('Result') }}</th><th>{{ _('Created') }}</th><th>{{ _('Acknowledged') }}</th></tr></thead>
+      <tbody id="cmd-body"><tr><td colspan="7" class="muted">{{ _('Loading…') }}</td></tr></tbody>
+    </table>
+  </section>
+</div>
+
+<dialog id="dlg-hb">
+  <h3>{{ _('Heartbeat History') }} — <span id="dlg-code" class="mono"></span></h3>
+  <table><thead><tr><th>{{ _('Time') }}</th><th>{{ _('Integrity') }}</th><th>IP</th><th>{{ _('Version') }}</th></tr></thead>
+  <tbody id="dlg-body"></tbody></table>
+  <p style="margin-top:12px;text-align:right"><button class="btn" onclick="document.getElementById('dlg-hb').close()">{{ _('Close') }}</button></p>
+</dialog>
+
+<div id="toast"></div>
+
+<script>
+// token 来源：?token= 优先，其次 sso_token cookie（与 /admin/workflow-editor 一致）
+const qs = new URLSearchParams(location.search);
+const TOKEN = qs.get('token') || (document.cookie.match(/(?:^|;\s*)sso_token=([^;]+)/) || [,''])[1];
+const H = {'Authorization': 'Bearer ' + TOKEN};
+let DEPLOYMENTS = [];
+
+// i18n 字典（Jinja 服务端渲染，|tojson 安全注入 JS 字符串字面量）
+const I18N = {
+  loading: {{ _('Loading…')|tojson }},
+  noSites: {{ _('No sites yet — sites auto-register once the client heartbeat arrives with PROBE_SECRET/DEPLOYMENT_CODE configured')|tojson }},
+  noRecords: {{ _('No records yet')|tojson }},
+  noEvents: {{ _('No events yet — integrity warn/critical heartbeats generate events automatically')|tojson }},
+  noSubs: {{ _('No subscription licenses yet — save one so client heartbeats receive valid/days_remaining')|tojson }},
+  noCommands: {{ _('No commands yet')|tojson }},
+  loadFail: {{ _('Load failed')|tojson }},
+  saveFail: {{ _('Save failed')|tojson }},
+  sendFail: {{ _('Send failed')|tojson }},
+  siteSaved: {{ _('Site saved')|tojson }},
+  subSaved: {{ _('Subscription saved')|tojson }},
+  queued: {{ _('Command queued')|tojson }},
+  queuedDestructive: {{ _('Command queued (destructive command requires local site confirmation)')|tojson }},
+  badJson: {{ _('params is not valid JSON')|tojson }},
+  codeRequired: {{ _('Deployment code is required')|tojson }},
+  never: {{ _('Never reported')|tojson }},
+  online: {{ _('Online')|tojson }},
+  offline: {{ _('Offline')|tojson }},
+  valid: {{ _('Valid')|tojson }},
+  invalid: {{ _('Invalid')|tojson }},
+};
+
+function toast(msg, ok = true) {
+  const d = document.createElement('div');
+  d.className = 'toast-item ' + (ok ? 'ok' : 'err');
+  d.textContent = msg;
+  document.getElementById('toast').appendChild(d);
+  setTimeout(() => d.remove(), 4000);
+}
+async function api(path, opts = {}) {
+  const r = await fetch(path, Object.assign({headers: Object.assign(H, {'Content-Type': 'application/json'})}, opts));
+  const j = await r.json().catch(() => ({success: false, error: 'bad response'}));
+  if (!j.success) throw new Error(j.error || ('HTTP ' + r.status));
+  return j.data;
+}
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function fmtStatus(d) {
+  if (d.never_reported) return '<span class="badge never">' + I18N.never + '</span>';
+  return d.online ? '<span class="badge online">' + I18N.online + '</span>' : '<span class="badge offline">' + I18N.offline + '</span>';
+}
+function fmtIntegrity(s) {
+  const cls = s === 'ok' ? 'int-ok' : (s === 'critical' ? 'int-critical' : (s === 'warn' ? 'int-warn' : 'never'));
+  return '<span class="badge ' + cls + '">' + esc(s) + '</span>';
+}
+const fmtTime = s => (s || '—').replace('T', ' ').slice(0, 19);
+
+async function loadOverview() {
+  try {
+    const data = await api('/admin/api/veroguard/overview');
+    DEPLOYMENTS = data.deployments || [];
+    document.getElementById('c-total').textContent = data.summary.total;
+    document.getElementById('c-online').textContent = data.summary.online;
+    document.getElementById('c-alerts').textContent = data.summary.integrity_alerts;
+    document.getElementById('c-pending').textContent = data.summary.pending_commands;
+    const tb = document.getElementById('dep-body');
+    tb.innerHTML = DEPLOYMENTS.length ? DEPLOYMENTS.map(d => `<tr>
+      <td class="mono">${esc(d.deployment_code)}</td>
+      <td>${esc(d.display_name || '—')}${d.site_url ? '<br><span class="muted mono" style="font-size:11px">' + esc(d.site_url) + '</span>' : ''}</td>
+      <td>${fmtStatus(d)}</td>
+      <td>${fmtIntegrity(d.last_integrity)}</td>
+      <td class="muted">${esc(fmtTime(d.last_heartbeat_at))}</td>
+      <td class="mono muted">${esc(d.last_ip || '—')}</td>
+      <td class="mono muted">${esc(d.last_version || '—')}</td>
+      <td><button class="btn sm" onclick="showHeartbeats('${esc(d.deployment_code)}')">{{ _('Heartbeats') }}</button>
+          <button class="btn sm" onclick="fillCmd('${esc(d.deployment_code)}')">{{ _('Command') }}</button></td>
+    </tr>`).join('') : '<tr><td colspan="8" class="muted">' + I18N.noSites + '</td></tr>';
+    const sel = document.getElementById('cmd-code');
+    sel.innerHTML = DEPLOYMENTS.map(d => `<option value="${esc(d.deployment_code)}">${esc(d.deployment_code)}</option>`).join('');
+    document.getElementById('pulse').style.background = data.summary.online ? 'var(--success)' : 'var(--warning)';
+  } catch (e) { toast(I18N.loadFail + ': ' + e.message, false); }
+}
+
+async function showHeartbeats(code) {
+  try {
+    const data = await api('/admin/api/veroguard/heartbeats/' + encodeURIComponent(code));
+    document.getElementById('dlg-code').textContent = code;
+    document.getElementById('dlg-body').innerHTML = (data.heartbeats || []).map(h => `<tr>
+      <td class="muted">${esc(fmtTime(h.received_at))}</td>
+      <td>${fmtIntegrity(h.integrity_status)}</td>
+      <td class="mono muted">${esc(h.ip || '—')}</td>
+      <td class="mono muted">${esc(h.version || '—')}</td></tr>`).join('')
+      || '<tr><td colspan="4" class="muted">' + I18N.noRecords + '</td></tr>';
+    document.getElementById('dlg-hb').showModal();
+  } catch (e) { toast(I18N.loadFail + ': ' + e.message, false); }
+}
+
+function fillCmd(code) {
+  document.getElementById('cmd-code').value = code;
+  document.getElementById('cmd-action').scrollIntoView({behavior: 'smooth', block: 'center'});
+}
+
+async function saveDeployment() {
+  const code = document.getElementById('f-code').value.trim();
+  if (!code) return toast(I18N.codeRequired, false);
+  try {
+    await api('/admin/api/veroguard/deployments', {method: 'POST', body: JSON.stringify({
+      deployment_code: code,
+      probe_secret: document.getElementById('f-secret').value.trim(),
+      display_name: document.getElementById('f-name').value.trim(),
+      site_url: document.getElementById('f-url').value.trim(),
+      notes: document.getElementById('f-notes').value.trim(),
+    })});
+    toast(I18N.siteSaved); loadOverview();
+  } catch (e) { toast(I18N.saveFail + ': ' + e.message, false); }
+}
+
+async function sendCommand() {
+  let params = {};
+  const raw = document.getElementById('cmd-params').value.trim();
+  if (raw) { try { params = JSON.parse(raw); } catch (e) { return toast(I18N.badJson, false); } }
+  try {
+    const r = await api('/admin/api/veroguard/commands', {method: 'POST', body: JSON.stringify({
+      deployment_code: document.getElementById('cmd-code').value,
+      action: document.getElementById('cmd-action').value, params,
+    })});
+    toast((r.notice ? I18N.queuedDestructive : I18N.queued) + ' · ' + r.command_id);
+    loadCommands();
+  } catch (e) { toast(I18N.sendFail + ': ' + e.message, false); }
+}
+
+async function loadEvents() {
+  try {
+    const data = await api('/admin/api/veroguard/events');
+    document.getElementById('evt-list').innerHTML = (data.events || []).map(e => `<div class="evt">
+      <span class="sev ${esc(e.severity)}">[${esc(e.severity)}]</span>
+      <span class="mono muted">${esc(e.deployment_code)}</span> · ${esc(e.event_type)}
+      · <span class="muted">${esc(fmtTime(e.received_at))}</span>
+      <div class="mono" style="margin-top:5px;color:var(--text-dim)">${esc(JSON.stringify(e.detail)).slice(0, 220)}</div>
+    </div>`).join('') || '<div class="muted">' + I18N.noEvents + '</div>';
+  } catch (e) { document.getElementById('evt-list').innerHTML = '<div class="muted">' + I18N.loadFail + '</div>'; }
+}
+
+async function loadSubscriptions() {
+  try {
+    const data = await api('/admin/api/veroguard/subscriptions');
+    document.getElementById('sub-body').innerHTML = (data.subscriptions || []).map(s => `<tr>
+      <td class="mono">${esc(s.code)}</td><td class="muted mono">${esc(s.hostname || '—')}</td>
+      <td>${s.valid ? '<span class="badge online">' + I18N.valid + '</span>' : '<span class="badge offline">' + I18N.invalid + '</span>'}</td>
+      <td>${s.days_remaining}</td><td class="muted">${esc((s.expires_at || '—').slice(0, 19))}</td>
+      <td class="muted">${esc(fmtTime(s.last_seen_at))}</td>
+      <td><button class="btn sm" onclick="fillSub('${esc(s.code)}')">{{ _('Edit') }}</button></td>
+    </tr>`).join('') || '<tr><td colspan="7" class="muted">' + I18N.noSubs + '</td></tr>';
+  } catch (e) { toast(I18N.loadFail + ': ' + e.message, false); }
+}
+function fillSub(code) {
+  document.getElementById('s-code').value = code;
+  document.getElementById('s-valid').scrollIntoView({behavior: 'smooth', block: 'center'});
+}
+async function saveSubscription() {
+  const code = document.getElementById('s-code').value.trim();
+  if (!code) return toast(I18N.codeRequired, false);
+  try {
+    await api('/admin/api/veroguard/subscriptions', {method: 'POST', body: JSON.stringify({
+      code, valid: document.getElementById('s-valid').value === '1',
+      days_remaining: parseInt(document.getElementById('s-days').value || '0', 10),
+      expires_at: document.getElementById('s-exp').value.trim(),
+      plan: document.getElementById('s-plan').value.trim(),
+      message: document.getElementById('s-msg').value.trim(),
+    })});
+    toast(I18N.subSaved); loadSubscriptions();
+  } catch (e) { toast(I18N.saveFail + ': ' + e.message, false); }
+}
+
+async function loadCommands() {
+  try {
+    const data = await api('/admin/api/veroguard/commands');
+    document.getElementById('cmd-body').innerHTML = (data.commands || []).map(c => `<tr>
+      <td class="mono">${esc(c.command_id)}</td><td class="mono muted">${esc(c.deployment_code)}</td>
+      <td>${esc(c.action)}</td>
+      <td><span class="badge ${c.status === 'executed' ? 'online' : (c.status === 'failed' ? 'offline' : 'never')}">${esc(c.status)}</span></td>
+      <td class="muted" style="max-width:220px;overflow:hidden;text-overflow:ellipsis">${esc(c.result || '—')}</td>
+      <td class="muted">${esc(fmtTime(c.created_at))}</td>
+      <td class="muted">${esc(fmtTime(c.acked_at))}</td>
+    </tr>`).join('') || '<tr><td colspan="7" class="muted">' + I18N.noCommands + '</td></tr>';
+  } catch (e) { toast(I18N.loadFail + ': ' + e.message, false); }
+}
+
+loadOverview(); loadEvents(); loadSubscriptions(); loadCommands();
+setInterval(loadOverview, 60000);
+</script>
+</body>
+</html>

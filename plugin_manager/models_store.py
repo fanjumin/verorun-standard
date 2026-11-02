@@ -427,6 +427,28 @@ CREATE TABLE IF NOT EXISTS edition_catalog (
     updated_at      TEXT DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_edition_catalog_enabled ON edition_catalog(enabled, edition);
+
+-- ── 豁免 Key（管理员签发 → 用户兑换 → 动态授权）────────────────────
+-- 定位：Key 是「预签发的 License Key」发行形态。兑换即按 scope 写入
+--       plugin_licenses（active），validate() 天然放行，内核零改动。
+--       DB 只存 SHA256(key)，明文仅创建响应中出现一次。
+CREATE TABLE IF NOT EXISTS plugin_exemption_keys (
+    id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    key_hash        TEXT NOT NULL UNIQUE,            -- SHA256(明文 key)
+    key_prefix      TEXT NOT NULL DEFAULT '',        -- 明文前 12 位（列表展示/对账用）
+    scope_plugins   TEXT NOT NULL DEFAULT '[]',      -- JSON：["*"] 或插件 identifier 列表
+    max_redemptions BIGINT NOT NULL DEFAULT 1,       -- 最大兑换次数（站点数）
+    redeemed_count  BIGINT NOT NULL DEFAULT 0,
+    redeemed_sites  TEXT NOT NULL DEFAULT '[]',      -- JSON：已兑换 site_id 列表（审计）
+    key_status      TEXT NOT NULL DEFAULT 'active'
+                    CHECK(key_status IN ('active','revoked')),
+    expires_at      TEXT,                            -- 兑换后的 License 到期时间（可空=永久）
+    granted_by      TEXT DEFAULT '',                 -- 签发管理员
+    note            TEXT DEFAULT '',                 -- 用途备注（如 tarka.cn 官网授权）
+    created_at      TEXT DEFAULT NOW(),
+    updated_at      TEXT DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_exemption_keys_status ON plugin_exemption_keys(key_status);
 """
 # i18n:tech:end
 

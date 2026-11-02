@@ -130,6 +130,14 @@ if _USER_LOGIN_ENABLED:
     except Exception as e:
         print(f'[OAuth Plugin] ⚠️ Load failed: {e}')
 
+# ── VeroGuard / 订阅心跳官方接收端（公开 API，协议层鉴权）──
+try:
+    from routes.guardian_api import guardian_api_bp
+    app.register_blueprint(guardian_api_bp)
+    print('[GuardianAPI] ✅ VeroGuard heartbeat/ack + subscription heartbeat endpoints registered')
+except Exception as e:
+    print(f'[GuardianAPI] ⚠️ Load failed: {e}')
+
 try:
     from flask_cors import CORS
     CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
