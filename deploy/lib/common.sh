@@ -1477,6 +1477,23 @@ EOF
     sudo -u "${APP_USER}" env VR_ADMIN_USERNAME="${VR_ADMIN_USERNAME}" VR_ADMIN_PASSWORD="${VR_ADMIN_PASSWORD}" \
         "${VENV_DIR}/bin/python" "${APP_HOME}/deploy/seed_data.py" --env "${APP_HOME}/.env"
     echo -e "${OK} Seed data injected"
+
+    # 系统知识库（官方手册）播种：必须在 DB 迁移完成、admin 种子写入之后执行，
+    # 这样运行期的数据库清洗（cleaner_agent）才有内容可处理。
+    # 由安装脚本承担而非插件：系统库属官方资产，不能随插件停用/卸载而缺失。
+    # 失败不阻断安装（手册目录缺失时脚本自身会 skip 并返回 0）。
+    local _kb_dir="${VR_SYSTEM_KB_DIR:-${APP_HOME}/docs/manual}"
+    if [ -d "${_kb_dir}" ]; then
+        if sudo -u "${APP_USER}" "${VENV_DIR}/bin/python" \
+            "${APP_HOME}/deploy/scripts/seed_system_knowledge.py" \
+            --env "${APP_HOME}/.env" --dir "${_kb_dir}"; then
+            echo -e "${OK} System knowledge base seeded"
+        else
+            echo -e "${WARN} System knowledge seed failed (non-fatal, install continues)"
+        fi
+    else
+        echo -e "${INFO} No manual source at ${_kb_dir} — system knowledge base left empty"
+    fi
 }
 
 # ══════════════════════════════════════════════════════════════════════

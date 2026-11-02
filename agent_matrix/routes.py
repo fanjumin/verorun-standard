@@ -2699,9 +2699,9 @@ def _build_attachment_block(attachments) -> str:
             if total + len(text) > ATTACH_MAX_TOTAL:
                 break
             total += len(text)
-            blocks.append(f'=== 附件: {name}（{rel}） ===\n{text}\n=== 附件结束 ===')
+            blocks.append(f'=== 附件: {name}（{rel}） ===\n{text}\n=== 附件结束 ===')  # i18n:tech — LLM 注入块
         else:
-            blocks.append(f'[附件] {name} 已保存到 {rel}（二进制/未能提取正文）')
+            blocks.append(f'[附件] {name} 已保存到 {rel}（二进制/未能提取正文）')  # i18n:tech — LLM 注入块
     return ('\n\n' + '\n\n'.join(blocks)) if blocks else ''
 
 

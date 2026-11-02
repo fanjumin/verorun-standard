@@ -596,6 +596,7 @@ _BUILTIN_CATEGORY_SEED = (
 _EDITION_CATALOG_SEED = (
     ('enterprise', 'Edition Enterprise',   'web',     ()),
     ('standard',   'Edition Standard',     'web',     ()),
+    ('tarka',      'Edition Tarka',        'web',     ()),
     ('pro',        'Edition Professional', 'web',     ()),
     ('finance',    'Edition Finance',      'desktop', ()),
     ('research',   'Edition Research',     'desktop', ()),

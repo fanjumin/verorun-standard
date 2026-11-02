@@ -1,9 +1,9 @@
 # VeroRun — Enterprise Multi-Core AI Operating System
 
-[![Version](https://img.shields.io/badge/version-0.63.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.66.0-blue.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-EULA%20v1.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)]()
-[![Plugins](https://img.shields.io/badge/plugins-43-orange.svg)]()
+[![Plugins](https://img.shields.io/badge/plugins-50-orange.svg)]()
 
 **VeroRun is a multi-core AI operating system that makes intelligent execution trustworthy, verifiable, and traceable — driven by core capabilities including agent collaboration, knowledge retrieval, content generation, and process orchestration, deployed on customer-owned servers.**
 
@@ -21,7 +21,7 @@ The engine core provides five intelligent execution primitives: **Multi-Agent co
 - **Multi-Provider LLM Gateway (UnifiedLLM)**: provider-agnostic unified API, 14 landed providers — 9 self-hosted vendors (DeepSeek / OpenAI / Ollama / Gemini / Grok / KIMI / 智谱 GLM / Anthropic / Edge-TTS) + 5 aggregators (阿里百炼 DashScope / 腾讯 TokenHub / 百度千帆 / OpenRouter / SiliconFlow) + 120 model seed records (main seed 96 + OpenRouter free-tier 24), transparent model substitution, automatic failover, key management, budget gate, 4-level quota — **zero kernel hardcoded provider/model** (engine.py PROVIDER_CONFIGS removed, all provider/model resolved from `system_config` + database seed, tools.py markdown/docx unified).
 - **Runtime-Free Plugin Config**: plugin-level provider/model no longer hardcoded — both `enterprise_verify` OCR + audit and plugins that previously had fallback literals (`mini_app_builder`, `analytics`) now read from `system_config` keys (`ai_text_provider` / `ai_text_model` / `enterprise_verify_ocr_*` / `enterprise_verify_audit_*`).
 - **VeroGuard Guard Layer**: health monitoring + integrity verification + encrypted heartbeat, dual-process mutual protection, client-side asset protection; Ed25519-signed releases, integrity manifests, and source watermarks guard the supply chain.
-- **Plugin Ecosystem**: 43 built-in plugins carry any business form, full lifecycle management, plugin marketplace, licensing engine.
+- **Plugin Ecosystem**: 50 built-in plugins carry any business form, full lifecycle management, plugin marketplace, licensing engine.
 
 Kernel design principle: **business semantics are declared entirely by plugins** — adding a business capability is equivalent to assembling a plugin, keeping the kernel stable.
 
@@ -37,7 +37,7 @@ Kernel design principle: **business semantics are declared entirely by plugins**
 ┌──────────────────────────────────────────────────────────────┐
 │ Application Layer  Plugin apps: knowledge · content · commerce│
 │                   · communications · ops …                    │
-│                   43 built-in plugins; any business via plugins│
+│                   50 built-in plugins; any business via plugins│
 ├──────────────────────────────────────────────────────────────┤
 │ Engine Base       Multi-role AI Agent Matrix + Discussion     │
 │                   Knowledge memory (vector) · Workflow · PromptResolver │
@@ -272,7 +272,7 @@ Unifies health monitoring, code-integrity verification, and encrypted heartbeat 
 - **Self-protection**: dual-process (`guardian` monitors business services, `self_protect` monitors the guardian) with pipe / pidfile heartbeat and automatic restart on parent death.
 - **Tiered recovery**: restart → GitHub rollback (`guardian.py --rollback-now` for manual trigger), with a cooldown window to prevent rollback loops.
 - **Daily snapshot**: `verorun-guardian-snapshot.timer` (systemd, daily) snapshots state ahead of rollback.
-- **Signed release chain**: Ed25519-signed release manifests + integrity manifests + official token verification; version-scope downgrade protection (`min/max_version`); build-time `build_id` source watermarks.
+- **Signed release chain**: Ed25519-signed release manifests + integrity manifests + official token verification; version-scope downgrade protection (`min/max_version`); build-time `build_id` source watermarks. Release manifests are no longer committed to the repo (`release_manifest.json` / `release_manifest.sig` are gitignored) — they are generated and re-signed at build time by `deploy/scripts/sign_release.py` and published as signed Release assets, so the signing key never enters git history.
 - **CI freshness gate**: `tests.yml` verifies `veroguard/data/manifest.json` matches `VERSION` on every run; a stale manifest fails CI (fix via the "Refresh VeroGuard Manifest" GitHub Actions workflow).
 - **Remote commands** (6): `warn`, `lock_ai`, `lock_full`, `shutdown`, `self_destruct`, `update_config`; destructive commands (`shutdown` / `self_destruct`) additionally require a local ops-token confirmation.
 
@@ -298,12 +298,14 @@ Full lifecycle management (6 states: `UNKNOWN → INSTALLED → ENABLED → ACTI
 | Domain | Plugins |
 |---|---|
 | Knowledge management | `chatbot`, `memory_engine`, `project_workspace`, `veroscholar` (incl. Discovery Engine) |
-| Edge / IIoT evolution | `cogevolution_substrate` (CES 边缘/IIoT 进化底座，能力 memory.curate/extract/iiot；与 `memory_engine` v0.62.1 起 conflicts 互斥，默认不启用) |
+| Research & assessment | `search_hub`, `survey`, `assessment` |
+| Analytical engines | `bayes_engine`, `butterfly_engine`, `chaos_engine` |
+| Edge / IIoT evolution | `cogevolution_substrate` (CES 边缘/IIoT 进化底座，能力 memory.curate/extract/iiot；与 `memory_engine` v0.62.1 起 conflicts 互斥，默认不启用), `ros_bridge`, `blender_bridge` |
 | Content publishing | `content_factory`, `site_builder`, `mini_app_builder`, `ads`, `social_push` |
-| Business operations | `shop`, `payment`, `logistics`, `subscription`, `coupons`, `order_notify`, `reviews`, `wishlist`, `stock_analysis`, `risk_control`, `ai_relay` |
-| Communications | `im_gateway`, `email`, `sms`, `oauth_config`, `verification` |
-| Ops & security | `health_check`, `vault`, `captcha_embedded`, `enterprise_verify`, `two_factor_auth`, `ali_api`, `iot_hub` |
-| Data & utilities | `visitor_profile`, `analytics`, `currency_converter`, `site_domains` |
+| Business operations | `shop`, `payment`, `logistics`, `subscription`, `coupons`, `order_notify`, `reviews`, `wishlist`, `stock_analysis`, `risk_control`, `ai_relay`, `hr_recruit`, `multi_asset` |
+| Communications | `im_gateway`, `email`, `sms`, `oauth_config`, `verification`, `omni_service` |
+| Ops & security | `health_check`, `vault`, `captcha_embedded`, `enterprise_verify`, `two_factor_auth`, `ali_api`, `iot_hub`, `net_proxy` |
+| Data & utilities | `visitor_profile`, `analytics`, `currency_converter`, `site_domains`, `neural_flow` |
 
 **Communications (`email`, v1.7.0)**: a full SMTP/IMAP email client — inbox search (server-side IMAP SEARCH with automatic client-side fallback), compose with CC/BCC and attachments, drafts, forward, and batch mailbox operations (mark read/unread, move, multi-select delete with confirmation), plus contact management and 22 preset mail providers with automatic domain inference. It exposes `email_send`, `email_send_contact`, and `email_get_config` as stdio MCP tools callable by the Agent Matrix.
 
@@ -404,7 +406,7 @@ VeroRun/
 │   ├── orchestrator.py     # Task decomposition, parallel dispatch
 │   └── agent_runner.py     # Self-evaluating executor
 ├── orchestrator/           # Visual workflow engine (DAG)
-├── plugins/                # 43 built-in plugins (business form assembly)
+├── plugins/                # 50 built-in plugins (business form assembly)
 ├── plugin_manager/         # Plugin lifecycle / marketplace / licensing / regional routing
 ├── veroguard/              # VeroGuard guard layer (7 modules)
 ├── health_guardian/        # Guardian support package (with health_guardian.py entry)
@@ -430,7 +432,7 @@ VeroRun/
 
 ## Codebase Metrics
 
-Measured on the v0.63.0 working copy (2026-10-05) with a `cloc`-style single-pass scan that classifies every line of every source file as **code / comment / blank** using language-specific comment syntax. Excluded from the count: build artifacts and vendored third-party code (`__pycache__`, `node_modules`, `backups/`, `data/`, `tmp/`, `outputs/`, `server_backup/`, `_ssh/`, hidden dependency caches such as `.stock_deps/`, minified bundles), and the internal engineering documents under `docs/` (plans, session handoffs, audit reports) — so the numbers reflect first-party product source only.
+Measured on the v0.63.0 working copy (2026-10-05) with a `cloc`-style single-pass scan (line counts are the v0.63.0 snapshot; the plugin count in the module table is synced to v0.66.0) that classifies every line of every source file as **code / comment / blank** using language-specific comment syntax. Excluded from the count: build artifacts and vendored third-party code (`__pycache__`, `node_modules`, `backups/`, `data/`, `tmp/`, `outputs/`, `server_backup/`, `_ssh/`, hidden dependency caches such as `.stock_deps/`, minified bundles), and the internal engineering documents under `docs/` (plans, session handoffs, audit reports) — so the numbers reflect first-party product source only.
 
 **Total: 300,787 code lines across 1,874 files** (plus 47,686 comment and 48,550 blank lines). Excluding prompt/documentation formats (Markdown, Text), executable code + markup ≈ **280,200 lines**.
 
@@ -454,7 +456,7 @@ Measured on the v0.63.0 working copy (2026-10-05) with a `cloc`-style single-pas
 
 | Module | Code lines | Share | Role |
 |---|---:|---:|---|
-| `plugins/` | 186,784 | 62.1% | Application layer — 43 plugins |
+| `plugins/` | 186,784 | 62.1% | Application layer — 50 plugins (count synced to v0.66.0) |
 | `admin/` | 21,257 | 7.1% | Admin console (8084) |
 | `main_site/` | 15,794 | 5.3% | Platform console (8083) |
 | `plugin_manager/` | 14,815 | 4.9% | Lifecycle / marketplace / licensing |
@@ -488,7 +490,6 @@ Kernel proper (`agent_matrix` + `orchestrator` + `plugin_manager` + `veroguard` 
 - `sdks/README.md` — SDK usage
 - `deploy/README.md` — deployment notes
 - `plugins/memory_engine/README.md` — cognitive evolution engine
-- `docs/VeroRun-技术白皮书-v0.63.0-审计修订版.md` — 技术架构白皮书（系统级架构与插件体系）
 - `help/core/` — 用户指南（终端用户手册，00-overview → 99-faq）
 - `docs/plugin-standard-v1.8.md` — 插件开发标准（v1.8，现行规范）
 - `docs/official-api-security-spec.md` — official API security spec (token revocation + command signing)

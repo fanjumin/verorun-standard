@@ -13,11 +13,14 @@ agent_matrix/models.py 再导出本模块的全部公开符号，既有调用方
 import os
 
 # ── 发行版 edition 归一化（单一事实源：VR_EDITION / RELEASE_EDITION / DEPLOY_TYPE）──
-# 现行发行版 ID 共 7 个（定稿后不再变更；显示名走 i18n，与 ID 解耦）：
-#   enterprise 企业版 / standard 标准版 / pro 专业版 / finance 金融版 /
+# 现行发行版 ID 共 8 个（定稿后不再变更；显示名走 i18n，与 ID 解耦）：
+#   enterprise 企业版 / standard 标准版 / tarka 塔卡投研 / pro 专业版 / finance 金融版 /
 #   research 科研版 / minipro 小程序版 / edge 边缘版
 # 注意：pro（专业版）与 finance（金融版）是两个**独立** ID，不可再合并。
-_EDITION_IDS = ('enterprise', 'standard', 'pro', 'finance', 'research', 'minipro', 'edge')
+# tarka（2026-11-01 用户裁决）：公开产品「塔卡投研」的发行 ID。不用 standard 命名，
+# 因 standard 同时是发布仓库 fanjumin/verorun-standard 的名字，二者混用会产生误解；
+# 兼容口径由下文 _EDITION_COMPAT_UNION 承接（声明 standard 的插件在 tarka 下同样放行）。
+_EDITION_IDS = ('enterprise', 'standard', 'tarka', 'pro', 'finance', 'research', 'minipro', 'edge')
 
 # 历史旧名 / 别名 → 现行 ID（大小写不敏感）
 # 'official' 为 enterprise 的历史别名，过渡期保留；显式写入 enterprise 同样有效。
@@ -25,6 +28,7 @@ _EDITION_ALIASES = {
     'official': 'enterprise',
     'enterprise-web': 'enterprise',
     'standard-web': 'standard',
+    'tarka-web': 'tarka',
     'pro-web': 'pro',
     'finance-desktop': 'finance',
     'research-desktop': 'research',
@@ -52,8 +56,24 @@ def current_edition() -> str:
                              or os.getenv('DEPLOY_TYPE') or '')
 
 
+# ── 插件兼容判定的发行版并集（改名不改插件声明）──
+# tarka 是 standard 的产品化命名：存量插件在 plugin.json 的 compatible_editions 里
+# 登记的是 'standard'（42 个），改名时**不要求**逐个改写插件声明，改由本表在判定侧
+# 把 'tarka' 展开为 {'tarka','standard'}。新增发行版若与旧 ID 同义，在此登记即可。
+# 未登记的 ID 原样返回，不改变既有行为。
+_EDITION_COMPAT_UNION = {
+    'tarka': ('tarka', 'standard'),
+}
+
+
+def edition_compat_values(edition: str = None) -> tuple:
+    """当前发行版在插件兼容判定时应被接受的全部 ID（含同义旧名）。"""
+    e = normalize_edition(edition or current_edition())
+    return _EDITION_COMPAT_UNION.get(e, (e,))
+
+
 # ── canonical ID → 磁盘产物名（**唯一**桥接点）──
-# canonical ID（_EDITION_IDS，7 个）与磁盘产物命名历史上分叉：
+# canonical ID（_EDITION_IDS，8 个）与磁盘产物命名历史上分叉：
 #   deploy/editions/<stem>.yaml、agent_matrix/roles/<stem>/
 # 磁盘侧仍沿用旧名 / 连字符名（official / finance-desktop / research-desktop）。
 # 二者必须显式桥接，**禁止**在各消费点自行字符串拼接：`f'{current_edition()}.yaml'`
@@ -62,6 +82,7 @@ def current_edition() -> str:
 _EDITION_ARTIFACT_STEMS = {
     'enterprise': 'official',
     'standard': 'standard',
+    'tarka': 'tarka',
     'finance': 'finance-desktop',
     'research': 'research-desktop',
     # 全网智能客服（omni-service）版（2026-10-21 用户裁决）：服务器部署 + 桌面轻壳远程接入。

@@ -1,9 +1,9 @@
 # VeroRun — 企业多核 AI 操作系统
 
-[![Version](https://img.shields.io/badge/version-0.63.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.66.0-blue.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-EULA%20v1.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)]()
-[![Plugins](https://img.shields.io/badge/plugins-43-orange.svg)]()
+[![Plugins](https://img.shields.io/badge/plugins-50-orange.svg)]()
 
 **VeroRun 是让智能执行可信、可验证、可追溯的多核 AI 操作系统——智能体协作、知识检索、内容生成与流程编排等核心能力并行驱动，部署在客户自有服务器上独立运转。**
 
@@ -21,7 +21,7 @@
 - **多供应商 LLM 网关（UnifiedLLM）**：provider-agnostic 统一 API，14 家已落地供应商——9 家自研厂商（DeepSeek / OpenAI / Ollama / Gemini / Grok / KIMI / 智谱 GLM / Anthropic / Edge-TTS）+ 5 家聚合平台（阿里百炼 DashScope / 腾讯 TokenHub / 百度千帆 / OpenRouter / SiliconFlow）+ 120 条模型种子记录（主种子 96 条 + OpenRouter 免费档 24 条），透明模型替换、自动故障转移、密钥管理、预算闸门、4 级配额——**内核零硬编码 provider/model**（engine.py PROVIDER_CONFIGS 已移除，provider/model 统一由 `system_config` + 数据库种子解析，markdown/docx 工具收编进网关）。
 - **插件配置零字面量**：插件级 provider/model 不再硬编码——`enterprise_verify` 的 OCR + 审核配置、`mini_app_builder` 与 `analytics` 的兜底字面量，统一改为读取 `system_config` 键（`ai_text_provider` / `ai_text_model` / `enterprise_verify_ocr_*` / `enterprise_verify_audit_*`）。
 - **VeroGuard 守护层**：健康监控 + 完整性校验 + 加密心跳，双进程互护，客户侧资产守护；Ed25519 签名发布、完整性清单与来源水印守护供应链。
-- **插件生态**：43 个内置插件承载任意业务形态，全生命周期管理、插件商店、许可引擎。
+- **插件生态**：50 个内置插件承载任意业务形态，全生命周期管理、插件商店、许可引擎。
 
 内核设计准则：**业务语义全部由插件声明**，新增业务能力等价于装配一个插件，内核保持稳定。
 
@@ -36,7 +36,7 @@
 ```text
 ┌──────────────────────────────────────────────────────────────┐
 │ 应用生态层  插件应用：知识管理 · 内容 · 商业经营 · 通信 · 运维…  │
-│            43 个内置插件覆盖多领域，任意业务形态经插件装配落地  │
+│            50 个内置插件覆盖多领域，任意业务形态经插件装配落地  │
 ├──────────────────────────────────────────────────────────────┤
 │ 引擎底座    多角色 AI Agent 矩阵 + 四阶段讨论协议              │
 │            知识库记忆（向量检索）· 可视化工作流引擎 · PromptResolver │
@@ -294,12 +294,14 @@ v2 另外补齐一整套研究栈（源自专项实施方案）：`secmaster` �
 | 领域 | 插件 |
 |---|---|
 | 知识管理 | `chatbot`、`memory_engine`、`project_workspace`、`veroscholar`（含假设发现引擎） |
-| 边缘 / IIoT 进化 | `cogevolution_substrate`（CES 边缘/IIoT 进化底座，能力 memory.curate/extract/iiot；与 `memory_engine` v0.62.1 起 conflicts 互斥，默认不启用） |
-| 内容传播 | `content_factory`、`site_builder`、`mini_app_builder`、`ads`、`social_push` 等 |
-| 商业经营 | `shop`、`payment`、`logistics`、`subscription`、`coupons`、`ai_relay` 等 |
-| 通信协作 | `im_gateway`、`email`、`sms`、`oauth_config` |
-| 运维安全 | `health_check`、`vault`、`captcha_embedded`、`enterprise_verify` 等 |
-| 数据工具 | `visitor_profile`、`analytics`、`currency_converter`、`site_domains` 等 |
+| 研究评估 | `search_hub`、`survey`、`assessment` |
+| 分析引擎 | `bayes_engine`、`butterfly_engine`、`chaos_engine` |
+| 边缘 / IIoT 进化 | `cogevolution_substrate`（CES 边缘/IIoT 进化底座，能力 memory.curate/extract/iiot；与 `memory_engine` v0.62.1 起 conflicts 互斥，默认不启用）、`ros_bridge`、`blender_bridge` |
+| 内容传播 | `content_factory`、`site_builder`、`mini_app_builder`、`ads`、`social_push` |
+| 商业经营 | `shop`、`payment`、`logistics`、`subscription`、`coupons`、`order_notify`、`reviews`、`wishlist`、`stock_analysis`、`risk_control`、`ai_relay`、`hr_recruit`、`multi_asset` |
+| 通信协作 | `im_gateway`、`email`、`sms`、`oauth_config`、`verification`、`omni_service` |
+| 运维安全 | `health_check`、`vault`、`captcha_embedded`、`enterprise_verify`、`two_factor_auth`、`ali_api`、`iot_hub`、`net_proxy` |
+| 数据工具 | `visitor_profile`、`analytics`、`currency_converter`、`site_domains`、`neural_flow` |
 
 **通信协作（`email`，v1.7.0）**：完整的 SMTP/IMAP 邮件客户端 —— 收件箱搜索（优先服务端 IMAP SEARCH，自动降级客户端过滤）、撰写支持抄送/密送与附件、草稿箱、转发、信箱批量操作（标记已读/未读、移动、多选删除二次确认），以及联系人管理与 22 家预置邮件服务商域名自动推导。同时以 stdio MCP 暴露 `email_send`、`email_send_contact`、`email_get_config` 三个工具，供 Agent 矩阵直接调用。
 
@@ -400,7 +402,7 @@ VeroRun/
 │   ├── orchestrator.py     # 任务分解、并行分发
 │   └── agent_runner.py     # 自评执行
 ├── orchestrator/           # 可视化工作流引擎（DAG）
-├── plugins/                # 43 个内置插件（业务形态装配）
+├── plugins/                # 50 个内置插件（业务形态装配）
 ├── plugin_manager/         # 插件生命周期/商店/许可/区域路由
 ├── veroguard/              # VeroGuard 守护层（7 模块）
 ├── health_guardian/        # 守护支撑包（含 health_guardian.py 入口）
@@ -426,7 +428,7 @@ VeroRun/
 
 ## 代码规模指标（Codebase Metrics）
 
-基于 v0.62.0 工作副本（2026-10-03）实测，采用 `cloc` 式单遍扫描，按各语言注释语法把每个源文件的每一行归类为 **代码 / 注释 / 空行**。统计已排除：构建产物与第三方 vendored 代码（`__pycache__`、`node_modules`、`backups/`、`data/`、`tmp/`、`outputs/`、`server_backup/`、`_ssh/`、`.stock_deps/` 等隐藏依赖缓存、压缩打包产物），以及 `docs/` 下的内部工程文档（方案、会话交接、审计报告）——因此数据仅反映第一方产品源码。
+基于 v0.62.0 工作副本（2026-10-03）实测，采用 `cloc` 式单遍扫描（行数指标为 v0.62.0 快照；模块表中的插件数已同步至 v0.66.0），按各语言注释语法把每个源文件的每一行归类为 **代码 / 注释 / 空行**。统计已排除：构建产物与第三方 vendored 代码（`__pycache__`、`node_modules`、`backups/`、`data/`、`tmp/`、`outputs/`、`server_backup/`、`_ssh/`、`.stock_deps/` 等隐藏依赖缓存、压缩打包产物），以及 `docs/` 下的内部工程文档（方案、会话交接、审计报告）——因此数据仅反映第一方产品源码。
 
 **合计：300,787 行代码，1,874 个文件**（另有 47,686 行注释、48,550 行空行）。剔除提示词/文档格式（Markdown、Text）后，可执行代码 + 标记 ≈ **280,200 行**。
 
@@ -450,7 +452,7 @@ VeroRun/
 
 | 模块 | 代码行 | 占比 | 职责 |
 |---|---:|---:|---|
-| `plugins/` | 186,784 | 62.1% | 应用层——43 个插件 |
+| `plugins/` | 186,784 | 62.1% | 应用层——50 个插件（插件数已同步至 v0.66.0） |
 | `admin/` | 21,257 | 7.1% | 管理后台（8084） |
 | `main_site/` | 15,794 | 5.3% | 平台控制台（8083） |
 | `plugin_manager/` | 14,815 | 4.9% | 生命周期 / 商店 / 许可 |
@@ -484,7 +486,6 @@ VeroRun/
 - `sdks/README.md` — SDK 使用说明
 - `deploy/README.md` — 部署说明
 - `plugins/memory_engine/README.md` — 认知进化引擎说明
-- `docs/VeroRun-技术白皮书-v0.63.0-审计修订版.md` — 技术架构白皮书（系统级架构与插件体系）
 - `help/core/` — 用户指南（终端用户手册，00-overview → 99-faq）
 - `docs/plugin-standard-v1.8.md` — 插件开发标准（v1.8，现行规范）
 - `docs/official-api-security-spec.md` — 官方 API 安全规范（token 撤销 + 命令签名）

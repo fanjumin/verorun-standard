@@ -307,9 +307,10 @@ class StoreAPIClient:
         if not compatible_editions:
             return True
         try:
-            from agent_matrix.models import normalize_edition
-            current = normalize_edition(DEPLOY_EDITION)
-            return current in [normalize_edition(str(e)) for e in compatible_editions]
+            from agent_matrix.models import normalize_edition, edition_compat_values
+            # tarka 等有同义旧名的发行版：按并集判定（见 shared/edition.py）
+            current_set = {normalize_edition(x) for x in edition_compat_values(DEPLOY_EDITION)}
+            return any(normalize_edition(str(e)) in current_set for e in compatible_editions)
         except Exception:
             return DEPLOY_EDITION in [str(e).strip().lower() for e in compatible_editions]
 
@@ -356,11 +357,20 @@ class StoreAPIClient:
                 # 注意：必须用 `@>`（包含）而非 jsonb 的 `?`（键存在）运算符 ——
                 # models._PgConnection.execute 有 `sql.replace('?', '%s')` 垫片，
                 # `?` 会被误改成占位符导致参数个数不匹配（IndexError → 500）。
+                # 发行版并集（tarka ⊇ standard）：逐 ID 生成 @> 条件，避免使用含 `?`
+                # 的 jsonb 运算符（会被 execute 的 `?` → `%s` 垫片破坏）。
+                try:
+                    from shared.edition import edition_compat_values
+                    _compat = list(edition_compat_values(DEPLOY_EDITION))
+                except Exception:
+                    _compat = [DEPLOY_EDITION]
+                _compat_cond = " OR ".join(
+                    ["s.compatible_editions::jsonb @> %s::jsonb"] * len(_compat))
                 sql += (" AND (s.compatible_editions IS NULL"
                         " OR s.compatible_editions IN ('', '[]')"
                         " OR (s.compatible_editions ~ '^[[:space:]]*\\['"
-                        " AND s.compatible_editions::jsonb @> %s::jsonb))")
-                params.append(json.dumps([DEPLOY_EDITION]))
+                        f" AND ({_compat_cond})))")
+                params.extend(json.dumps([e]) for e in _compat)
 
                 # 阶段 3b：黑名单机制已退出 —— default_exclude / yaml exclude 均不再参与，
                 # 可见性完全由上面的 compatible_editions 决定。

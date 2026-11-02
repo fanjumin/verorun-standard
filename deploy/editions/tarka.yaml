@@ -1,0 +1,55 @@
+# 塔卡投研（tarka.cn）发行配置 —— 单一事实源：插件白名单 + 服务开关
+#
+# 命名说明（2026-11-01 用户裁决）：不用 "standard" 作为本发行版名称。
+# "standard" 会与发布仓库 fanjumin/verorun-standard 混淆（该仓库承载全部 edition 资产，
+# 不是某个发行版的代号）。因此本发行版独立为 edition=tarka，产物名 tarka.yaml。
+# 兼容口径：tarka 部署下，plugin.json 中声明 "standard" 的插件同样放行
+# （见 shared/edition.py::_EDITION_COMPAT_UNION），故 42 个插件的兼容声明无需逐个改写。
+#
+# 插件清单来源：F:\Sites\VeroRun-docs\tarka-design\12-tarka-cn-site\tarka-cn-website-plan.md §04
+# 「25 插件 → 网站功能映射」（Web 呈现层 13 + 能力层 14，二者重叠 content_factory /
+# subscription，去重后 25 个）。本清单在此基础上补两项闭包/基建：
+#   _base          —— 基础插件，与其它 edition 同惯例（finance-desktop/minipro/omni 均含）
+#   oauth_config   —— 依赖闭包：mini_app_builder 的 dependencies 要求 oauth_config>=1.0.0
+edition: tarka
+label: 塔卡投研
+services:
+  # tarka.cn 官网 + 账户中心 + 订购/授权均在服务器侧提供，故三项全开
+  user_login: true
+  user_console: true
+  main_site: true
+plugins:
+  # include 兼任两职（语义见 agent_matrix/models.edition_runtime_whitelist）：
+  #   ① 发包裁剪：sync 流程按它物理拷贝插件目录；
+  #   ② 运行时门控：plugin_manager 的可见性 / 安装 / 启用三层同口径。
+  include:
+    - _base
+    - oauth_config
+    # ── Web 呈现层（13）──
+    - site_builder
+    - chatbot
+    - search_hub
+    - project_workspace
+    - wishlist
+    - survey
+    - coupons
+    - hr_recruit
+    - ads
+    - mini_app_builder
+    - omni_service
+    - content_factory
+    - subscription
+    # ── 能力层（14，含与 Web 层重叠的 content_factory / subscription）──
+    - ai_relay
+    - analytics
+    - email
+    - enterprise_verify
+    - health_check
+    - im_gateway
+    - memory_engine
+    - payment
+    - site_domains
+    - sms
+    - vault
+    - visitor_profile
+  runtime_whitelist: true

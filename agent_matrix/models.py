@@ -28,6 +28,7 @@ from shared.edition import (  # noqa: F401
     normalize_edition,
     current_edition,
     edition_artifact_stem,
+    edition_compat_values,
 )
 
 # 兼容别名：早期调用方沿用下划线私有名（agent_matrix/routes.py 等）
