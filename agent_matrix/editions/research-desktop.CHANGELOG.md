@@ -2,8 +2,8 @@
 
 ```yaml
 edition:            research-desktop
-edition_version:    1.1.0
-kernel_baseline:    0.64.0
+edition_version:    2.0.0
+kernel_baseline:    0.66.2
 governing_yaml:     deploy/editions/research-desktop.yaml
 constitution:       agent_matrix/kernel.AGENTS.md (L1) + agent_matrix/editions/research-desktop.AGENTS.md (L2)
 ```
@@ -111,6 +111,44 @@ constitution:       agent_matrix/kernel.AGENTS.md (L1) + agent_matrix/editions/r
 
 ---
 
+## [2.0.0] — 2026-11-05
+
+与金融桌面版（`finance-desktop`）做发行接线对齐，范围**仅限非业务插件层**：门控开关、通用能力插件、角色认领与基线声明。业务插件（`veroscholar` 及科研角色集）不变。
+
+### Added
+
+- 插件 `include` 新增 `net_proxy`（统一出站网络代理 v1.0.3）。裁决来源与日期：2026-11-05 用户裁决「net_proxy 必须接，否则可能会遇到其他区的文献找不到」。依据：境内部署访问 arXiv / PubMed / Crossref / Web of Science 等境外文献源需经统一出站路由，`search_hub` 与 `veroscholar` 的 `discovery.*` 均受益。归属零成本：`net_proxy.agent_role=ops` ① 命中本版核心角色集，无需角色侧认领
+- 插件 `include` 新增 `im_gateway`（统一即时消息通道网关 v3.3.0）。裁决来源与日期：2026-11-05 用户裁决「im_gateway 这个必须」。依据：科研长任务（批量文献检索 / 综述生成 / 实验批处理）的完成与异常需 IM 即时通知，与 `email` 同级通道
+- `ops` 角色 `managed_modules` 认领 `im_gateway`（② 通道）。其 `plugin.json` 的 `agent_role=service` 保持官方版语义不改，与金融版 ops 认领 `email` / `im_gateway` 同一惯例
+
+### Changed
+
+- 插件 `include` 由 10 项增至 12 项（`_base` + 11 项业务插件）
+- **`runtime_whitelist: true`（2026-11-05 对齐金融版）**。此前未声明（按 `false` 语义运行）。影响：标准安装包因发包已物理裁剪而不发作；但开发模式（壳层 `codeDir` 直指核心仓源码，`plugins/` 为全量目录）与整盒部署切 `VR_EDITION=research` 时，插件中心会列出磁盘上全部插件（金融版 2026-09-21 实测 ~39 个）。声明后插件中心 / discover / enable / unified 四处门控同源，只放行 `include`
+- `plugins/net_proxy/plugin.json`、`plugins/im_gateway/plugin.json` 的 `compatible_editions` 追加 `research`。**前置条件**：不改此项则 discovery 按 `compatible_editions` 硬拒绝，加进 `include` 也不可用
+
+### Fixed
+
+- **基线漂移修正**：L2 宪法 §6.1 此前声明 `include` 7 项 / `exclude` 19 项（含 `project_workspace`），而 yaml 自 2026-10-27 起已是 `include` 10 项 / `exclude` 18 项且 `project_workspace` 在 `include` 内。文档落后实际 9 天且违反 §7.2「只改 yaml 不改本文件视为基线漂移」。本次一并对齐为 `include` 12 / `exclude` 18，并补齐 §6.2 `ops` 认领范围（`search_hub` 2026-10-22 已加入但未记录）
+- `agent_matrix/editions/finance-desktop.AGENTS.md` §6.1 同样漂移（仍列 2026-10-26 已移除的 `hr_recruit` / `visitor_profile`、2026-10-29 已移除的 `coupons`，且写「17 项业务插件」而实际为 14 项），同批修正
+
+### Security
+
+- **启用 `license_enforcement: true`（fail-closed）**。裁决来源与日期：2026-11-05 用户裁决「肯定是商用分发」。按 L2 §7.5 四步顺序执行：① `deploy/editions/research-desktop.yaml` 声明 → ② 本条目 → ③ §6.4 更新（已完成）→ ④ 本 `Security` 分类记录（本处）
+- 消费点与后果：`admin/app.py` 的 `_license_enforced()` 会锁 `/admin` 页面（跳 `/admin/renew`）与插件业务端点（403 `subscription_expired`）；`agent_matrix/routes.py` 的 `_ai_license_enforced()` 会锁 AI / Agent 能力（403）。**首次安装未配置部署码即全锁**，用户须经 `/admin/renew` 写入 `system_config.deployment_code` 并联网心跳激活
+- 开发机自测：需 `VERORUN_DEV_UNLICENSED=1` + 官方签名凭证（`_official_dev_exempt()` 的 `_verify_official_token()` Ed25519 验签）。客户仓库无 `official_token.json(.sig)`，该豁免不成立，不构成商业绕过
+- 登记记忆后端约束不变：`cogevolution_substrate` 仍在 `exclude`，认知进化唯一后端为 `memory_engine`
+
+### Removed
+
+无（本次未移出任何插件或角色）。
+
+### Kernel Baseline
+
+- 内核 0.66.2（`VERSION`）。本次对齐基于该内核构建载荷；1.1.0 的 0.64.0 基线保留于上一节不改
+
+---
+
 ## 基线回填（Baseline Trace）
 
 以下条目为**事后回填**，来源为 `deploy/editions/research-desktop.yaml` 的设计注释与白皮书增补第 5/6 章，**不是当年当日的原始变更记录**。未经原始发布单核验的项已标注。
@@ -132,7 +170,7 @@ constitution:       agent_matrix/kernel.AGENTS.md (L1) + agent_matrix/editions/r
 
 - [ ] `edition_version` 递增符合 Semver 策略
 - [ ] `kernel_baseline` 与 `VERSION` 一致
-- [ ] L2 宪法 §6 基线与 `deploy/editions/research-desktop.yaml` 逐项一致（`include` 7 / `exclude` 19 / `roles` 8）
+- [ ] L2 宪法 §6 基线与 `deploy/editions/research-desktop.yaml` 逐项一致（`include` 12 / `exclude` 18 / `roles` 8）
 - [ ] 白名单变更已在 `Changed` 分类记录，附裁决来源
 - [ ] 门控开关变更已在 `Security` 分类记录
 - [ ] 条款废弃使用 `deprecated` 标记，编号不复用

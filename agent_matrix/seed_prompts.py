@@ -83,6 +83,12 @@ PROMPT_SEEDS = [
     ('explorer-role', 'Explorer Agent Role Base', 'system', 'research',
      '["exploration","read_only_research","aggregation"]', '[]',
      'explorer_agent.md', ['explorer'], None),
+    # Layer 2 全局执行规则：枚举探测 / 标签映射 / 终稿数值回填 / 多跳关联 / 窗口语义 / 输出形态。
+    # rule+general 受唯一索引 idx_ap_rule_general 约束，全表只允许一行。
+    ('global-rule', 'Global Execution Rules', 'rule', 'general',
+     '["enum_probe","label_mapping","numeric_fidelity","join_chain",'
+     '"window_semantics","output_shape"]', '[]',
+     'global_rule.md', [], None),
 ]
 
 
@@ -132,6 +138,26 @@ def seed_prompts():
                 continue
             with open(fpath, 'r', encoding='utf-8') as f:
                 content = f.read()
+
+            # rule+general 受唯一索引约束（全表仅一行）：
+            #   - 站点已有不同 slug 的规则行 → 跳过，不覆盖运营既有规则；
+            #   - 同 slug 内容变更 → 原地 UPDATE（插新 version 会撞唯一索引）。
+            if prompt_type == 'rule' and domain == 'general':
+                existing = conn.execute(
+                    "SELECT id, slug, content FROM agent_prompts "
+                    "WHERE prompt_type='rule' AND domain='general' "
+                    "ORDER BY version DESC, id DESC LIMIT 1"
+                ).fetchone()
+                if existing and existing['slug'] != slug:
+                    print(f'[SeedPrompts] Skip rule seed (existing row: {existing["slug"]})')
+                    continue
+                if existing:
+                    if (existing['content'] or '') != content:
+                        conn.execute(
+                            "UPDATE agent_prompts SET content=%s, updated_at=CURRENT_TIMESTAMP "
+                            "WHERE id=%s", (content, existing['id']))
+                        print(f'[SeedPrompts] Update rule in place: {slug}')
+                    continue
 
             row = conn.execute(
                 "SELECT id, version, content FROM agent_prompts WHERE slug=%s "

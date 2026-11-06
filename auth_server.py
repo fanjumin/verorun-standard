@@ -175,6 +175,15 @@ def site_home():
     """Render the main landing page using the existing theme template."""
     if _is_edu():
         return _edu_admin_login()
+    # 站点根路径由 site_builder 接管：存在已发布 home 页时渲染站点首页，
+    # 否则回落到平台产品落地页（无行为回归）。
+    try:
+        from plugins.site_builder.pages.public_routes import try_render_home
+        _sb_home = try_render_home()
+        if _sb_home is not None:
+            return _sb_home
+    except Exception:
+        pass
     site_plans = _get_site_plans()
     resp = make_response(render_template('public_home.html', LANG=deploy.LANG, site_plans=site_plans))
     # Set cross-subdomain SSO cookie if token present in URL

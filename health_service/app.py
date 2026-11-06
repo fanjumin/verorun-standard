@@ -66,6 +66,14 @@ def ready():
             return {'status': 'not_ready', 'error': 'health_check plugin not installed'}, 503
         with get_db() as db:
             db.execute('SELECT 1').fetchone()
+        # P0 自检：凭据加密 salt 缺失时，下一次加密会重新生成随机 salt，
+        # 历史密文将全部失效（表现为所有 LLM 凭据「未配置」）。此处显式暴露。
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        salt_path = (os.environ.get('VR_CRYPTO_SALT_PATH')
+                     or os.path.join(root, 'data', '.crypto_salt'))
+        if not (os.path.exists(salt_path) and os.path.getsize(salt_path) > 0):
+            return {'status': 'not_ready',
+                    'error': 'crypto salt missing: ' + salt_path}, 503
         return {'status': 'ready', 'service': 'health-service'}
     except Exception as e:
         return {'status': 'not_ready', 'error': str(e)}, 503

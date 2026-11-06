@@ -19,10 +19,31 @@ from agent_matrix.llm_text import ERROR_SENTINEL
 
 logger = logging.getLogger(__name__)
 
-from agent_matrix.failover import FallbackEngine
+from agent_matrix.failover import FallbackEngine, _send_alert
 
 # 兜底引擎单例（进程内共享熔断器 + 健康状态存储）
 _failover_engine = FallbackEngine()
+
+# SB-BUG-1 告警限频：同一 key 解密失败每小时最多告警一次，避免每次调用刷屏
+_DECRYPT_ALERT_WINDOW = 3600
+_DECRYPT_ALERT_AT = {}
+_DECRYPT_ALERT_LOCK = threading.Lock()
+
+
+def _notify_decrypt_failure(key_id, pool_role=''):
+    """凭据解密失败 → 走统一告警通道（限频，且异常绝不影响主链路）。"""
+    now = _time.time()
+    with _DECRYPT_ALERT_LOCK:
+        if now - _DECRYPT_ALERT_AT.get(key_id, 0) < _DECRYPT_ALERT_WINDOW:
+            return
+        _DECRYPT_ALERT_AT[key_id] = now
+    try:
+        _send_alert(
+            f'[KeyPool] API key id={key_id} ({pool_role}) decrypt failed: '
+            '.crypto_salt or ENCRYPTION_KEY changed since encryption; '
+            'AI calls using this key will fail until the key is re-entered.')
+    except Exception as e:
+        logger.warning(f'[KeyPool] decrypt alert send failed: {e}')
 
 # 模块级 sys.path 设置（只执行一次，避免函数内重复插入）
 _PARENT_DIR = os.path.join(os.path.dirname(__file__), '..')
@@ -142,6 +163,7 @@ class _ProviderKeyPool:
                 '[KeyPool] DECRYPT FAILED for key id=%s (%s): salt or ENCRYPTION_KEY changed '
                 'since key was encrypted. Check .crypto_salt / ENCRYPTION_KEY consistency, '
                 'or re-enter API keys.', row['id'], row.get('pool_role', ''))
+            _notify_decrypt_failure(row['id'], row.get('pool_role', ''))
             return row['id'], ''
         except Exception as e:
             logger.warning(f"[KeyPool] decrypt key id={row['id']} failed: {e}")
@@ -305,10 +327,15 @@ _AI_RATE_LOCK = threading.Lock()
 
 # 阈值默认值（system_config 无对应 key 时生效）
 _AI_BUDGET_DEFAULTS = {
-    'ai_budget_daily_tokens': 2000000,   # 全站每日 token 上限，0=不限
+    # 默认值须与真实用量同量级（实测单日 5.8k 万）：过低会让配置缺行的部署
+    # 直接全站拒绝，过高则失去保险作用。
+    'ai_budget_daily_tokens': 60000000,  # 全站每日 token 上限，0=不限
     'ai_rate_max_calls': 30,             # 速率窗口内最大调用次数，0=不限
     'ai_rate_window_sec': 60,            # 速率窗口秒数
 }
+
+# 首次预算配置打印开关（避免每次 AI 调用刷日志）
+_BUDGET_CONFIG_LOGGED = False
 
 
 def _rate_worker_divisor() -> int:
@@ -324,8 +351,14 @@ def _rate_worker_divisor() -> int:
 
 
 def _get_ai_budget_config() -> dict:
-    """从 system_config 读取 AI 闸门阈值，缺失则用默认值。"""
+    """从 system_config 读取 AI 闸门阈值，缺失则用默认值。
+
+    首次加载时打印一次生效配置与来自 DB 的键，便于排查"部署后被改回默认值"
+    这类无告警的配置漂移（评测报告第 10 节）。
+    """
+    global _BUDGET_CONFIG_LOGGED
     cfg = dict(_AI_BUDGET_DEFAULTS)
+    _from_db = set()
     try:
         from models import get_db as _main_get_db
         with _main_get_db() as conn:
@@ -340,10 +373,14 @@ def _get_ai_budget_config() -> dict:
                 continue
             try:
                 cfg[key] = int(val)
+                _from_db.add(key)
             except (ValueError, TypeError):
                 pass
     except Exception as e:
         logger.warning("[AIBudget] read config failed, using defaults: %s", e)
+    if not _BUDGET_CONFIG_LOGGED:
+        _BUDGET_CONFIG_LOGGED = True
+        logger.info("[AIBudget] effective=%s db_keys=%s", cfg, sorted(_from_db))
     return cfg
 
 
@@ -845,14 +882,24 @@ class UnifiedLLM:
                 for q in quotas:
                     q = dict(q)
                     if q.get('daily_limit', 0) > 0:
-                        today_used = conn.execute(
-                            "SELECT COALESCE(SUM(total_tokens), 0) AS c FROM agent_token_logs "
-                            "WHERE created_at >= CURRENT_DATE::text AND module = %s",
-                            (module,)
-                        ).fetchone()
+                        # global 是站点级总闸：统计全模块合计；其余粒度仍按 module 统计。
+                        if q.get('target_type') == 'global':
+                            today_used = conn.execute(
+                                "SELECT COALESCE(SUM(total_tokens), 0) AS c FROM agent_token_logs "
+                                "WHERE created_at >= CURRENT_DATE::text"
+                            ).fetchone()
+                        else:
+                            today_used = conn.execute(
+                                "SELECT COALESCE(SUM(total_tokens), 0) AS c FROM agent_token_logs "
+                                "WHERE created_at >= CURRENT_DATE::text AND module = %s",
+                                (module,)
+                            ).fetchone()
                         used = today_used['c'] if isinstance(today_used, dict) else (today_used[0] or 0)
                         if used >= q['daily_limit']:
-                            return False, f"Daily quota exceeded for {module}: {used}/{q['daily_limit']} tokens"
+                            scope = 'global' if q.get('target_type') == 'global' else module
+                            return False, (
+                                f"Daily quota exceeded for {scope}: {used}/{q['daily_limit']} tokens "
+                                f"(resets at next 00:00 server time)")
 
                 # 第二轮：检查速率限制（先检查，全部通过后再记录）
                 for q in quotas:
@@ -1293,10 +1340,13 @@ class UnifiedLLM:
                          trace_id=trace_id, session_id=session_id)
 
     def chat_with_tools(self, messages, tools, temperature=0.7, max_tokens=8192,
-                        trace_id=None, session_id=None):
+                        trace_id=None, session_id=None, tool_choice="auto"):
+        # P0 收尾机制：tools=None 时必须纯文本补全，否则收尾请求仍在工具模式，
+        # 模型继续发起 tool_call、content 为空，最终把几十轮前的口头语当成终稿。
         return self.chat(messages, temperature=temperature, max_tokens=max_tokens,
                          module='tool_call', raw_response=True, tools=tools,
-                         tool_choice="auto", trace_id=trace_id,
+                         tool_choice=(tool_choice if tools else None),
+                         trace_id=trace_id,
                          session_id=session_id)
 
     def ask_stream(self, user_query, temperature=0.7, trace_id=None,

@@ -45,7 +45,29 @@ def _get_or_create_salt() -> bytes:
     os.makedirs(os.path.dirname(_SALT_PATH), exist_ok=True)
     with open(_SALT_PATH, 'wb') as f:
         f.write(salt)
+    # P0 自检：走到这里说明持久 salt 与旧部署树 salt 都不存在 —— 若系统此前已
+    # 加密过凭据，新 salt 会派生出不同 key，全部历史密文立即失效（2026-09-18 事故）。
+    logger.critical('[Crypto] generated a NEW credential salt at %s; previously '
+                    'encrypted credentials (if any) can no longer be decrypted. '
+                    'Restore the old salt from backup immediately.', _SALT_PATH)
+    try:
+        with open(_SALT_PATH + '.bak', 'wb') as f:
+            f.write(salt)
+    except OSError as e:
+        logger.warning('[Crypto] salt backup copy failed: %s', e)
     return salt
+
+
+def salt_status() -> dict:
+    """返回 salt 持久化状态，供健康检查/启动自检使用（不触发创建）。"""
+    try:
+        size = os.path.getsize(_SALT_PATH)
+    except OSError:
+        size = 0
+    legacy = os.path.exists(_LEGACY_SALT_PATH)
+    return {'path': _SALT_PATH, 'exists': size > 0, 'size': size,
+            'legacy_present': legacy}
+
 
 def _raw_keys():
     """按优先级返回可用的主密钥原文（去重、校验强度）。

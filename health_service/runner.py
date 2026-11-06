@@ -29,7 +29,7 @@ if __name__ == '__main__':
     sys.argv = [
         'gunicorn',
         '-w', '2',
-        '--max-requests', '1000',
+        '--max-requests', '5000',
         '-b', '0.0.0.0:8085',
         'health_service.app:app',
         '--timeout', '30',

@@ -28,6 +28,9 @@ DEFAULT_FAILURE_THRESHOLD = 3
 DEFAULT_COOLDOWN_SECONDS = 300
 DEFAULT_BACKOFF_FACTOR = 2
 DEFAULT_MAX_COOLDOWN = 3600
+# P1：熔断读库兜底的缓存，避免热路径反复查询 ai_model_health
+_HEALTH_CACHE = {}
+_HEALTH_CACHE_TTL = 30
 # 兜底候选默认不内置硬编码——生产环境无 key 的兜底只会制造噪音与延迟（D-1），
 # 需通过 system_config ai_fallback_models 显式配置（load_fallback_models 兼容）。
 BUILTIN_FALLBACKS = []
@@ -121,7 +124,37 @@ class CircuitBreaker:
     def is_available(self, key):
         with self._lock:
             st = self._get(key)
-            return not st['open'] or _time.time() >= st['cooldown_until']
+            if not st['open'] or _time.time() >= st['cooldown_until']:
+                return True
+        # 已熔断且冷却期内：以 DB 为准做一次兜底（管理员后台恢复后立即生效）
+        return self._db_recovered(key)
+
+    def _db_recovered(self, key):
+        """P1 熔断读库兜底。
+
+        进程内熔断只是加速器，真实状态在 ai_model_health 表。运维在后台把模型
+        改回 healthy 后，进程内状态不应继续拦截请求；为避免热路径频繁查库，
+        每个 key 最多 30 秒回源一次，且只在「已熔断」时触发。
+        """
+        now = _time.time()
+        cached = _HEALTH_CACHE.get(key)
+        if cached and now - cached[0] < _HEALTH_CACHE_TTL:
+            healthy = cached[1]
+        else:
+            healthy = False
+            try:
+                provider, _, model_name = key.partition('::')
+                rows = ModelHealthStore().get_health(
+                    provider=provider or None, model_name=model_name or None, limit=1)
+                if rows:
+                    row = rows[0]
+                    healthy = (not row.get('circuit_open')) and row.get('status') == 'healthy'
+            except Exception as e:
+                logger.debug(f'[failover] breaker db probe skipped: {e}')
+            _HEALTH_CACHE[key] = (now, healthy)
+        if healthy:
+            self.record_success(key)
+        return healthy
 
     def record_success(self, key):
         with self._lock:
@@ -147,6 +180,13 @@ class CircuitBreaker:
             st = self._get(key)
             return {'failures': st['failures'], 'open': st['open'],
                     'cooldown_until': st['cooldown_until'], 'open_count': st['open_count']}
+
+    def reset_all(self):
+        """清空本进程全部熔断状态（运维兜底：改 DB 对本进程无效时必须重启 worker）。"""
+        with self._lock:
+            count = len(self._states)
+            self._states.clear()
+            return count
 
 
 class ModelHealthStore:

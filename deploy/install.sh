@@ -86,12 +86,12 @@ else
         _COMMON_REMOTE="${EDU_COMMON_REMOTE:-https://raw.githubusercontent.com/fanjumin/verorun-edu/master/deploy/lib/common.sh}"
         _COMMON_MIRROR="${EDU_COMMON_MIRROR:-https://ghfast.top/https://raw.githubusercontent.com/fanjumin/verorun-edu/master/deploy/lib/common.sh}"
         # Computed and backfilled at release time by deploy/scripts/sign_release.py (LF-normalized hash)
-        _COMMON_SHA256="${EDU_COMMON_SHA256:-5b6b9b01bbff5efb2968b7315e7c2cdc49f182249b9fa5432ee670b97baa9745}"
+        _COMMON_SHA256="${EDU_COMMON_SHA256:-a2d349a8332f883495ad049e5f9d5778618fb808d10cd06a9bfd9db07e4fb3b5}"
     else
         _COMMON_REMOTE="${COMMON_REMOTE:-https://raw.githubusercontent.com/fanjumin/verorun-pro/master/deploy/lib/common.sh}"
         _COMMON_MIRROR="${COMMON_MIRROR:-https://ghfast.top/https://raw.githubusercontent.com/fanjumin/verorun-pro/master/deploy/lib/common.sh}"
         # Computed and backfilled at release time by deploy/scripts/sign_release.py (LF-normalized hash)
-        _COMMON_SHA256="${COMMON_SHA256:-5b6b9b01bbff5efb2968b7315e7c2cdc49f182249b9fa5432ee670b97baa9745}"
+        _COMMON_SHA256="${COMMON_SHA256:-a2d349a8332f883495ad049e5f9d5778618fb808d10cd06a9bfd9db07e4fb3b5}"
     fi
     _tmp_common="$(mktemp)"
     # Audit P3-2: clean up the temp file on Ctrl+C interruption

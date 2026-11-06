@@ -343,6 +343,7 @@ Notes:
 | `/home/verorun/verorun/venv/` | Python virtual environment |
 | `/home/verorun/verorun/.env` | Environment configuration |
 | `/home/verorun/verorun/data/` | Runtime data directory (PostgreSQL is the only supported database; no SQLite file) |
+| `/home/verorun/verorun/data/.crypto_salt` | API Key encryption salt. **Must be included in every backup and preserved across reinstall/migration** — losing it makes all stored ciphertext undecryptable. The installer creates it only when absent and never overwrites it. |
 | `/var/log/verorun/` | Service logs |
 | `/run/verorun/` | Runtime status files (update status, health probe) |
 | `/etc/systemd/system/verorun-*.service` | systemd service files |

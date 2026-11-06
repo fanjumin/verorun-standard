@@ -22,6 +22,7 @@ load_dotenv()
 from services.deployment_config import deploy
 from services.brand_service import get_brand_settings
 from services.notification_service import get_unread_count, mark_read
+from services.avatar_service import generate_initials_svg
 # ══ routes 包名冲突处理 ══
 from auth_blueprint import register_auth
 from routes.douyin_miniprogram import douyin_mp_bp
@@ -47,6 +48,7 @@ sys.modules.pop('routes', None)
 
 from main_site.routes.api_v1 import api_v1_bp
 from main_site.routes.internal_api import internal_api_bp
+from main_site.routes.download import download_bp
 # mini_program_bp 已解耦至插件 plugins/mini_app_builder/public_api.py（v2.0.0），
 # 由 PluginManager mount_all_routes() 挂载（见下方 ── PluginManager ── 段）
 
@@ -321,6 +323,7 @@ register_auth(app, exclude_blueprints=['admin', 'cms_admin'])
 app.register_blueprint(api_v1_bp)
 app.register_blueprint(douyin_mp_bp)
 app.register_blueprint(internal_api_bp)  # 内部服务 API（插件数据解耦后共享数据获取）
+app.register_blueprint(download_bp)  # 官网下载入口：302 跳转 + download_events 计数
 # mini_program_bp 已由 PluginManager 挂载（plugins/mini_app_builder）
 
 # ── 旧用户中心路由重定向到 SPA（user_console 禁用时不注册）──
@@ -720,6 +723,14 @@ def serve_theme_file(slug, filename):
     if not os.path.isdir(theme_static):
         return 'Theme not found', 404
     return send_from_directory(theme_static, filename)
+
+
+@app.route('/avatar/gen/<path:seed>')
+def generated_avatar(seed):
+    """生成默认首字母头像 SVG（无自定义头像时使用）"""
+    svg = generate_initials_svg(seed)
+    return Response(svg, mimetype='image/svg+xml',
+                    headers={'Cache-Control': 'public, max-age=86400'})
 
 
 @app.route('/health')

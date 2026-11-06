@@ -182,7 +182,7 @@
         </div>
 <div class="dl-actions">
           {% if dl.download_url %}
-          <span class="dl-btn dl-btn-primary" onclick="event.stopPropagation();window.open('{{ dl.download_url }}','_blank')">{{ _('⬇ Download') }}</span>
+          <span class="dl-btn dl-btn-primary" onclick="event.stopPropagation();window.open('/api/download/{{ dl.slug }}?src=list','_blank')">{{ _('⬇ Download') }}</span>
           {% endif %}
           {% if dl.repo_url %}
           <span class="dl-btn dl-btn-ghost" onclick="event.stopPropagation();window.open('{{ dl.repo_url }}','_blank')">GitHub →</span>

@@ -81,6 +81,8 @@ class AgentRunner:
         # v1.2.0：可观测关联键（单实例单任务，串行路径无并发覆盖风险）
         self._trace_id = ''
         self._session_id = ''
+        # 调用轨配速预算（task.tool_call_budget；0=关闭，缺省行为零变化）
+        self._tool_call_budget = 0
 
     def _get_engine(self):
         if not self._engine:
@@ -128,6 +130,8 @@ class AgentRunner:
         # WP-8：预算与子代理深度经实例属性透传到 _execute_batch 的 context，
         # 供 spawn_subagent 工具使用（单实例单任务，串行路径无并发覆盖风险）
         self._current_token_budget = task.get('token_budget', 0)
+        # 调用轨配速预算：轮次配速在大 max_rounds 下失效，按工具调用量补一路闸门。
+        self._tool_call_budget = int(task.get('tool_call_budget') or 0)
 
         # 1. 日志：开始执行
         self._log(task_id, 'info', 'execution', f'🤖 {self.name} starts executing the task')
@@ -318,8 +322,22 @@ class AgentRunner:
             logger.warning(f"[{self.name}] 加载工具失败，退回单轮: {e}")  # i18n:tech — 运维日志
             return []
 
+    def _derive_call_budget(self, max_rounds):
+        """未显式配置 tool_call_budget 时的保守调用预算。
+
+        轮次配速在长循环（max_rounds≥20）下失效：85% 需跑到第 34 轮，
+        而实测任务多在 25-33 轮收尾。按经验值 ~3 次工具调用/轮推导总预算，
+        使 60%/85% 闸门在长循环中真正可达；短循环（<20 轮）保持关闭，
+        避免改变现有行为。该值仅为提示（advisory），不强制停机。
+        """
+        try:
+            _mr = int(max_rounds)
+        except (TypeError, ValueError):
+            return 0
+        return _mr * 3 if _mr >= 20 else 0
+
     def _execute_batch(self, tool_calls, logs, task_id, tight, round_i,
-                       parallel_enabled=False, task_phase=''):
+                       parallel_enabled=False, task_phase='', emit=None):
         """WP-2：执行一批 tool_calls，返回按模型产出顺序的 [(tc, result)]。
 
         调度规则：
@@ -337,7 +355,8 @@ class AgentRunner:
                    # WP-8：透传父白名单 / 预算额度 / 子代理深度（spawn_subagent 使用）
                    'allowed_tools_parsed': allowed,
                    'token_budget': getattr(self, '_current_token_budget', 0),
-                   'subagent_depth': getattr(self, '_subagent_depth', 0)}
+                   'subagent_depth': getattr(self, '_subagent_depth', 0),
+                   'focus': getattr(self, '_focus_text', '')}
 
         def _run_one(tc):
             name = tc.function.name
@@ -356,7 +375,10 @@ class AgentRunner:
         if do_parallel:
             import concurrent.futures as _cf
             logs.append(f'[ReAct #{round_i}] 并行执行 {len(tool_calls)} 个工具')
-            with _cf.ThreadPoolExecutor(max_workers=min(4, len(tool_calls))) as pool:
+            if emit:
+                emit(f'[ReAct #{round_i}] parallel execution: {len(tool_calls)} tools')
+            # 编排层最大并发对齐 README 约束：≤5
+            with _cf.ThreadPoolExecutor(max_workers=min(5, len(tool_calls))) as pool:
                 futs = {pool.submit(_run_one, tc): i for i, tc in enumerate(tool_calls)}
                 aborted = False
                 for fut in _cf.as_completed(futs):
@@ -452,6 +474,21 @@ class AgentRunner:
         except Exception as e:
             logger.warning(f'[{self.name}] 检查点写入失败: {e}')  # i18n:tech — 运维日志
 
+    def _build_system_content(self):
+        """system = config system_prompt + 持久记忆分节（WP-11 并存模式）。
+
+        流式/续跑入口与 execute() 共用，避免续跑时沿用检查点里的旧 system。
+        """
+        system_content = self.config.get('system_prompt', '')
+        try:
+            _memory = load_memory_prompt(self.agent_id)
+            if _memory:
+                system_content = (system_content + '\n\n' + _memory
+                                  if system_content else _memory)
+        except Exception as e:
+            logger.warning(f'[{self.name}] 加载持久记忆失败，按无记忆处理: {e}')  # i18n:tech — 运维日志
+        return system_content
+
     def _run_react_loop(self, engine, user_query, history, tools, logs, task_id,
                         max_rounds=5, task_phase='', cancel_event=None, gates=None,
                         run_id=None):
@@ -522,6 +559,55 @@ class AgentRunner:
         from agent_matrix.engine import aggregate_stream_message
         from types import SimpleNamespace
 
+        # 供 MCP issue 结果重排使用（tools.py::_rerank_issue_results）。
+        self._focus_text = (user_query or '')[:500]
+
+        def _looks_empty_result(content):
+            """判断一次工具调用是否"没有取到数据"，用于空结果窗口率统计。
+
+            先按 JSON 结构判定（兼容不同 MCP 返回形态：total/count/items 等），
+            解析失败再退回旧的文本片段匹配；两条路径 OR 关系，原有命中不变。
+            """
+            text = (content or '').strip()
+            if len(text) < 5:
+                return True
+            if text[:1] in ('{', '['):
+                try:
+                    parsed = json.loads(text)
+                except (json.JSONDecodeError, TypeError):
+                    parsed = None
+                if parsed is not None:
+                    _empty = _json_is_empty(parsed)
+                    if _empty is not None:
+                        return _empty
+            low = text.lower()
+            return any(m in low for m in ('"maxresults": 0', '"maxresults":0',
+                                          '"total": 0', '"total":0',
+                                          '"count": 0', '"count":0',
+                                          'no results', '0 results found'))
+
+        # 空结果 JSON 判定口径：计数键为 0，或结果集字段为空列表。
+        _EMPTY_COUNT_KEYS = ('total', 'count', 'totalcount', 'total_count',
+                             'maxresults', 'max_results', 'length')
+        _EMPTY_LIST_KEYS = ('items', 'results', 'records', 'data', 'rows')
+
+        def _json_is_empty(obj, depth=0):
+            """返回 True/False；结构无法判定时返回 None（交给文本兜底）。"""
+            if depth > 4:
+                return None
+            if isinstance(obj, dict):
+                for k, v in obj.items():
+                    if str(k).lower() in _EMPTY_COUNT_KEYS and isinstance(v, (int, float)):
+                        return v == 0
+                for k in _EMPTY_LIST_KEYS:
+                    v = obj.get(k)
+                    if isinstance(v, list):
+                        return len(v) == 0
+                return None
+            if isinstance(obj, list):
+                return len(obj) == 0
+            return None
+
         def _as_tool_call_obj(tc):
             """聚合器产出的 dict → 带属性对象，供 _execute_batch 复用。"""
             fn = tc.get('function') or {}
@@ -531,12 +617,21 @@ class AgentRunner:
                 function=SimpleNamespace(name=fn.get('name', ''),
                                          arguments=fn.get('arguments', '')))
 
+        # 流式/续跑入口不经过 execute()，此处补齐用量归因键（同 execute 语义）。
+        if task_id and str(task_id) != 'unknown':
+            self._trace_id = str(task_id)
+
         # WP-6：检查点恢复 → 直接沿用已持久化 messages 续跑（跳过重建）；
         # 否则按系统提示 + history + user_query 构建初始消息。
         _ck_user_query = user_query
         _ck_history = history
         if checkpoint and isinstance(checkpoint, dict) and checkpoint.get('messages'):
             messages = list(checkpoint['messages'])
+            # 续跑沿用旧 system 会保留历史路径/旧提示（如 'prompts/xxx.md'），
+            # 配置有值时以当前解析结果覆盖。
+            _system = self._build_system_content()
+            if _system and messages and messages[0].get('role') == 'system':
+                messages[0]['content'] = _system
             start_round = int(checkpoint.get('round', 0)) + 1
             run_id = run_id or checkpoint.get('run_id')
             max_rounds = int(checkpoint.get('max_rounds') or max_rounds)
@@ -547,14 +642,7 @@ class AgentRunner:
         else:
             # WP-11：system = config system_prompt + 持久记忆分节（并存模式，
             # 分节头标注来源；空记忆/加载失败均按原样，fail-open 不阻断）。
-            system_content = self.config.get('system_prompt', '')
-            try:
-                _memory = load_memory_prompt(self.agent_id)
-                if _memory:
-                    system_content = (system_content + '\n\n' + _memory
-                                      if system_content else _memory)
-            except Exception as e:
-                logger.warning(f'[{self.name}] 加载持久记忆失败，按无记忆处理: {e}')  # i18n:tech — 运维日志
+            system_content = self._build_system_content()
             messages = [{"role": "system", "content": system_content}]
             if history:
                 for h in history:
@@ -563,6 +651,15 @@ class AgentRunner:
             messages.append({"role": "user", "content": user_query})
             start_round = 1
             last_text = ''
+
+        # 诊断：规则层/记忆是否真的进入了 system prompt。仅在 SSE（携带 run_id）
+        # 时输出，避免污染同步路径的事件序列与既有单测。
+        if stream and run_id:
+            _sys_first = (messages[0].get('content') or ''
+                          if messages and messages[0].get('role') == 'system' else '')
+            yield {'type': 'log',
+                   'message': (f'[system] len={len(_sys_first)} '
+                               f'rule={"Y" if "Global Execution Rules" in _sys_first else "N"}')}
 
         # WP-A（6.3）：预算只读一次（循环外），循环内复用，避免每轮打库。
         # 读取失败按关闭处理（0 = 直通），与引入前行为逐字节一致。
@@ -598,6 +695,13 @@ class AgentRunner:
         TOOL_RESULT_NORMAL = 4000
         TOOL_RESULT_TIGHT = 1200
 
+        # P1 空转看门狗：同一 tool + 同一 arguments 连续重复调用不会产生新信息，
+        # 第 3 次注入纠正提示，第 5 次直接收尾，避免把轮次烧在无效重试上。
+        _REPEAT_HINT_AT = 3
+        _REPEAT_STOP_AT = 5
+        _last_tool_sig = None
+        _repeat_count = 0
+
         def _cancelled():
             """WP-5：取消闸门（未注册 cancel_event 时永不触发）。"""
             return cancel_event is not None and cancel_event.is_set()
@@ -608,8 +712,48 @@ class AgentRunner:
                 messages.append({"role": "tool", "tool_call_id": tc.id,
                                  "content": "Interrupted by user/timeout"})
 
+        # P1 收敛闸门：轮次配速 + 空结果窗口率（实测"整轮签名相同"命中率为 0，
+        # 真实退化形态是参数各异的枚举试探，故以进展/配速为主，签名闸门保留兜底）
+        _pace_marks: set = set()
+        _recent_empty: list = []
+        _enum_hint_done = False
+        # 调用轨预算：task.tool_call_budget 优先；缺省时长循环按 ~3 次/轮推导，
+        # 使 85% 闸门可达（短循环 <20 轮不启用，行为不变）。
+        _call_budget = int(getattr(self, '_tool_call_budget', 0) or 0)
+        if _call_budget <= 0:
+            # 未显式配置：长循环按 ~3 次/轮推导，使 85% 闸门可达（短循环不启用）。
+            _call_budget = self._derive_call_budget(max_rounds)
+        _tool_calls_used = 0
+        _batch_events: list = []
+
+        def _emit_batch_log(message):
+            """_execute_batch 非生成器，用回调收集事件，由本轮统一 yield。"""
+            if stream:
+                _batch_events.append({'type': 'log', 'message': message})
+
         # WP-6：checkpoint 恢复时从 start_round 续跑；正常路径从 1 开始。
         for round_i in range(start_round, max_rounds + 1):
+            _ratios = [('round', round_i / max(max_rounds, 1))]
+            if _call_budget > 0:
+                _ratios.append(('calls', _tool_calls_used / _call_budget))
+            for _track, _ratio in _ratios:
+                for _mark in (0.6, 0.85):
+                    _pace_key = (_track, _mark)
+                    # 续跑首个轮次不注入，保证"恢复即沿用检查点消息"的语义不变
+                    if (round_i > start_round and _ratio >= _mark
+                            and _pace_key not in _pace_marks):
+                        _pace_marks.add(_pace_key)
+                        messages.append({'role': 'system', 'content': (
+                            f'Round budget: {round_i}/{max_rounds} consumed. Stop expanding '
+                            'exploration and answer with the evidence already collected; '
+                            'list explicitly any item that could not be retrieved.')})
+                        _label = '' if _track == 'round' else f' ({_track})'
+                        logs.append(f'[ReAct] pace hint{_label} at {int(_mark * 100)}%')
+                        if stream:
+                            # 报告诉求：注入时机必须可从 SSE 侧观测，而不是只写日志。
+                            yield {'type': 'log',
+                                   'message': f'[ReAct] pace hint{_label} at {int(_mark * 100)}%'}
+
             # WP-5：检查点 1 —— 每轮开始前取消
             if _cancelled():
                 self._save_checkpoint(run_id, messages, round_i - 1, last_text,
@@ -755,11 +899,44 @@ class AgentRunner:
             if not tool_calls:
                 self._log(task_id, 'info', 'execution',
                           f'ReAct ended at round {round_i} (No More Tool Calls)')
+                self._verify_answer_numbers(last_text, messages, task_id)
                 self._save_checkpoint(run_id, messages, round_i, last_text,
                                       _ck_user_query, _ck_history, max_rounds,
                                       task_phase, status='completed')
                 yield {'type': 'final', 'text': last_text or ''}
                 return
+
+            # P1 空转看门狗：连续相同 (tool, args) 调用 → 第 3 次纠正，第 5 次收尾
+            _sig = tuple(sorted((tc.function.name, str(tc.function.arguments or ''))
+                                for tc in tool_calls))
+            _repeat_count = _repeat_count + 1 if _sig == _last_tool_sig else 1
+            _last_tool_sig = _sig
+            if _repeat_count >= _REPEAT_STOP_AT:
+                hint = (f'Same tool call ({tool_calls[0].function.name}) with identical '
+                        f'arguments repeated {_repeat_count} times; stopped to avoid '
+                        f'wasted rounds. Repeating returns the same data.')
+                logs.append('[ReAct] ' + hint)
+                if stream:
+                    yield {'type': 'log', 'message': '[ReAct] ' + hint}
+                self._log(task_id, 'warning', 'execution', hint)
+                self._verify_answer_numbers(last_text, messages, task_id)
+                self._save_checkpoint(run_id, messages, round_i, last_text,
+                                      _ck_user_query, _ck_history, max_rounds,
+                                      task_phase, status='completed')
+                yield {'type': 'final',
+                       'text': (last_text + '\n\n' + hint) if last_text else hint}
+                return
+            if _repeat_count == _REPEAT_HINT_AT:
+                messages.append({'role': 'system', 'content': (
+                    'Repeated identical tool call detected. Do not call the same tool '
+                    'with the same arguments again. If the result was empty, first sample '
+                    'the available values/enums; otherwise switch tool or narrow the '
+                    'filter. If the data is genuinely unavailable, state that in the '
+                    'final answer instead of retrying.')})
+                logs.append('[ReAct] injected no-repeat hint')
+                if stream:
+                    yield {'type': 'log',
+                           'message': '[ReAct] injected no-repeat hint'}
 
             # 把 assistant 的 tool_calls 消息追加回上下文
             messages.append(assistant_msg)
@@ -774,9 +951,15 @@ class AgentRunner:
                 return
 
             # 执行工具并按序回灌（WP-2：并发窗口；串行路径与原实现一致）
-            for tc, result in self._execute_batch(
-                    tool_calls, logs, task_id, tight, round_i,
-                    parallel_enabled=parallel_enabled):
+            _batch_events.clear()
+            _batch_results = self._execute_batch(
+                tool_calls, logs, task_id, tight, round_i,
+                parallel_enabled=parallel_enabled, task_phase=task_phase,
+                emit=_emit_batch_log)
+            for _ev in _batch_events:
+                yield _ev
+            _tool_calls_used += len(tool_calls)
+            for tc, result in _batch_results:
                 result_content = str(result)[:TOOL_RESULT_TIGHT if tight else TOOL_RESULT_NORMAL]
                 messages.append({
                     "role": "tool",
@@ -786,6 +969,24 @@ class AgentRunner:
                 })
                 yield {'type': 'tool_result', 'tool_call_id': tc.id,
                        'name': tc.function.name, 'content': result_content}
+                # P1 空结果窗口率：记录每次调用是否"无数据"，用于枚举探测提示
+                _empty_hit = (_looks_empty_result(result_content))
+                _recent_empty.append(1 if _empty_hit else 0)
+                del _recent_empty[:-12]
+
+            if (not _enum_hint_done and len(_recent_empty) >= 12
+                    and sum(_recent_empty[-12:]) >= 6):
+                _enum_hint_done = True
+                messages.append({'role': 'system', 'content': (
+                    'Most recent tool calls returned no data. Before further queries, '
+                    'sample the available values/enums (list/describe) and map the '
+                    "task's wording to the real enum values; do not keep probing with "
+                    'guessed literals. If the data is genuinely absent, say so explicitly '
+                    'in the final answer.')})
+                logs.append('[ReAct] injected enum-sampling hint (empty window rate)')
+                if stream:
+                    yield {'type': 'log', 'message': ('[ReAct] injected enum-sampling '
+                                                     'hint (empty window rate)')}
 
             # WP-5：检查点 3 —— 工具执行后取消（本轮已正常回填，无孤儿）
             if _cancelled():
@@ -813,20 +1014,36 @@ class AgentRunner:
                                   _ck_user_query, _ck_history, max_rounds,
                                   task_phase, status='running')
 
-        # 达到轮次上限，做最后一次无工具收尾
+        # 达到轮次上限：P0 收尾必须走纯文本（不传 tools），否则仍在工具模式，
+        # 模型继续发 tool_call、content 为空，最终把几十轮前的口头语当成终稿。
         logs.append(f'[ReAct] Reached maximum rounds {max_rounds}, forced termination')
-        final = engine.chat_with_tools(messages, tools,
+        if stream:
+            yield {'type': 'log',
+                   'message': f'[ReAct] Reached maximum rounds {max_rounds}, '
+                              'forced termination'}
+        _closing_messages = messages + [{'role': 'user', 'content': (
+            f'Tool budget exhausted ({max_rounds} rounds). Answer now using only the '
+            'evidence already collected; list explicitly what could not be retrieved.')}]
+        final = engine.chat_with_tools(_closing_messages, None,
                                        trace_id=self._trace_id,
                                        session_id=self._session_id)
+        final_text = ''
         if final is not None:
-            final_choice = final.choices[0].message
-            if final_choice.content:
-                last_text = final_choice.content
+            try:
+                final_text = (final.choices[0].message.content or '').strip()
+            except Exception:
+                final_text = ''
+        body = final_text or (last_text or '').strip()
+        if len(body) < 200:
+            note = (f'Unable to retrieve everything within the {max_rounds}-round budget; '
+                    'the result above reflects only the evidence collected so far.')
+            body = (body + '\n\n' + note).strip() if body else note
+        last_text = body
+        self._verify_answer_numbers(last_text, messages, task_id)
         self._save_checkpoint(run_id, messages, max_rounds, last_text,
                               _ck_user_query, _ck_history, max_rounds,
                               task_phase, status='completed')
-        yield {'type': 'final',
-               'text': last_text or _('(Tool loop reached limit, no final response generated)')}
+        yield {'type': 'final', 'text': last_text}
 
     def _build_query(self, task):
         """构造发给 LLM 的用户消息"""
@@ -956,6 +1173,26 @@ class AgentRunner:
                 self.models.add_log(task_id, self.agent_id, level, log_type, message)
             except Exception:
                 pass
+
+    def _verify_answer_numbers(self, text, messages, task_id):
+        """P1 终稿数值保真：终稿数字若从未出现在工具结果中，记告警（不拦截）。
+
+        口径噪声（千分位/单位/四舍五入）天然存在，故只做可观测性，不改答复。
+        """
+        try:
+            from agent_matrix.answer_check import summarize_missing, summarize_missing_dates
+            tool_texts = [m.get('content') or '' for m in messages
+                          if m.get('role') == 'tool']
+            msg = summarize_missing(text or '', tool_texts)
+            if msg:
+                self._log(task_id, 'warning', 'answer_check', msg)
+                logger.warning(f'[{self.name}] answer_check: {msg}')
+            dmsg = summarize_missing_dates(text or '', tool_texts)
+            if dmsg:
+                self._log(task_id, 'warning', 'answer_check_date', dmsg)
+                logger.warning(f'[{self.name}] answer_check_date: {dmsg}')
+        except Exception as e:
+            logger.debug(f'[{self.name}] answer_check skipped: {e}')
 
     def _build_gates(self, task, task_id):
         """WP-7：构造三闸门组（env 可配、缺省关闭）。构造异常按关闭处理。"""

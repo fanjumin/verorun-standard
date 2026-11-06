@@ -1235,11 +1235,18 @@ class PluginManager:
                         if bp.name in self.app.blueprints:
                             continue
                         prefix = self._get_route_prefix(pid, bp)
-                        # 与 mount_all_routes 一致：插件不得抢占 admin 核心根前缀
+                        # 插件不得抢占 admin 核心根前缀；仅显式声明
+                        # metadata.public_root=true 的插件可挂载空前缀（公开站点根路径）
                         if prefix in ('', '/', '/admin', '/admin/'):
-                            print(f'[PluginManager] ⚠️ {pid}: 插件前缀 {prefix!r} 抢占 admin 核心域，跳过预挂载')  # i18n:tech — 启动诊断
+                            if not (prefix == '' and self._public_root_allowed(info, bp)):
+                                print(f'[PluginManager] ⚠️ {pid}: 插件前缀 {prefix!r} 抢占 admin 核心域，跳过预挂载')  # i18n:tech — 启动诊断
+                                continue
+                        try:
+                            self.app.register_blueprint(bp, url_prefix=prefix)
+                        except Exception as e:
+                            # 嵌套子蓝图可能已被父蓝图带入，单蓝图失败不得中断整个插件挂载
+                            print(f'[PluginManager] ⚠️ {pid}: 蓝图 {bp.name} 挂载跳过: {e}')  # i18n:tech — 启动诊断
                             continue
-                        self.app.register_blueprint(bp, url_prefix=prefix)
                         print(f'[PluginManager] {pid}: preloaded {prefix}')
                 # 注册事件订阅（P0-1 权限门控；PF-07 HookRegistry+EventBus 双通道）
                 self._register_plugin_handlers(info, instance)
@@ -1298,6 +1305,27 @@ class PluginManager:
 
     # ── 安装 ────────────────────────────────────────────────────────────
 
+    def _edition_exempt_by_license(self, identifier: str) -> bool:
+        """豁免 Key 桥接（2026-11-04 用户裁决）：插件存在有效 License（含豁免 Key
+        兑换产出 / 官方版直授权）→ 发行版 yaml（compatible_editions / include /
+        exclude）对该插件不再适用，安装与启用均放行。
+
+        判定自身异常时 fail-closed（视为无豁免，门禁照常执行），不阻断原门禁语义。
+        """
+        try:
+            mgr = self._license_mgr or get_license_manager()
+            result = mgr.validate(identifier)
+            ok = bool(result and result.get('valid'))
+            if ok:
+                # i18n:tech — 运维日志
+                print(f'[PluginManager] {identifier}: edition gates bypassed by '
+                      f'valid license (status={result.get("status")})')
+            return ok
+        except Exception as e:
+            # i18n:tech — 运维日志
+            print(f'[PluginManager] {identifier} license exemption check failed: {e}')
+            return False
+
     def install(self, identifier: str) -> PluginInfo:
         """安装插件: 写入 registry 持久化, 状态 → INSTALLED"""
         with self._lock_timeout():
@@ -1337,7 +1365,12 @@ class PluginManager:
             # 依赖插件「是否已装/已启用」由 enable() 的 _resolve_dependencies 把关，
             # 安装期不重复拦截，避免阻断"先装依赖方、后装被依赖方"的正常顺序。
             _eds = (info.metadata or {}).get('compatible_editions') or []
-            if _eds:
+            # 豁免桥接（2026-11-04 用户裁决）：该插件有有效 License（豁免 Key
+            # 兑换产出）→ compatible_editions 与 include/exclude 均跳过。
+            # 判定只做一次，两处门禁共用。
+            _lic_exempt = self._edition_exempt_by_license(identifier)
+
+            if _eds and not _lic_exempt:
                 try:
                     from .store import DEPLOY_EDITION as _deploy_edition
                     _edition_ok = StoreAPIClient._edition_compatible(_eds)
@@ -1364,12 +1397,12 @@ class PluginManager:
                                                  edition_runtime_whitelist)
                 _ed_excl = set(edition_plugin_excludes())
                 _ed_incl = set(edition_plugin_includes())
-                if identifier in _ed_excl:
+                if identifier in _ed_excl and not _lic_exempt:
                     raise PluginError(_(
                         'Plugin "{identifier}" is explicitly excluded by the current edition '
                         'and cannot be installed', identifier=identifier))
                 if (_ed_incl and edition_runtime_whitelist()
-                        and identifier not in _ed_incl):
+                        and identifier not in _ed_incl and not _lic_exempt):
                     raise PluginError(_(
                         'Plugin "{identifier}" is not listed in the current edition\'s '
                         'plugins.include whitelist and cannot be installed '
@@ -1495,11 +1528,14 @@ class PluginManager:
                 _ed_incl = set(edition_plugin_includes())
                 _ed_runtime_whitelist = edition_runtime_whitelist()
                 _hidden_by = None
-                if identifier in _ed_excl:
+                # 豁免桥接（2026-11-04 用户裁决）：有效 License → 发行版 yaml 不适用
+                _lic_exempt = self._edition_exempt_by_license(identifier)
+                if identifier in _ed_excl and not _lic_exempt:
                     _hidden_by = 'excluded_in_edition'
                     _why = _('explicitly excluded by edition plugins.exclude; '
                              'not installable in this edition')
-                elif _ed_incl and _ed_runtime_whitelist and identifier not in _ed_incl:
+                elif (_ed_incl and _ed_runtime_whitelist
+                        and identifier not in _ed_incl and not _lic_exempt):
                     _hidden_by = 'not_in_edition_include'
                     _why = _('not listed in this edition\'s plugins.include whitelist '
                              '(the server edition also does not ship it); to provide it, '
@@ -2434,7 +2470,12 @@ class PluginManager:
                         if bp.name in self.app.blueprints:
                             continue  # 已挂载，跳过
                         prefix = self._get_route_prefix(identifier, bp)
-                        self.app.register_blueprint(bp, url_prefix=prefix)
+                        try:
+                            self.app.register_blueprint(bp, url_prefix=prefix)
+                        except Exception as e:
+                            # 嵌套子蓝图可能已被父蓝图带入，单蓝图失败不得中断整个插件挂载
+                            print(f'[PluginManager] ⚠️ {identifier}: 蓝图 {bp.name} 挂载跳过: {e}')  # i18n:tech — 启动诊断
+                            continue
                         mounted.append(f'{identifier}:{prefix}')
             except Exception as e:
                 print(f'[PluginManager] ⚠️ mount {identifier} failed: {e}')
@@ -2473,13 +2514,21 @@ class PluginManager:
                         prefix = self._get_route_prefix(identifier, bp)
                         # 插件不得抢占 admin 核心根前缀（/admin），否则门卫会把整个
                         # /admin 域误判为插件路径（曾导致 admin 登录页/插件管理全部 404）
+                        # 仅显式声明 metadata.public_root=true 的插件可挂载空前缀（公开站点根路径）
                         if prefix in ('', '/', '/admin', '/admin/'):
-                            print(f'[PluginManager] ⚠️ {identifier}: 插件前缀 {prefix!r} 抢占 admin 核心域，跳过挂载（请改用专属前缀）')  # i18n:tech — 启动诊断
-                            continue
-                        self._plugin_prefixes[prefix] = identifier
+                            if not (prefix == '' and self._public_root_allowed(info, bp)):
+                                print(f'[PluginManager] ⚠️ {identifier}: 插件前缀 {prefix!r} 抢占 admin 核心域，跳过挂载（请改用专属前缀）')  # i18n:tech — 启动诊断
+                                continue
+                        if prefix:
+                            self._plugin_prefixes[prefix] = identifier
                         if bp.name in self.app.blueprints:
                             continue  # 已挂载，跳过
-                        self.app.register_blueprint(bp, url_prefix=prefix)
+                        try:
+                            self.app.register_blueprint(bp, url_prefix=prefix)
+                        except Exception as e:
+                            # 嵌套子蓝图可能已被父蓝图带入，单蓝图失败不得中断整个插件挂载
+                            print(f'[PluginManager] ⚠️ {identifier}: 蓝图 {bp.name} 挂载跳过: {e}')  # i18n:tech — 启动诊断
+                            continue
                         mounted.append(f'{identifier}:{prefix}')
             except Exception as e:
                 print(f'[PluginManager] ⚠️ mount-all {identifier} failed: {e}')
@@ -3369,10 +3418,24 @@ class PluginManager:
             if identifier in pinfo.dependencies:
                 print(f'[PluginManager] {pid}: dependency {identifier} {action}')
 
+    def _public_root_allowed(self, info, bp) -> bool:
+        """空前缀挂载授权：插件声明 public_root，且宿主在 public_root_hosts 内。
+
+        空名单 = 未限定宿主（兼容旧声明）。宿主以 app.import_name 首段判定
+        （auth_server / main_site），避免公开站点根路径抢占控制台等宿主。
+        """
+        md = getattr(info, 'metadata', None) or {}
+        if not (bool(md.get('public_root')) or getattr(bp, 'public_root', False)):
+            return False
+        hosts = getattr(bp, 'public_root_hosts', None) or md.get('public_root_hosts') or ()
+        if not hosts:
+            return True
+        return getattr(self.app, 'import_name', '').split('.')[0] in hosts
+
     def _get_route_prefix(self, identifier: str, bp) -> str:
         """确定路由前缀"""
-        # 如果 Blueprint 已自定义 url_prefix，则使用自定义的
-        if bp.url_prefix:
+        # 如果 Blueprint 已自定义 url_prefix（含显式 ''），则使用自定义的
+        if bp.url_prefix is not None:
             return bp.url_prefix
         return f'/plugin/{identifier}'
 

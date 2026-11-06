@@ -16,6 +16,7 @@ Plugin Manager — 管理 API（供 Admin 后台调用）
   POST   /admin/plugins/<id>/config   — 保存配置
 """
 
+import hashlib
 import json
 import os
 import subprocess
@@ -2601,6 +2602,91 @@ def exemption_key_revoke(key_id: int):
     if mgr.revoke_key(key_id):
         return _json_result(True, data={'revoked': True})
     return _json_result(False, error=_('Exemption key not found or already revoked'), code=404)
+
+
+# ── 29. 跨站点在线兑换（官方站 ← 用户站回调）─────────────
+# 流向：用户站 redeem_key() 本地查无 Key → 回调本端点（官方站为签发方）。
+# 安全模型：
+#   - 明文 Key 本身即授权凭证（256bit 熵，库中仅存 SHA256）——不知道 Key 无法调用；
+#   - 消耗（redeemed_count）只在签发方（本端点）原子发生，用户站无副本可重复消耗；
+#   - 同一 site_id 重复回调幂等返回（用户站重建库后可恢复授权，不重复占坑）；
+#   - 响应附 HMAC-SHA256 票据（PLUGIN_LICENSE_SECRET 签名），用户站以
+#     EXEMPTION_ISSUER_SECRET 验签，防中间人伪造 scope/expires_at。
+
+def _exemption_ticket(payload: dict) -> str:
+    """签发 HMAC 票据（与 license.generate_offline_token 同构：b64(payload.sig)）"""
+    import base64 as _b64
+    import hashlib as _hashlib
+    import hmac as _hmac
+
+    from .license import _get_license_secret
+    payload_str = json.dumps(payload, separators=(',', ':'))
+    sig = _hmac.new(_get_license_secret().encode(), payload_str.encode(),
+                    _hashlib.sha256).hexdigest()[:32]
+    return _b64.urlsafe_b64encode(f'{payload_str}.{sig}'.encode()).decode()
+
+
+@bp.route('/exemption-keys/redeem-remote', methods=['POST'])
+def exemption_key_redeem_remote():
+    """用户站在线兑换入口：验 Key → 原子消耗（同站幂等）→ 返回 scope + HMAC 票据"""
+    data = request.json if request.is_json else {}
+    key = (data.get('key') or '').strip()
+    site_id = (data.get('site_id') or '').strip()
+    if not key or not site_id:
+        return _json_result(False, error='key and site_id required', code=400)
+
+    key_hash = hashlib.sha256(key.encode('utf-8')).hexdigest()
+
+    with get_registry_db() as conn:
+        row = conn.execute(
+            'SELECT * FROM plugin_exemption_keys WHERE key_hash=%s',
+            (key_hash,)
+        ).fetchone()
+        if row is None:
+            return _json_result(False, error='Invalid or unknown exemption key', code=404)
+        if row['key_status'] != 'active':
+            return _json_result(False, error='Exemption key has been revoked', code=403)
+        if row['expires_at']:
+            try:
+                if datetime.now() > datetime.fromisoformat(row['expires_at']):
+                    return _json_result(False, error='Exemption key has expired', code=403)
+            except ValueError:
+                pass
+
+        sites = json.loads(row['redeemed_sites'] or '[]')
+        already = site_id in sites
+        if not already:
+            # 原子占坑：与本地 redeem 同口径（WHERE 带条件，防并发超发）
+            sites.append(site_id)
+            cur = conn.execute(
+                """
+                UPDATE plugin_exemption_keys
+                SET redeemed_count = redeemed_count + 1,
+                    redeemed_sites = %s, updated_at = NOW()
+                WHERE id = %s AND redeemed_count < max_redemptions
+                  AND key_status = 'active'
+                """,
+                (json.dumps(sites), row['id']),
+            )
+            if cur.rowcount != 1:
+                return _json_result(
+                    False, error='Exemption key has reached its redemption limit', code=403)
+        conn.commit()
+
+    scope = json.loads(row['scope_plugins'] or '[]')
+    payload = {
+        's': site_id,
+        'scope': scope,
+        'e': row['expires_at'] or '',
+        'ts': datetime.now().isoformat(timespec='seconds'),
+        'v': 1,
+    }
+    return _json_result(True, data={
+        'scope_plugins': scope,
+        'expires_at': row['expires_at'] or '',
+        'idempotent': already,
+        'ticket': _exemption_ticket(payload),
+    })
 
 
 # ====================================================================

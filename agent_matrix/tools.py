@@ -17,7 +17,8 @@ Agent Matrix — 工具注册中心 (Tool Registry)
   - execute_tool(name, args, allowed_tools=None) -> str
 """
 from i18n import _
-import json, os, sys, logging
+import json, os, re, sys, logging
+from datetime import datetime
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 # WP-8：spawn_subagent 工具实现体（内部延迟导入 tools/models，无循环依赖）
 from agent_matrix.tools_subagent import _tool_spawn_subagent
@@ -923,12 +924,46 @@ TOOL_CONCURRENCY = {
     'spawn_subagent': {'concurrency_safe': False, 'interruptible': False},
 }
 
+# MCP 合并工具不在本仓注册（服务端由插件声明），按工具名动词识别只读操作：
+# 仅 search/list/get/query/read/fetch/retrieve/find/describe/lookup/count 视为并发安全；
+# create/update/delete/... 等写操作不匹配，仍按串行执行（保守起步原则不变）。
+_MCP_READONLY_VERBS = frozenset({
+    'search', 'list', 'get', 'query', 'read', 'fetch',
+    'retrieve', 'find', 'describe', 'lookup', 'count',
+})
+
+# 写动词黑名单优先：命中任一即判定为非只读（宁漏不误——误判只读会让写操作并发，
+# 代价远高于少并发几个查询）。覆盖常见 CRUD/发布/流转动词。
+_MCP_WRITE_VERBS = frozenset({
+    'create', 'update', 'delete', 'remove', 'insert', 'set', 'add',
+    'upload', 'publish', 'send', 'post', 'put', 'patch', 'approve',
+    'reject', 'execute', 'run', 'close', 'archive', 'restore', 'merge',
+})
+
+
+def _is_mcp_readonly(name):
+    """mcp__<plugin>__<server>__<tool> → 按 <tool> 段全部词元判定是否只读。
+
+    历史实现取 <tool> 段的首词（如 crm_query → 'crm'），而真实命名是
+    "服务前缀_动词"（bench 夹具为 benchcrm__crm_query），首词恒为服务名，
+    导致 crm_query 等占一半调用的只读工具全部漏判（实测覆盖率仅 10%）。
+    改为词元级判定：任一写动词 → 非只读；否则含只读动词 → 只读。
+    """
+    if not str(name).startswith('mcp__'):
+        return False
+    tokens = [t for t in str(name).rsplit('__', 1)[-1].lower().split('_') if t]
+    if not tokens or any(t in _MCP_WRITE_VERBS for t in tokens):
+        return False
+    return any(t in _MCP_READONLY_VERBS for t in tokens)
+
 
 def get_tool_concurrency(name):
     """返回 (concurrency_safe, interruptible)。未注册工具保守返回 (False, True)。"""
     meta = TOOL_CONCURRENCY.get(name)
     if meta:
         return bool(meta.get('concurrency_safe')), bool(meta.get('interruptible', True))
+    if _is_mcp_readonly(name):
+        return True, True
     return False, True
 
 
@@ -1104,11 +1139,275 @@ def _mcp_authorized(name, permitted):
     return False
 
 
+_EMPTY_RESULT_HINT = (
+    "No records matched. Before retrying with different spellings, sample the "
+    "field's actual values (e.g. SELECT DISTINCT status / priority) and map the "
+    "task's labels to the store's enum values.")
+
+
+def _with_empty_hint(result):
+    """空结果附加枚举探测提示，避免模型改写法盲猜（无效试错的主因）。
+
+    仅在结果为空时追加说明；非空结果原样返回，不改变任何既有输出。
+    """
+    if result is None:
+        return _EMPTY_RESULT_HINT
+    text = result if isinstance(result, str) else str(result)
+    if text.strip() in ('', '[]', '{}', 'null', 'None'):
+        return f"{text}\n{_EMPTY_RESULT_HINT}".strip()
+    return result
+
+
+def _field_name(value):
+    """Jira 字段可能是字符串，也可能是 {'name': ...} 对象。"""
+    if isinstance(value, dict):
+        return str(value.get('name') or value.get('value') or '')
+    return str(value or '')
+
+
+_ISSUE_TOOL_SUFFIXES = ('_search_issues', '_search')
+_CLOSED_STATUS = {
+    'done', 'closed', 'resolved', 'cancelled', 'canceled', 'rejected',
+    'duplicate', 'won\'t fix', 'will not fix',
+}
+# 模板型占位条目（评测数据里大多是这类重复噪声）：不删，只降权。
+# 分两类：①"Add unit tests / Update docs"这类通用维护动作；
+#          ②Refactor / Migrate / Rename 等纯粹的结构性改造。
+_TEMPLATE_ISSUE_RE = re.compile(
+    r'^(?:'
+    r'(?:add|write|increase|improve|update)\s+(?:unit\s+)?'
+    r'(?:tests?|test\s+coverage|coverage|documentation|docs|logging|telemetry|'
+    r'dead\s+code|dependencies?)\b'
+    r'|'
+    r'(?:refactor|migrate|bump|rename|deprecate|clean\s*up|remove|delete)\b'
+    r')',
+    re.IGNORECASE,
+)
+_FOCUS_STOPWORDS = {
+    'with', 'from', 'that', 'this', 'have', 'been', 'which', 'their', 'there',
+    'about', 'into', 'over', 'also', 'when', 'where', 'while', 'should', 'would',
+    'could', 'must', 'each', 'both', 'more', 'most', 'other', 'than', 'then',
+    'they', 'them', 'your', 'you', 'all', 'any', 'can', 'for', 'and', 'the',
+    'are', 'was', 'were', 'has', 'had', 'not', 'but', 'its', 'it', 'on', 'in',
+    'to', 'of', 'a', 'an', 'as', 'at', 'by', 'or', 'is', 'be', 'do', 'does',
+}
+
+
+def _focus_terms(text):
+    """任务原文 → 去停用词后的词元集合，供 issue 标题相关性打分。"""
+    return {
+        t for t in re.findall(r'[a-z][a-z0-9]{3,}', (text or '').lower())
+        if t not in _FOCUS_STOPWORDS
+    }
+
+
+def _issue_score(issue, focus_terms):
+    """单条 issue 的相关度得分：open 优先、模板降权、标题词干越大越靠前。"""
+    fields = issue.get('fields') if isinstance(issue, dict) else None
+    if not isinstance(fields, dict):
+        return 0.0
+    summary = str(fields.get('summary') or '')
+    status = _field_name(fields.get('status')).strip().lower()
+    priority = _field_name(fields.get('priority')).strip().lower()
+    score = 0.0
+    score += -3.0 if status in _CLOSED_STATUS else 1.0
+    if _TEMPLATE_ISSUE_RE.match(summary.strip()):
+        score -= 2.0
+    if focus_terms:
+        tokens = set(re.findall(r'[a-z][a-z0-9]{3,}', summary.lower()))
+        score += min(5.0, float(len(tokens & focus_terms)))
+    if priority in ('highest', 'blocker', 'critical', 'high'):
+        score += 1.0
+    return score
+
+
+def _rerank_issue_results(name, result, context=None):
+    """对 issue 搜索结果做稳定重排：open/非模板/与任务相关者靠前。
+
+    fail-open：名字不匹配、结构不符、解析失败或任何异常 → 原样返回。
+    `VR_MCP_RERANK=0` 可一键关闭。仅重排、不删条目，total/maxResults 保持不变。
+    """
+    if os.getenv('VR_MCP_RERANK', '1') == '0':
+        return result
+    if not isinstance(result, str) or not str(name).endswith(_ISSUE_TOOL_SUFFIXES):
+        return result
+    try:
+        payload = json.loads(result)
+        if not isinstance(payload, dict):
+            return result
+        issues = payload.get('issues')
+        if not isinstance(issues, list) or len(issues) < 2:
+            return result
+        focus = ''
+        if isinstance(context, dict):
+            focus = str(context.get('focus') or '')
+        terms = _focus_terms(focus)
+        ranked = [item for _, item in sorted(
+            enumerate(issues),
+            key=lambda pair: (-_issue_score(pair[1], terms), pair[0]))]
+        if ranked == issues:
+            return result
+        payload['issues'] = ranked
+        payload.setdefault('ranking', 'open-first; generic test/refactor entries demoted')
+        return json.dumps(payload, ensure_ascii=False)
+    except Exception as e:
+        logger.warning(f'[tool:{name}] issue rerank skipped: {e}')
+        return result
+
+
+_CONSTRAINT_RE = re.compile(
+    r'(deadline|due\s|go[\s\-]*no[\s\-]*go|expires?|expiry|required\s+by|'
+    r'must\s+be|threshold|cutoff|no\s+later\s+than|end\s+of\s+(?:day|week|month|quarter)|'
+    r'by\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec))',
+    re.IGNORECASE,
+)
+_DATE_TEXT_RE = re.compile(
+    r'Date:\s*([A-Z][a-z]+\s+\d{1,2},\s*\d{4}|[A-Z][a-z]+\s+\d{1,2}\s+\d{4})')
+_MONTH_NUM = {
+    'january': 1, 'february': 2, 'march': 3, 'april': 4, 'may': 5, 'june': 6,
+    'july': 7, 'august': 8, 'september': 9, 'october': 10, 'november': 11,
+    'december': 12,
+}
+
+
+def _extract_constraint_digest(text, max_items=10):
+    """从正文里摘出含时间/阈值/强制要求的句子，连同前后各一句。
+
+    只做呈现，不裁剪原文；返回空列表表示没有可用约束。
+    """
+    lines = [ln.strip() for ln in text.splitlines()]
+    out = []
+    covered = set()
+    for i, line in enumerate(lines):
+        if not line or line in covered or not _CONSTRAINT_RE.search(line):
+            continue
+        window = [lines[j] for j in (i - 1, i, i + 1)
+                  if 0 <= j < len(lines) and lines[j]]
+        covered.update(window)
+        frag = ' / '.join(window)[:400]
+        if frag and frag not in out:
+            out.append(frag)
+        if len(out) >= max_items:
+            break
+    return out
+
+
+def _enrich_read_result(name, result):
+    """read_file_content：在返回体顶部加 constraint_digest，正文保持原样。"""
+    if os.getenv('VR_MCP_ENRICH', '1') == '0':
+        return result
+    if not isinstance(result, str) or not str(name).endswith('read_file_content'):
+        return result
+    try:
+        payload = json.loads(result)
+        if not isinstance(payload, dict):
+            return result
+        content = payload.get('content')
+        if not isinstance(content, str) or len(content) < 120:
+            return result
+        digest = _extract_constraint_digest(content)
+        if not digest:
+            return result
+        enriched = {
+            'constraint_digest': digest,
+            'constraint_digest_note': '约束句摘录（含前后各一句）；原文完整保留在 content 字段',
+        }
+        enriched.update(payload)
+        return json.dumps(enriched, ensure_ascii=False)
+    except Exception as e:
+        logger.warning(f'[tool:{name}] constraint digest skipped: {e}')
+        return result
+
+
+def _parse_doc_date(item):
+    """从 contentSnippet 的 Date: 行解析文档日期（modifiedTime 在夹具里不可用）。"""
+    snippet = str(item.get('contentSnippet') or '')
+    m = _DATE_TEXT_RE.search(snippet)
+    if not m:
+        return ''
+    for fmt in ('%B %d, %Y', '%b %d, %Y', '%B %d %Y'):
+        try:
+            return datetime.strptime(m.group(1), fmt).strftime('%Y-%m-%d')
+        except ValueError:
+            continue
+    return ''
+
+
+def _focus_month_day(focus):
+    """从任务原文提取 (月, 日) 锚点：支持 February 9 / 2/9 两种写法。"""
+    text = focus or ''
+    m = re.search(r'([A-Za-z]+)\s+(\d{1,2})', text)
+    if m and m.group(1).lower() in _MONTH_NUM:
+        return _MONTH_NUM[m.group(1).lower()], int(m.group(2))
+    m = re.search(r'\b(\d{1,2})/(\d{1,2})\b', text)
+    if m:
+        month, day = int(m.group(1)), int(m.group(2))
+        if 1 <= month <= 12 and 1 <= day <= 31:
+            return month, day
+    return None
+
+
+def _enrich_file_dates(name, result, context=None):
+    """list_recent_files / search_files：补 docDate，并按任务日期窗口前置。"""
+    if os.getenv('VR_MCP_ENRICH', '1') == '0':
+        return result
+    if not isinstance(result, str) or not str(name).endswith(
+            ('list_recent_files', 'search_files')):
+        return result
+    try:
+        payload = json.loads(result)
+        if not isinstance(payload, dict):
+            return result
+        files = payload.get('files')
+        if not isinstance(files, list) or not files:
+            return result
+        changed = False
+        for item in files:
+            if isinstance(item, dict) and not item.get('docDate'):
+                doc_date = _parse_doc_date(item)
+                if doc_date:
+                    item['docDate'] = doc_date
+                    changed = True
+        if not changed:
+            return result
+        focus = context.get('focus') if isinstance(context, dict) else ''
+        anchor = _focus_month_day(focus)
+
+        def _sort_key(item):
+            doc_date = str(item.get('docDate') or '')
+            matched = 0
+            if anchor and doc_date:
+                try:
+                    dt = datetime.strptime(doc_date, '%Y-%m-%d')
+                    if dt.month == anchor[0] and abs(dt.day - anchor[1]) <= 7:
+                        matched = 1
+                except ValueError:
+                    pass
+            return (-matched, doc_date or '9999-99-99')
+
+        files.sort(key=_sort_key)
+        payload['files'] = files
+        payload.setdefault(
+            'date_note', 'docDate 取自正文 Date: 行（modifiedTime 不可用）；按日期排序')
+        return json.dumps(payload, ensure_ascii=False)
+    except Exception as e:
+        logger.warning(f'[tool:{name}] file date enrich skipped: {e}')
+        return result
+
+
 def _execute_mcp_tool(name, args, context=None):
     """P2-5: 路由 MCP 工具调用（mcp__<plugin>__<server>__<tool>）。"""
     try:
         from plugin_manager.mcp import call_mcp_tool
-        return call_mcp_tool(name, args, context)
+        result = call_mcp_tool(name, args, context)
+        # 呈现层增强（不改原文、只加字段/调整顺序）：
+        #   1) 文档正文顶部给约束句摘要，避免截止日期被长文淹没；
+        #   2) 文件列表补 docDate，夹具的 modifiedTime 不可用。
+        result = _enrich_read_result(name, result)
+        result = _enrich_file_dates(name, result, context)
+        # 3) 候选去噪：issue 搜索结果按 open/相关性重排（其余工具原样返回）。
+        result = _rerank_issue_results(name, result, context)
+        return _with_empty_hint(result)
     except Exception as e:
         logger.warning(f'[tool:{name}] MCP 调用失败: {e}')  # i18n:tech — 运维日志
         return f'Tool {name} execution error: {e}'

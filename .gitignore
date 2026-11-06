@@ -67,6 +67,11 @@ git_script.py
 !.env.example
 *.env.local
 
+# 云厂商密钥导出文件（严禁入库）——腾讯云 CAM 子用户密钥 CSV 文件名固定为「新建子用户信息.csv」
+# 注意：不可在此写 *.csv，仓库内 data/ 下的日历、ip2region 等 csv 必须继续入库
+/新建子用户信息*.csv
+/子用户信息*.csv
+
 # OS
 Thumbs.db
 .DS_Store

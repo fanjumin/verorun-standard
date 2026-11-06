@@ -66,6 +66,10 @@ app = Flask(__name__, template_folder='templates')
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', os.environ.get('FLASK_SECRET_KEY', secrets.token_hex(32)))
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 app.config['PREFERRED_URL_SCHEME'] = 'https'
+# P2 请求体上限：Nginx 放行 100M，但应用层此前完全不设限，超大 JSON 会直接
+# 放大内存与上下文写入压力（第三方评测用 1MB 垃圾体打穿了 SSE 接口）。
+# 统一上限 32MB，留足附件/导入空间；Agent 流式接口另有 1MB 更严格限制。
+app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024
 
 # ══ CORS 中间件 ══
 # 桌面端研发/打包态（无服务版本地核）渲染层与 admin(8084) 异源（本机：vite:5173；打包态：

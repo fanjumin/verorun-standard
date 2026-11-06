@@ -22,7 +22,7 @@
   "tagline_subtitle": "飞书 · 企业微信 · Telegram · LINE · Slack · Discord · 钉钉 · QQ 消息通道（入站验签 fail-closed），含 Web 第三方登录",
   "author": "VeroRun",
   "min_app_version": "0.10.0",
-  "compatible_editions": ["enterprise", "standard", "pro", "finance", "minipro", "omni-service"],
+  "compatible_editions": ["enterprise", "standard", "pro", "finance", "minipro", "omni-service", "research"],
   "agent_role": "service",
   "capabilities": [
     "im.channel.list",

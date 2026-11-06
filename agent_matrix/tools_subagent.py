@@ -82,6 +82,21 @@ def _execute_subagent(agent_config, task, expected, context, depth):
     cfg = dict(agent_config)
     cfg['allowed_tools_parsed'] = permitted if permitted else None
 
+    # 子代理同样是执行入口：必须与主链路一致加载全局规则/场景模板，
+    # 否则 spawn_subagent 产出的结论不受规则约束（评测报告 P0-1 的同类缺口）。
+    # 解析失败自动降级为原始 system_prompt，不阻断子任务。
+    try:
+        import agent_matrix.models as _am_models
+        from agent_matrix.prompt_resolver import PromptResolver
+        cfg['system_prompt'] = PromptResolver(_am_models).resolve(cfg, {
+            'domain': cfg.get('domain', 'general'),
+            'task_type': (context or {}).get('task_phase') or 'execute',
+            'mode': 'subagent',
+            'user_query': task[:200],
+        })
+    except Exception as e:
+        logger.warning('[spawn_subagent] prompt resolve failed: %s', e)
+
     runner = AgentRunner(cfg)
     engine = runner._get_engine()
     if not engine or not engine.is_ready():

@@ -18,6 +18,11 @@ managed_modules:
   #   agent_role=content 不改，在本版由本角色 managed_modules 认领（② 通道，与
   #   email/vault 同一运维 lane）。通用检索接入层为 lit_scout 文献检索补证据层。
   - search_hub
+  # 2026-11-05 用户裁决（im_gateway 必须接入）：其 plugin.json 保持 agent_role=service
+  #   （官方版语义）不改，在本版由本角色 managed_modules 认领（② 通道，与金融版 ops
+  #   认领 email/im_gateway 完全同一惯例）。用途：科研长任务（批量检索/综述生成）完成
+  #   与异常通知。前置：plugins/im_gateway/plugin.json compatible_editions 已追加 research。
+  - im_gateway
 provider_model_id: 401638
 provider: deepseek
 model_name: deepseek-v4-flash

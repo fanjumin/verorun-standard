@@ -6,7 +6,6 @@
 # 兼容口径：tarka 部署下，plugin.json 中声明 "standard" 的插件同样放行
 # （见 shared/edition.py::_EDITION_COMPAT_UNION），故 42 个插件的兼容声明无需逐个改写。
 #
-# 插件清单来源：F:\Sites\VeroRun-docs\tarka-design\12-tarka-cn-site\tarka-cn-website-plan.md §04
 # 「25 插件 → 网站功能映射」（Web 呈现层 13 + 能力层 14，二者重叠 content_factory /
 # subscription，去重后 25 个）。本清单在此基础上补两项闭包/基建：
 #   _base          —— 基础插件，与其它 edition 同惯例（finance-desktop/minipro/omni 均含）
@@ -33,6 +32,8 @@ plugins:
     - wishlist
     - survey
     - coupons
+    # shop 已于 2026-11-03 移除：coupons v1.5.5 解除 order_items 硬绑定（优雅降级），
+    # 无商城 edition 不再需要 shop；此前补入系 coupons 未声明隐式依赖的临时兜底
     - hr_recruit
     - ads
     - mini_app_builder

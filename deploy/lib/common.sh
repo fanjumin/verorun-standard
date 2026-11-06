@@ -544,6 +544,49 @@ _resolve_git_repo() {
 }
 
 # ══════════════════════════════════════════════════════════════════════
+# 证书覆盖校验与失败标记（_setup_ssl_cert / 部署摘要共用）
+# 判定依据是「证书 SAN 是否覆盖 nginx 各 server_name」，而非「fullchain.pem 是否存在」。
+# 二者不等价：一张只签了主域的证书同样能让文件存在，从而在部署摘要里对
+# platform/agent 两个子域谎报 HTTPS 就绪——配置里 HSTS 带 includeSubDomains，
+# 一旦某子域不在 SAN 内，浏览器会直接硬拦截且无法跳过。
+# 注：install.sh 启用了 set -euo pipefail，此处所有可失败的命令均显式兜底，
+#     数组展开用 ${arr[*]:-} 规避空数组在 set -u 下的未定义访问。
+# ══════════════════════════════════════════════════════════════════════
+_mark_ssl_failed() {
+    [ -f "${APP_HOME}/.env" ] || return 0
+    if grep -q "^SSL_STATUS=" "${APP_HOME}/.env" 2>/dev/null; then
+        sed -i "s/^SSL_STATUS=.*/SSL_STATUS=failed/" "${APP_HOME}/.env"
+    else
+        echo "SSL_STATUS=failed" >> "${APP_HOME}/.env"
+    fi
+    return 0
+}
+
+verify_ssl_coverage() {
+    local _cert="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
+    [ -f "${_cert}" ] || return 1
+
+    local _san=""
+    _san=$(openssl x509 -in "${_cert}" -noout -ext subjectAltName 2>/dev/null | tr -d ' \n') || _san=""
+    [ -n "${_san}" ] || return 1
+
+    local _host
+    local _missing=()
+    for _host in "${DOMAIN}" "www.${DOMAIN}" "platform.${DOMAIN}" "agent.${DOMAIN}"; do
+        # DNS:<host> 必须后接逗号或结尾，避免 agent.tarka.cn 误判为覆盖 tarka.cn
+        echo "${_san}" | grep -qE "DNS:${_host}(,|$)" || _missing+=("${_host}")
+    done
+
+    [ ${#_missing[@]} -eq 0 ] && return 0
+
+    echo -e "${FAIL} Certificate does NOT cover: ${_missing[*]:-}"
+    echo -e "${INFO} SAN in use: ${_san}"
+    echo -e "${INFO} Fix: sudo certbot --nginx --cert-name ${DOMAIN} --expand --force-renewal"
+    echo -e "${INFO}        -d ${DOMAIN} -d www.${DOMAIN} -d platform.${DOMAIN} -d agent.${DOMAIN}"
+    return 1
+}
+
+# ══════════════════════════════════════════════════════════════════════
 # Automatic HTTPS certificate issuance (审计 Y-2：enabled only for production + when the domain is configured)
 # Flow: install certbot → certbot --nginx issuance (interactive email input) → update .env
 # DEPLOY_PROTOCOL=https → reload nginx. Failure does not block installation (Let's Encrypt has
@@ -595,7 +638,7 @@ _setup_ssl_cert() {
         if ! { exec 3<>/dev/tty; } 2>/dev/null; then
             exec 3>&-
             echo -e "${WARN} Non-interactive shell — skipping cert issuance."
-            echo -e "${INFO} Run later: sudo apt-get install -y certbot python3-certbot-nginx && sudo certbot --nginx -d ${DOMAIN} -d www.${DOMAIN} -d platform.${DOMAIN} -d agent.${DOMAIN}"
+            echo -e "${INFO} Run later: sudo apt-get install -y certbot python3-certbot-nginx && sudo certbot --nginx --cert-name ${DOMAIN} --expand -d ${DOMAIN} -d www.${DOMAIN} -d platform.${DOMAIN} -d agent.${DOMAIN}"
             return 0
         fi
         exec 3>&-
@@ -604,7 +647,7 @@ _setup_ssl_cert() {
         if ! read -r -t 30 -p "  Let's Encrypt email (for renewal notices, optional): " _email < /dev/tty; then
             _email=""
             echo -e "${WARN} No input within 30s — skipping cert issuance (run manually later)."
-            echo -e "${INFO} Run later: sudo apt-get install -y certbot python3-certbot-nginx && sudo certbot --nginx -d ${DOMAIN} -d www.${DOMAIN} -d platform.${DOMAIN} -d agent.${DOMAIN}"
+            echo -e "${INFO} Run later: sudo apt-get install -y certbot python3-certbot-nginx && sudo certbot --nginx --cert-name ${DOMAIN} --expand -d ${DOMAIN} -d www.${DOMAIN} -d platform.${DOMAIN} -d agent.${DOMAIN}"
             return 0
         fi
     fi
@@ -622,10 +665,23 @@ _setup_ssl_cert() {
         _cert_args=("--agree-tos" "-m" "${_email}")
     fi
 
+    # 签发域名集合：与 write_nginx_config 中三个 server 块的 server_name 严格一致。
+    # Let's Encrypt 为「全有或全无」——任一域名校验失败，整批都不签发，因此该集合必须与
+    # nginx 实际服务的域名逐一对应，多一个不可达域名就会让整站失去 HTTPS。
+    local _ssl_domains=("${DOMAIN}" "www.${DOMAIN}" "platform.${DOMAIN}" "agent.${DOMAIN}")
+    local _d_args=()
+    local _d
+    for _d in "${_ssl_domains[@]}"; do
+        _d_args+=(-d "${_d}")
+    done
+
+    # 审计新增：--cert-name + --expand 保证幂等。
+    # 若此处只写 -d（无 --cert-name），在已有历史证书的机器上重跑会新建 <domain>-0001 lineage，
+    # 而 nginx 始终指向 /etc/letsencrypt/live/${DOMAIN}/，新证书不会被加载，
+    # 「部署成功但证书仍是旧的」由此产生。--expand 则把新增域名并入既有 lineage。
     # Issuance failure does not block installation: cert rate limits / domain not resolved / port 80 unreachable etc.
-    if certbot --nginx --non-interactive "${_cert_args[@]}" \
-        -d "${DOMAIN}" -d "www.${DOMAIN}" -d "platform.${DOMAIN}" -d "agent.${DOMAIN}" \
-        --redirect 2>&1; then
+    if certbot --nginx --non-interactive --cert-name "${DOMAIN}" --expand \
+        "${_cert_args[@]}" "${_d_args[@]}" --redirect 2>&1; then
         if grep -q "^DEPLOY_PROTOCOL=" "${APP_HOME}/.env"; then
             sed -i "s/^DEPLOY_PROTOCOL=.*/DEPLOY_PROTOCOL=https/" "${APP_HOME}/.env"
         else
@@ -633,9 +689,17 @@ _setup_ssl_cert() {
         fi
         nginx -t && systemctl reload nginx 2>/dev/null || true
         done_step "HTTPS certificate issued — DEPLOY_PROTOCOL=https"
+        # 签发成功不等于覆盖正确：certbot 可能沿用了一张不含全部域名的旧证书，
+        # 故此处立即回验 SAN，避免「文件存在但域名不匹配」的故障潜伏到浏览器端才暴露。
+        verify_ssl_coverage || _mark_ssl_failed
     else
-        echo -e "${WARN} certbot failed (domain must resolve to this server). SSL skipped — run manually:"
-        echo -e "${INFO}   sudo certbot --nginx -d ${DOMAIN} -d www.${DOMAIN} -d platform.${DOMAIN} -d agent.${DOMAIN}"
+        # 审计新增：失败必须显式可见。原实现仅 WARN 后继续，部署收尾仍打印 Complete，
+        # 使「4 个域名全部未签发」与「全部签发成功」在输出上无法区分。
+        echo -e "${FAIL} certbot failed — none of these domains got a certificate:"
+        echo -e "${INFO}   ${_ssl_domains[*]:-}"
+        echo -e "${INFO} Let's Encrypt is all-or-nothing: one unverifiable domain blocks the whole batch."
+        echo -e "${INFO} Diagnose manually: sudo certbot --nginx --cert-name ${DOMAIN} --expand ${_d_args[*]:-}"
+        _mark_ssl_failed
     fi
 }
 
@@ -988,7 +1052,7 @@ SVCEOF
     fi
     # 8084 — Admin (uses run_gunicorn.py to avoid platform/ shadowing stdlib)
     # RuntimeDirectory=verorun → systemd creates /run/verorun/ owned by APP_USER on service start.
-    write_one_service "verorun-admin" 8084 "admin.app" "--timeout 300 --max-requests=1000 --graceful-timeout=30 --log-level warning --config admin/gunicorn_config.py" "admin/run_gunicorn.py" "verorun"
+    write_one_service "verorun-admin" 8084 "admin.app" "--timeout 300 --max-requests=5000 --graceful-timeout=30 --log-level warning --config admin/gunicorn_config.py" "admin/run_gunicorn.py" "verorun"
     # 8085 — Health Check
     write_one_service "verorun-health" 8085 "health_service.app" "--timeout 30 --graceful-timeout=30 --log-level warning"
     # ── verorun-guardian (standalone daemon, no HTTP port) ──
@@ -2620,6 +2684,14 @@ do_install() {
              "${APP_HOME}/.cache/agents"
     chown -R "${APP_USER}:${APP_USER}" "${APP_HOME}" 2>/dev/null || true
     chown -R "${APP_USER}:${APP_USER}" "${LOG_DIR}" 2>/dev/null || true
+    # 加密盐持久化（评测报告 P1）：salt 决定 API Key 密文能否解密。仅在缺失时
+    # 生成，绝不覆盖；重装/换机时必须随 data/ 一并备份，否则旧密文全部失效。
+    if [ ! -s "${APP_HOME}/data/.crypto_salt" ]; then
+        head -c 16 /dev/urandom > "${APP_HOME}/data/.crypto_salt"
+        chmod 600 "${APP_HOME}/data/.crypto_salt"
+        chown "${APP_USER}:${APP_USER}" "${APP_HOME}/data/.crypto_salt" 2>/dev/null || true
+        echo -e "${INFO} Crypto salt created: ${APP_HOME}/data/.crypto_salt (include it in backups)"
+    fi
     done_step "Directories ready"
 
     # Git repo auto-resolution (审计 Y-1)：automatically switch to a mirror when HTTPS direct is unreachable; SSH uses 443
@@ -3154,7 +3226,9 @@ print_summary() {
             echo "  ╠══════════════════════════════════════════════════════════════╣"
             # 审计 P0-1：summary reflects the real TLS state — https only when a certificate actually exists,
             # otherwise http + a prominent warning (DEPLOY_PROTOCOL may have been rewritten back to http).
-            if [ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]; then
+            # 审计 P0-1+：改为按「SAN 是否覆盖各 server_name」判定。原实现用 fullchain.pem 是否存在，
+            # 单域证书同样满足该条件，导致摘要对 platform/agent 谎报 https 就绪（本次 www 故障即由此潜伏）。
+            if verify_ssl_coverage; then
             echo "  ║  Main site:  https://${DOMAIN}                                 ║"
             echo "  ║  Platform:   https://platform.${DOMAIN}                        ║"
             echo "  ║  Admin:      https://agent.${DOMAIN}/admin/                    ║"
@@ -3163,10 +3237,17 @@ print_summary() {
             echo "  ║  Platform:   http://platform.${DOMAIN}                         ║"
             echo "  ║  Admin:      http://agent.${DOMAIN}/admin/                     ║"
             echo "  ╠══════════════════════════════════════════════════════════════╣"
+            # 区分两种失败：完全没有证书，与「有证书但不覆盖全部域名」。后者更危险——
+            # 浏览器对未覆盖的子域硬拦截（HSTS includeSubDomains），但运维容易误以为 HTTPS 已就绪。
+            if [ -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]; then
+            echo "  ║  WARNING: TLS certificate does NOT cover all domains above.   ║"
+            else
             echo "  ║  WARNING: no TLS certificate issued — running over HTTP.      ║"
-            echo "  ║  SSO cookies lack the Secure flag; enable HTTPS via:          ║"
-            echo "  ║    sudo certbot --nginx -d ${DOMAIN} -d www.${DOMAIN}         ║"
-            echo "  ║             -d platform.${DOMAIN} -d agent.${DOMAIN}          ║"
+            fi
+            echo "  ║  SSO cookies lack the Secure flag; re-issue via:              ║"
+            echo "  ║    sudo certbot --nginx --cert-name ${DOMAIN} --expand        ║"
+            echo "  ║      -d ${DOMAIN} -d www.${DOMAIN}                            ║"
+            echo "  ║      -d platform.${DOMAIN} -d agent.${DOMAIN}                 ║"
             fi
             fi
             if [ "${APPROVE_MIGRATE:-0}" != "1" ]; then

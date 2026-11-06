@@ -154,7 +154,7 @@
         {% if item.download_url or item.platforms %}
         <div class="dl-buttons">
           {% if item.download_url %}
-          <a class="dl-big-btn primary" href="{{ item.download_url }}" rel="noopener" target="_blank">{{ _('⬇ Direct Download') }}<span class="btn-os">{{ item.file_size or '' }}</span>
+          <a class="dl-big-btn primary" href="/api/download/{{ item.slug }}?src=detail" rel="noopener" target="_blank">{{ _('⬇ Direct Download') }}<span class="btn-os">{{ item.file_size or '' }}</span>
 </a>
           {% endif %}
           {% if item.repo_url %}

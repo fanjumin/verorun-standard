@@ -46,7 +46,9 @@ constitution:       agent_matrix/kernel.AGENTS.md (L1) + agent_matrix/editions/f
 
 ## [Unreleased]
 
-无。
+### Fixed
+
+- **基线漂移修正（2026-11-05）**：L2 宪法 §6.1 仍列 `hr_recruit`、`visitor_profile`（2026-10-26 用户裁决移除）与 `coupons`（2026-10-29 用户裁决移除），且写「`_base` + 17 项业务插件」而 `deploy/editions/finance-desktop.yaml` 实际为 `_base` + 14 项（`stock_analysis`、`multi_asset`、`im_gateway`、`email`、`memory_engine`、`bayes_engine`、`butterfly_engine`、`chaos_engine`、`vault`、`net_proxy`、`project_workspace`、`content_factory`、`search_hub`、`neural_flow`）。违反 §7.2「只改 yaml 不改本文件视为基线漂移」。本次仅修文档，`deploy/editions/finance-desktop.yaml` 与各插件源码一字不动
 
 ---
 

@@ -1203,7 +1203,7 @@ function loadServices(){
   document.getElementById('mainContent').innerHTML='<div class="svc-grid" id="svcGrid"><div class="spinner" style="grid-column:1/-1;margin:40px auto"></div></div>';
   // 并行获取未读通知数、优惠券数、工单数
   var p1=fetch('/api/notifications/unread-count',{headers:{'Authorization':'Bearer '+TOKEN}}).then(function(r){return r.json()}).catch(function(){return{count:0}});
-  var p2=api('/user/coupons?status=active').catch(function(){return{data:[]}});
+  var p2=api('/plugin/coupons/user/list?status=active').catch(function(){return{data:[]}});
   var p3=api('/user/tickets?status=open').catch(function(){return{data:[]}});
   Promise.all([p1,p2,p3]).then(function(res){
     var notifUnread=res[0].count||0;
@@ -1359,7 +1359,7 @@ function notifPageMarkRead(nid,link){
 // ============ 优惠券 ============
 function loadCoupons(){
   document.getElementById('mainContent').innerHTML='<div class="spinner" style="margin:40px auto"></div>';
-  api('/user/coupons').then(function(d){
+  api('/plugin/coupons/user/list').then(function(d){
     var coupons=(d.data||d||[]);
     var h='';
     if(!coupons.length){h='<div class="empty">{{ _('No coupons') }}</div>'}
@@ -1610,8 +1610,8 @@ async function chatSend(){
       for(var si=1;si<=5;si++){
         csatHtml+='<span class="csat-star" data-sid="'+esc(sessionId)+'" data-score="'+si+'" '+
           'style="cursor:pointer;font-size:16px;color:#555;transition:color .15s" '+
-          'onmouseenter="this.style.color=\\'#f0c040\\'" onmouseleave="this.style.color=\\'#555\\'" '+
-          'onclick="submitCSAT(this.dataset.sid,'+si+',this)">\\u2605</span>';
+          'onmouseenter="this.style.color=\'#f0c040\'" onmouseleave="this.style.color=\'#555\'" '+
+          'onclick="submitCSAT(this.dataset.sid,'+si+',this)">\u2605</span>';
       }
       csatHtml+='</span></div>';
       botDiv.insertAdjacentHTML('beforeend',csatHtml);
@@ -1684,54 +1684,54 @@ function loadDocs(){
 // ============ 我的订单 ============
 function loadOrders(){
   document.getElementById('mainContent').innerHTML='<div class="spinner" style="margin:40px auto"></div>';
-  fetch('/mall/api/orders',{headers:{'Authorization':'Bearer '+TOKEN}}).then(function(r){
-    if(r.status===401){showLogin();return}
-    return r.json();
-  }).then(function(d){
-    if(!d.success||!d.data){
-      document.getElementById('mainContent').innerHTML='<div class="empty">{{ _('Failed to load') }}</div>';
-      return;
-    }
-    var orders=d.data;
-    var h='';
-    if(!orders||!orders.length){
-      h='<div class="empty" style="padding:60px"><div style="font-size:40px;margin-bottom:12px">📭</div><div>{{ _('No orders yet') }}</div><a href="/mall" style="color:var(--accent);margin-top:8px;display:inline-block">→ {{ translations['Go Shopping'] }}</a></div>';
-      document.getElementById('mainContent').innerHTML=h;
-      return;
-    }
+  function safeGet(u){
+    return fetch(u,{headers:{'Authorization':'Bearer '+TOKEN}}).then(function(r){
+      if(r.status===401){showLogin();return{}}
+      if(!r.ok)return{};
+      return r.json();
+    }).catch(function(){return{}});
+  }
+  // 订单来源可为商城(shop)与订阅(subscription)两个插件，任一未启用时按空数据降级
+  Promise.all([safeGet('/mall/api/orders'),safeGet('/plugin/subscription/api/orders')]).then(function(res){
+    var shopOrders=(res[0]&&res[0].success&&res[0].data)?res[0].data:[];
+    var subOrders=(res[1].orders||(res[1].data&&res[1].data.orders)||[]);
     var groups={};
-    orders.forEach(function(o){
-      if(!groups[o.order_id]) groups[o.order_id]={items:[],total:0,discount:0,status:o.status,time:o.created_at};
+    shopOrders.forEach(function(o){
+      if(!groups[o.order_id]) groups[o.order_id]={id:o.order_id,items:[],total:0,discount:0,status:o.status,time:o.created_at,type:'shop'};
       groups[o.order_id].items.push(o);
-      groups[o.order_id].total+=o.subtotal;
+      groups[o.order_id].total+=o.subtotal||0;
       groups[o.order_id].discount+=o.discount||0;
     });
-    var stLabels={pending:{{ _('Pending Payment') | tojson }},paid:{{ _('Paid') | tojson }},completed:{{ _('Completed') | tojson }},refunding:{{ _('Refunding') | tojson }},refunded:{{ _('Refunded') | tojson }},cancelled:{{ _('Cancelled') | tojson }}};
-    var orderIds=Object.keys(groups);
-    h+='<div style="font-size:13px;color:var(--muted);margin-bottom:16px">'+{{ _('Total: ') | tojson }}+' '+orderIds.length+' '+{{ _('orders') | tojson }}+'</div>';
-    orderIds.forEach(function(oid){
-      var g=groups[oid];
-      h+='<div class="card" style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><span style="font-family:monospace;font-size:11px;color:var(--muted)">'+esc(oid)+'</span><span class="badge badge-'+(g.status==='paid'||g.status==='completed'?'green':g.status==='pending'?'yellow':'red')+'">'+(stLabels[g.status]||g.status)+'</span></div>';
-      g.items.forEach(function(it){
-        h+='<div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-bottom:1px solid var(--border)"><span>'+esc(it.product_title)+' <span style="color:var(--muted);font-size:11px">×'+it.quantity+'</span></span><span>¥'+(it.subtotal||0).toFixed(2)+'</span></div>';
-      });
-      var finalAmt=g.total-g.discount;
-      h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px"><div><span style="font-size:15px;font-weight:700;color:var(--accent)">¥'+finalAmt.toFixed(2)+'</span>';
-      if(g.discount>0) h+='<span style="font-size:11px;color:var(--muted);margin-left:6px">('+{{ _('Discount') | tojson }}+' ¥'+g.discount.toFixed(2)+')</span>';
-      h+='</div><div style="display:flex;align-items:center;gap:8px"><span style="font-size:11px;color:var(--dim)">'+(g.time||'').slice(0,16).replace('T',' ')+'</span>';
-      if(g.status==='pending'){
-        h+='<div style="display:flex;gap:6px"><button class="btn btn-primary btn-sm" onclick="payShopOrder(\''+oid+'\')">{{ _('Pay Now') }}</button><button class="btn btn-sm" onclick="cancelShopOrder(\''+oid+'\')">{{ _('Cancel') }}</button></div>';
-      }
-      var canDel = g.status==='cancelled' || g.status==='refunded' || g.status==='pending';
-      if(canDel){
-        h+='<button class="btn btn-sm" style="color:#f85149;border-color:rgba(248,81,73,.3)" onclick="deleteShopOrder(\''+oid+'\')">{{ _('Delete') }}</button>';
-      }
-      h+='</div></div></div>';
+    var list=Object.keys(groups).map(function(k){return groups[k]});
+    subOrders.forEach(function(o){
+      list.push({id:o.order_no||o.id,items:[{title:o.plan_id||o.item_key||{{ _('Subscribe') | tojson }}}],total:(o.amount_fen!=null?o.amount_fen/100:parseFloat(o.amount_yuan||0)),discount:0,status:o.status,time:o.created_at,type:'subscription'});
     });
-    h+='<div style="margin-top:16px;text-align:center"><a href="/mall" class="btn btn-sm">🛒 '+{{ _('Continue Shopping') | tojson }}+' →</a></div>';
+    list.sort(function(a,b){return(b.time||'').localeCompare(a.time||'')});
+    if(!list.length){
+      document.getElementById('mainContent').innerHTML='<div class="empty" style="padding:60px"><div style="font-size:40px;margin-bottom:12px">📭</div><div>{{ _('No orders yet') }}</div></div>';
+      return;
+    }
+    var stLabels={pending:{{ _('Pending Payment') | tojson }},paid:{{ _('Paid') | tojson }},completed:{{ _('Completed') | tojson }},failed:{{ _('Failed') | tojson }},refunding:{{ _('Refunding') | tojson }},refunded:{{ _('Refunded') | tojson }},cancelled:{{ _('Cancelled') | tojson }}};
+    var h='<div style="font-size:13px;color:var(--muted);margin-bottom:16px">'+{{ _('Total: ') | tojson }}+' '+list.length+' '+{{ _('orders') | tojson }}+'</div>';
+    list.forEach(function(g){
+      var amount=g.total-g.discount;
+      var time=(g.time||'').slice(0,16).replace('T',' ');
+      var act='';
+      if(g.status==='pending'){
+        act=g.type==='subscription'
+          ?'<a href="/plugin/subscription/portal" class="btn btn-primary btn-sm">{{ _('Pay Now') }}</a>'
+          :'<button class="btn btn-primary btn-sm" onclick="payShopOrder(\''+g.id+'\')">{{ _('Pay Now') }}</button>';
+      }
+      h+='<div class="card" style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><span style="font-family:monospace;font-size:11px;color:var(--muted)">'+esc(g.id)+'</span><span class="badge badge-'+(g.status==='paid'||g.status==='completed'?'green':g.status==='pending'?'yellow':'red')+'">'+(stLabels[g.status]||g.status)+'</span></div>';
+      g.items.forEach(function(it){
+        var title=it.product_title||it.title||{{ _('Product') | tojson }};
+        var qty=it.quantity?(' ×'+it.quantity):'';
+        h+='<div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-bottom:1px solid var(--border)"><span>'+esc(title)+' <span style="color:var(--muted);font-size:11px">'+qty+'</span></span><span>¥'+((it.subtotal!=null?it.subtotal:0)).toFixed(2)+'</span></div>';
+      });
+      h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px"><span style="font-size:15px;font-weight:700;color:var(--accent)">¥'+(isNaN(amount)?0:amount).toFixed(2)+'</span>';
+      h+='<div style="display:flex;align-items:center;gap:8px"><span style="font-size:11px;color:var(--dim)">'+time+'</span>'+act+'</div></div></div>';
+    });
     document.getElementById('mainContent').innerHTML=h;
-  }).catch(function(){
-    document.getElementById('mainContent').innerHTML='<div class="empty">{{ _('Failed to load') }}</div>';
   });
 }
 
@@ -1798,24 +1798,27 @@ function loadBilling(){
     document.getElementById('blDay').textContent=u.calls_today??'-';
     document.getElementById('blTotal').textContent=u.calls_total??'-';
   });
-  // Load order history
-  Promise.all([
-    fetch('/mall/api/orders',{headers:{'Authorization':'Bearer '+TOKEN}}).then(function(r){return r.json()}).catch(function(){return{}}),
-    fetch('/subscription/orders',{headers:{'Authorization':'Bearer '+TOKEN}}).then(function(r){return r.json()}).catch(function(){return{}})
-  ]).then(function(res){
-    var shopOrders=res[0].success?res[0].data||[]:[];
-    var subOrders=res[1].success?res[1].data.orders||[]:[];
+  // Load order history（订单可来自商城(shop)与订阅(subscription)两个插件，未启用的按空数据降级）
+  function safeGetOrder(u){
+    return fetch(u,{headers:{'Authorization':'Bearer '+TOKEN}}).then(function(r){
+      if(!r.ok)return{};
+      return r.json();
+    }).catch(function(){return{}});
+  }
+  Promise.all([safeGetOrder('/mall/api/orders'),safeGetOrder('/plugin/subscription/api/orders')]).then(function(res){
+    var shopOrders=(res[0]&&res[0].success&&res[0].data)?res[0].data:[];
+    var subOrders=(res[1].orders||(res[1].data&&res[1].data.orders)||[]);
     var allOrders=[];
     var groups={};
     shopOrders.forEach(function(o){
-      if(!groups[o.order_id]) groups[o.order_id]={id:o.order_id,items:[],total:0,discount:0,status:o.status,time:o.created_at,type:'shop',pay_url:''};
+      if(!groups[o.order_id]) groups[o.order_id]={id:o.order_id,items:[],total:0,discount:0,status:o.status,time:o.created_at,type:'shop',sub:false};
       groups[o.order_id].items.push(o);
-      groups[o.order_id].total+=o.subtotal;
+      groups[o.order_id].total+=o.subtotal||0;
       groups[o.order_id].discount+=o.discount||0;
     });
     Object.keys(groups).forEach(function(k){allOrders.push(groups[k])});
     subOrders.forEach(function(o){
-      allOrders.push({id:o.order_no||o.id,items:[{title:o.plan_id||{{ _('Subscribe') | tojson }},total:o.amount_fen/100,discount:0,status:o.status,time:o.created_at,type:'subscription',sub:true}]});
+      allOrders.push({id:o.order_no||o.id,items:[{title:o.plan_id||o.item_key||{{ _('Subscribe') | tojson }},total:(o.amount_fen!=null?o.amount_fen/100:parseFloat(o.amount_yuan||0)),discount:0}],total:(o.amount_fen!=null?o.amount_fen/100:parseFloat(o.amount_yuan||0)),discount:0,status:o.status,time:o.created_at,type:'subscription',sub:true});
     });
     allOrders.sort(function(a,b){return(b.time||'').localeCompare(a.time||'')});
     var stLabels={pending:{{ _('Pending Payment') | tojson }},paid:{{ _('Paid') | tojson }},completed:{{ _('Completed') | tojson }},refunding:{{ _('Refunding') | tojson }},refunded:{{ _('Refunded') | tojson }},cancelled:{{ _('Cancelled') | tojson }},failed:{{ _('Failed') | tojson }}};
@@ -1825,16 +1828,16 @@ function loadBilling(){
     }else{
       oh+='<table><tr><th>{{ _('Order ID') }}</th><th>{{ _('Type') }}</th><th>{{ _('Product') }}</th><th>{{ _('Amount') }}</th><th>{{ _('Status') }}</th><th>{{ _('Time') }}</th><th>{{ _('Actions') }}</th></tr>';
       allOrders.forEach(function(o){
-        var itemsTxt=o.items.map(function(it){return esc(it.title||it.product_title||{{ _('Product') | tojson }})+(it.quantity?' ×'+it.quantity:'')}).join(', ');
+        var itemsTxt=o.items.map(function(it){return esc(it.title||it.product_title||{{ _('Product') | tojson }})}).join(', ');
         var finalAmt=o.total-o.discount;
         var typeTxt=o.sub?{{ _('Subscribe') | tojson }}:{{ _('Shop') | tojson }};
         var act='';
-        if(o.status==='pending'&&!o.sub){
-          act='<button class="btn btn-sm" onclick="payShopOrder(\''+o.id+'\')">{{ _('Pay Now') }}</button>';
-        }else if(o.status==='pending'&&o.sub){
-          act='<a href="/plugin/subscription/portal" class="btn btn-sm">{{ _('Pay Now') }}</a>';
+        if(o.status==='pending'){
+          act=o.sub
+            ?'<a href="/plugin/subscription/portal" class="btn btn-sm">{{ _('Pay Now') }}</a>'
+            :'<button class="btn btn-sm" onclick="payShopOrder(\''+o.id+'\')">{{ _('Pay Now') }}</button>';
         }
-        oh+='<tr><td style="font-family:monospace;font-size:10px">'+esc(o.id)+'</td><td>'+typeTxt+'</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+itemsTxt+'</td><td>¥'+finalAmt.toFixed(2)+(o.discount>0?' <span style="color:var(--muted);font-size:10px">('+{{ _('Discounted') | tojson }}+'¥'+o.discount.toFixed(2)+')</span>':'')+'</td><td><span class="badge badge-'+(o.status==='paid'||o.status==='completed'?'green':o.status==='pending'?'yellow':'red')+'">'+(stLabels[o.status]||o.status)+'</span></td><td style="font-size:10px;color:var(--muted)">'+(o.time||'').slice(0,16).replace('T',' ')+'</td><td>'+act+'</td></tr>';
+        oh+='<tr><td style="font-family:monospace;font-size:10px">'+esc(o.id)+'</td><td>'+typeTxt+'</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+itemsTxt+'</td><td>¥'+(isNaN(finalAmt)?0:finalAmt).toFixed(2)+'</td><td><span class="badge badge-'+(o.status==='paid'||o.status==='completed'?'green':o.status==='pending'?'yellow':'red')+'">'+(stLabels[o.status]||o.status)+'</span></td><td style="font-size:10px;color:var(--muted)">'+(o.time||'').slice(0,16).replace('T',' ')+'</td><td>'+act+'</td></tr>';
       });
       oh+='</table>';
     }

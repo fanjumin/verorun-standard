@@ -111,19 +111,19 @@ status:              active
 
 ## 6 基线声明（与 yaml 同步，变更须同时更新 CHANGELOG）
 
-**6.1 插件白名单**（include，发货裁剪语义；本版未声明 `runtime_whitelist: true`，运行时可见性由 `plugin_distribution_rules` + 各插件 `compatible_editions` 决定）：
+**6.1 插件白名单**（`runtime_whitelist: true`，include 兼任运行期白名单——包外插件不可见、不可启用；2026-11-05 对齐金融版策略）：
 
-`_base`、`bayes_engine`、`captcha_embedded`、`email`、`memory_engine`、`vault`、`veroscholar`（共 7 项）
+`_base` + 11 项业务插件：`bayes_engine`、`chaos_engine`、`search_hub`、`project_workspace`、`captcha_embedded`、`email`、`memory_engine`、`vault`、`veroscholar`、`net_proxy`、`im_gateway`
 
-显式排除（19 项）：`cogevolution_substrate`、`project_workspace`、`content_factory`、`site_domains`、`shop`、`payment`、`subscription`、`coupons`、`logistics`、`wishlist`、`order_notify`、`reviews`、`ali_api`、`currency_converter`、`ads`、`social_push`、`enterprise_verify`、`sms`、`two_factor_auth`
+显式排除（18 项，运行期恒无效——`edition_plugin_excludes()` 已废弃，仅作"本版明确不提供"的登记与发包侧参考）：`cogevolution_substrate`、`content_factory`、`site_domains`、`shop`、`payment`、`subscription`、`coupons`、`logistics`、`wishlist`、`order_notify`、`reviews`、`ali_api`、`currency_converter`、`ads`、`social_push`、`enterprise_verify`、`sms`、`two_factor_auth`
 
 **6.2 角色集**（8 个）：`athena`、`ops`、`veroscholar`、`lit_scout`、`method_architect`、`thesis_smith`、`peer_auditor`、`academic_writer`
 
-`ops` 为系统运维 lane，仅认领 `email` / `vault` 两个基建模块，不进入科研内容流水线（2026-10-20 用户裁决新增，见 CHANGELOG [1.1.0]）；`captcha_embedded` 由 `athena` 认领，不归 ops。
+`ops` 为系统运维 lane，认领 `email` / `vault` / `search_hub` / `im_gateway` 四项基建模块（`search_hub` 2026-10-22、`im_gateway` 2026-11-05 加入），不进入科研内容流水线；`captcha_embedded` 由 `athena` 认领，不归 ops。`project_workspace` 由 `veroscholar` 认领。
 
 **6.3 核心文件**：`agent_matrix/models.py`、`agent_matrix/routes.py`、`auth-center/models/database.py`、`auth-center/services/kb_permission.py`
 
-**6.4 门控开关**：本版**未启用** `license_enforcement`（该键为 opt-in 语义，不写即不启用）；`runtime_whitelist` 未声明，按 `false` 语义运行。
+**6.4 门控开关**：`runtime_whitelist: true`（2026-11-05 对齐金融版，dev/整盒部署下插件可见性以 include 为准）；`license_enforcement: true`（2026-11-05 商用分发决策，fail-closed：未配置部署码/未知/过期一律拒绝）。
 
 **6.5 能力命名空间**（`veroscholar`，23 项）：`lit.*`（6）、`citation.*`（3）、`exp.*`（3）、`writing.*`（4）、`discovery.*`（7）
 

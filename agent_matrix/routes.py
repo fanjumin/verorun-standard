@@ -432,8 +432,21 @@ def test_agent(aid):
     if not agent_config:
         return _error(_('Agent does not exist'), 404)
 
+    # 与 /agent/chat、/agent/stream 一致走 PromptResolver：
+    # 此前直接执行原始行，导致测试入口拿不到全局规则/场景模板/记忆过滤器，
+    # 后台"测试 Agent"看到的行为与线上不一致。
+    from agent_matrix.orchestrator import AgentOrchestrator
+    orch = AgentOrchestrator(models_module=_m())
+    agent_config['system_prompt'] = orch._resolve_prompt(agent_config, {
+        'domain': agent_config.get('domain', 'general'),
+        'task_type': data.get('task_type') or 'execute',
+        'mode': data.get('mode', ''),
+        'user_query': query[:200],
+        'locale': _current_locale(),
+    })
+
     from agent_matrix.agent_runner import AgentRunner
-    runner = AgentRunner(agent_config)
+    runner = AgentRunner(agent_config, db_models=_m())
 
     result = runner.execute({
         'task_id': 'test-' + str(aid),
@@ -1975,6 +1988,11 @@ def chat_stream_sse():
 # 6.1 Agent 循环流式事件（WP-4）— /agent/stream
 # ============================================================
 
+# 管理端 Agent 流式接口请求体上限（≈1MB）：history/task 由客户端拼装，
+# 超大 JSON 无业务意义，且会直接放大上下文与 DB 写入压力。
+_AGENT_STREAM_MAX_BODY = 1_000_000
+
+
 @agent_matrix_bp.route('/agent/stream', methods=['POST'])
 def agent_stream_sse():
     """WP-4：Agent ReAct 循环流式事件端点（SSE）。
@@ -1990,6 +2008,9 @@ def agent_stream_sse():
 
     ai_err = _check_ai_access()
     if ai_err: return ai_err
+
+    if (request.content_length or 0) > _AGENT_STREAM_MAX_BODY:
+        return jsonify({'error': _('Request body too large')}), 413
 
     data = request.get_json(force=True) or {}
     task = data.get('task') or {}
@@ -2007,8 +2028,23 @@ def agent_stream_sse():
     if not agent_config:
         return jsonify({'error': _('No available Agent')}), 500
 
+    # 内置 Agent 的 system_prompt 存的是文件路径（如 prompts/master_prompt.md），
+    # 流式路径此前直接用原始行 → 系统提示词从未加载；与 /agent/chat 一致走解析。
+    from agent_matrix.orchestrator import AgentOrchestrator
+    orch = AgentOrchestrator(models_module=_m())
+    agent_config['system_prompt'] = orch._resolve_prompt(agent_config, {
+        'domain': agent_config.get('domain', 'general'),
+        'task_type': task.get('task_type') or 'agent',
+        'mode': data.get('mode', ''),
+        'user_query': str(task.get('description') or task.get('title') or '')[:200],
+        'locale': _current_locale(),
+        'user_id': admin.get('user_id'),
+    })
+
     from agent_matrix.agent_runner import AgentRunner
     runner = AgentRunner(agent_config, db_models=_m())
+    # 调用轨配速预算：由请求体显式给出，0=沿用纯轮次配速（缺省行为不变）。
+    runner._tool_call_budget = int(task.get('tool_call_budget') or 0)
 
     from flask import Response, stream_with_context
     import time as _t
@@ -2041,7 +2077,9 @@ def agent_stream_sse():
                                         run_id=run_id):
                 for p in _maybe_ping():
                     yield p
-                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+                # default=str：error 事件携带的 exc 是 Exception 对象，直接序列化会抛
+                # TypeError 并吞掉真实原因（如 HTTP 402 / 配额耗尽），此处统一兜底。
+                yield f"data: {json.dumps(ev, ensure_ascii=False, default=str)}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
         finally:
@@ -2099,6 +2137,9 @@ def agent_resume_sse():
     ai_err = _check_ai_access()
     if ai_err: return ai_err
 
+    if (request.content_length or 0) > _AGENT_STREAM_MAX_BODY:
+        return jsonify({'error': _('Request body too large')}), 413
+
     data = request.get_json(force=True) or {}
     run_id = str(data.get('run_id') or '').strip()
     if not run_id:
@@ -2117,6 +2158,19 @@ def agent_resume_sse():
         agent_config = agents[0] if agents else None
     if not agent_config:
         return jsonify({'error': _('No available Agent')}), 500
+
+    # 续跑同样需要解析 system_prompt（与 /agent/stream 一致）；
+    # 检查点里若存的是路径字符串，由 iter_react 以本次解析结果覆盖。
+    from agent_matrix.orchestrator import AgentOrchestrator
+    orch = AgentOrchestrator(models_module=_m())
+    agent_config['system_prompt'] = orch._resolve_prompt(agent_config, {
+        'domain': agent_config.get('domain', 'general'),
+        'task_type': ckpt.get('task_type') or 'agent',
+        'mode': data.get('mode', ''),
+        'user_query': str(ckpt.get('user_query') or '')[:200],
+        'locale': _current_locale(),
+        'user_id': admin.get('user_id'),
+    })
 
     runner = AgentRunner(agent_config, db_models=_m())
 
@@ -2146,7 +2200,9 @@ def agent_resume_sse():
                                         run_id=run_id, checkpoint=ckpt):
                 for p in _maybe_ping():
                     yield p
-                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+                # default=str：error 事件携带的 exc 是 Exception 对象，直接序列化会抛
+                # TypeError 并吞掉真实原因（如 HTTP 402 / 配额耗尽），此处统一兜底。
+                yield f"data: {json.dumps(ev, ensure_ascii=False, default=str)}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
         finally:
@@ -2272,6 +2328,22 @@ def health_check():
         'ready': sum(1 for r in results if r['ready']),
         'agents': results
     })
+
+
+@agent_matrix_bp.route('/ai/breaker/reset', methods=['POST'])
+def ai_breaker_reset():
+    """清空本进程的模型熔断状态（运维兜底接口）。
+
+    熔断器是进程内状态：改 DB 里的 ai_model_health 不会影响运行中的 worker，
+    此前只能靠重启 worker 恢复。本接口用于免重启清空内存态。
+    限制：请求只落到一个 gunicorn worker，多 worker 部署需重复调用直至全部命中，
+    或直接重启 worker；DB 健康记录不受影响。
+    """
+    admin, err = _require_admin()
+    if err: return err
+    from agent_matrix.engine import _failover_engine
+    cleared = _failover_engine.breaker.reset_all()
+    return _success({'cleared': cleared, 'scope': 'current_worker_only'})
 
 
 # ============================================================
@@ -3472,6 +3544,20 @@ def init_agent_matrix(app):
         seed_prompts()
     except Exception as e:
         print(f'[Agent Matrix] ⚠️ seed_prompts failed: {e}')
+    # ── 全局规则基线自检（防止 id=9 被 seed/后台恢复覆盖后静默失去约束） ──
+    try:
+        from agent_matrix.prompt_resolver import PromptResolver
+        _rules = PromptResolver(_m())._get_global_rules() or ''
+        if (len(_rules) < 3400
+                or '不得填 none' not in _rules
+                or '同名但已关闭' not in _rules):
+            logger.critical(
+                '[Agent Matrix] 全局规则基线异常：len=%d，缺少关联判据；'
+                '请执行 install.sh seed 或检查 agent_prompts id=9', len(_rules))
+        else:
+            print(f'[Agent Matrix] ✅ Rule baseline ok ({len(_rules)} chars)')
+    except Exception as e:
+        logger.warning(f'[Agent Matrix] rule baseline check failed: {e}')
     # ── 审批系统内核化（Phase A） ────────────────────────
     try:
         from agent_matrix.approval import (

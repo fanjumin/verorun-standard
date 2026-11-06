@@ -8,11 +8,28 @@ services:
   user_login: false
   user_console: false
   main_site: false
+# 许可证/订阅到期强制（agent_matrix.models.edition_requires_license() 消费）
+# 2026-11-05 产品决策：科研桌面版商用分发，与金融桌面版同口径「订阅到期即锁」，
+#   一律 fail-closed（未配置部署码/未知/过期均拒绝，不"默认放行+事后告警"）。
+#   消费点：admin/app.py 的 _license_enforced()（锁 /admin 页面与插件业务端点）
+#   与 agent_matrix/routes.py 的 _ai_license_enforced()（锁 AI/Agent 能力）。
+#   激活入口为后端 /admin/renew（写入 system_config.deployment_code 后联网心跳）。
+#   开发机自测：VERORUN_DEV_UNLICENSED=1 + 官方签名凭证（_official_dev_exempt），
+#   客户仓库无 official_token.json(.sig) 时该豁免不成立。
+license_enforcement: true
 plugins:
   # 【2026-09-07 用户拍板】认知进化后端采用 memory_engine（服务端全量版），
   # 不使用 cogevolution_substrate；vault 保留。
   # （project_workspace 当时移出科研版，2026-10-26 用户裁决重新启用，见下方 include）
   # 【2026-09-08 用户拍板】content_factory / site_domains 对科研版毫无价值，移入 exclude。
+  #
+  # 运行时可见性（2026-11-05 对齐金融版）：声明 runtime_whitelist: true，让 include
+  #   兼任运行期白名单。此前未声明（= false），运行时可见集由 plugin_distribution_rules
+  #   + 各插件 compatible_editions 决定；标准安装包因发包已物理裁剪而不发作，但开发模式
+  #   （壳层 codeDir 直指核心仓源码，plugins/ 为全量目录）或整盒部署切 VR_EDITION=research
+  #   时，插件中心会列出磁盘上全部插件。金融版 2026-09-21 即踩过该坑（实测列出 ~39 个）。
+  #   声明后：插件中心 / discover / enable / unified 四处门控同源，只放行下方 include。
+  runtime_whitelist: true
   include:
     - _base
     # 2026-10-20 用户裁决：新增 bayes_engine（贝叶斯推理插件 v1.0.1）。
@@ -48,6 +65,18 @@ plugins:
     - memory_engine
     - vault
     - veroscholar
+    # ★ 2026-11-05 用户裁决：net_proxy 必须接入 —— 境外文献源（arXiv / PubMed /
+    #   Crossref / Web of Science）在境内部署下需经统一出站代理路由，否则检索不到。
+    #   归属零成本：net_proxy.agent_role=ops 已在本版核心角色集内，resolve_agent_roles
+    #   ① 直接命中，无需 ops.yaml managed_modules 认领。
+    #   前置条件（已同步）：plugins/net_proxy/plugin.json 的 compatible_editions 追加 research。
+    - net_proxy
+    # ★ 2026-11-05 用户裁决：im_gateway 必须接入 —— 科研长任务（批量文献检索 / 综述
+    #   生成 / 实验批处理）完成与异常需有 IM 即时通知通道，与 email 同级。
+    #   归属：im_gateway.agent_role=service 不在本版核心角色集，由 roles/research-desktop/
+    #   ops.yaml 的 managed_modules 显式认领（② 通道，与金融版 ops 认领 im_gateway 同惯例）。
+    #   前置条件（已同步）：plugins/im_gateway/plugin.json 的 compatible_editions 追加 research。
+    - im_gateway
   exclude:
     - cogevolution_substrate
     - content_factory

@@ -51,12 +51,29 @@ class PromptResolver:
             return ''
         # 全局开关
         if not self._is_enabled():
-            return self._legacy_load(agent_config)
+            return self._degraded_join(agent_config)
         try:
             return self._do_resolve(agent_config, task_context or {})
         except Exception as e:
             logger.error(f'PromptResolver failed, falling back to legacy: {e}')
-            return self._legacy_load(agent_config)
+            # 规则层与开关/异常解耦：装配失败时也必须保留 Layer 2 全局规则。
+            # 原实现此处直接返回 _legacy_load，会静默丢掉规则，导致
+            # "规则在库在盘、模型行为不变"（11-05 评测的 342 字符现象）。
+            return self._degraded_join(agent_config)
+
+    def _degraded_join(self, agent_config):
+        """降级组装：角色基座 + Layer 2 全局规则。
+
+        开关关闭与装配异常共用同一出口，保证全局规则永不被静默吞掉。
+        规则读取失败时退化为纯基座（fail-open，不阻断主流程）。
+        """
+        base = self._legacy_load(agent_config)
+        try:
+            rules = self._get_global_rules()
+        except Exception as e:
+            logger.warning(f'global rules load failed in degraded path: {e}')
+            rules = ''
+        return PART_SEPARATOR.join([p for p in (base, rules) if p])
 
     def _apply_prompt_filters(self, prompt, agent_config, task_context):
         """应用内核 before_prompt_resolve 过滤器链（memory_engine 等在此注入记忆）。
@@ -94,6 +111,10 @@ class PromptResolver:
         with self.models.get_db() as conn:
             # Layer 1: 角色基础 Prompt（default 绑定 → system 类型）
             base = self._get_binding_prompt(agent_id, 'default', conn=conn)
+            if not base:
+                # Layer 1 无绑定时回退 agent_matrix.system_prompt，
+                # 避免启用组装后未绑定 Agent 丢掉自己的角色基座提示。
+                base = self._legacy_load(agent_config)
             if base:
                 parts.append(base)
 
