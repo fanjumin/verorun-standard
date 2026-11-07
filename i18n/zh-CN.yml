@@ -4188,11 +4188,9 @@ Please enter a GitHub repo URL: 请输入 GitHub 仓库地址
 'Multi-select. Leave empty to show in all distributions': '可多选；不勾选则所有发行版可见'
 'Edition Enterprise': '企业版'
 'Edition Standard': '标准版'
-'Edition Professional': '专业版'
 'Edition Finance': '金融版'
 'Edition Research': '科研版'
 'Edition Mini Program': '小程序版'
-'Edition Edge': '边缘版'
 
 # ── Notifications & Rewards templates (keys are the zh source text) ──
 '实名认证通过': '实名认证通过'

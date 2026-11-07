@@ -3111,8 +3111,8 @@ class PluginManager:
         for row in rows:
             pid = row['identifier']
             plugin_versions[pid] = str(row.get('version') or '')
-            # site_domains 仅网站版需要，企业版（lan/code/edu）不需要子域名管理
-            if pid == 'site_domains' and deploy_type in ('lan', 'code', 'edu'):
+            # site_domains 仅网站版需要，企业版（lan/code）不需要子域名管理
+            if pid == 'site_domains' and deploy_type in ('lan', 'code'):
                 continue
             # metadata 优先取数据库中的最新值（插件安装/更新时同步写入）
             try:

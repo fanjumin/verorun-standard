@@ -1,6 +1,6 @@
 # VeroRun — 企业多核 AI 操作系统
 
-[![Version](https://img.shields.io/badge/version-0.66.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.67.0-blue.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-EULA%20v1.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)]()
 [![Plugins](https://img.shields.io/badge/plugins-50-orange.svg)]()
@@ -13,14 +13,14 @@
 
 ## 核心特性
 
-- **可编排的多角色 Agent 矩阵**：Athena（主控）+ 9 个核心子角色，另有发行版专属的科研 / 金融角色，角色分工 + 任务分解编排，扩展 Agent 自动注册。
+- **可编排的多角色 Agent 矩阵**：Athena（主控）+ 9 个子角色 = 10 个核心角色，另有发行版专属的科研 / 金融角色，角色分工 + 任务分解编排，扩展 Agent 自动注册。
 - **四阶段讨论协议（Agent Discussion v2.0）**：Planner → Reviewer → Revise → Decider，生成与评审分离，方案在落地前被拦截。
 - **动态提示词系统**：数据库驱动的 `PromptResolver`，四层组装 + 场景差异化 + 多版本管理。
 - **认知进化引擎（CogEvolution）**：RAG 向量检索、分层记忆、Reflexion 反思学习、Prompt Evolution 版本进化，形成"记忆 → 反思 → 优化 → 行为进化"闭环。
 - **可视化工作流引擎**：DAG 节点编排、Cron 调度、分级 Worker 池，任意流程的通用执行载体。
 - **多供应商 LLM 网关（UnifiedLLM）**：provider-agnostic 统一 API，14 家已落地供应商——9 家自研厂商（DeepSeek / OpenAI / Ollama / Gemini / Grok / KIMI / 智谱 GLM / Anthropic / Edge-TTS）+ 5 家聚合平台（阿里百炼 DashScope / 腾讯 TokenHub / 百度千帆 / OpenRouter / SiliconFlow）+ 120 条模型种子记录（主种子 96 条 + OpenRouter 免费档 24 条），透明模型替换、自动故障转移、密钥管理、预算闸门、4 级配额——**内核零硬编码 provider/model**（engine.py PROVIDER_CONFIGS 已移除，provider/model 统一由 `system_config` + 数据库种子解析，markdown/docx 工具收编进网关）。
+- **交付物中心（Deliverables Hub）**：一份研究报告，三种同步导出格式（XLSX / PPTX / Markdown），由单一流水线产出——调整假设重新生成、修改表格数字，三种格式同步重渲染。
 - **插件配置零字面量**：插件级 provider/model 不再硬编码——`enterprise_verify` 的 OCR + 审核配置、`mini_app_builder` 与 `analytics` 的兜底字面量，统一改为读取 `system_config` 键（`ai_text_provider` / `ai_text_model` / `enterprise_verify_ocr_*` / `enterprise_verify_audit_*`）。
-- **VeroGuard 守护层**：健康监控 + 完整性校验 + 加密心跳，双进程互护，客户侧资产守护；Ed25519 签名发布、完整性清单与来源水印守护供应链。
 - **插件生态**：50 个内置插件承载任意业务形态，全生命周期管理、插件商店、许可引擎。
 
 内核设计准则：**业务语义全部由插件声明**，新增业务能力等价于装配一个插件，内核保持稳定。
@@ -80,21 +80,20 @@
 
 | `INSTALL_TYPE` | 场景 | 仓库 | 域名/HTTPS |
 |---|---|---|---|
-| `website` | 生产站点（域名 + HTTPS） | `verorun-pro` | 是 |
-| `professional` | 企业内网（LAN 访问） | `verorun-pro` | 否 |
+| `website` | 生产站点（域名 + HTTPS） | `verorun-code` | 是 |
+| `professional` | 企业内网（LAN 访问） | `verorun-code` | 否 |
 | `development` | 开发（完整源码，需 SSH key） | `verorun-code` | 否 |
-| `educational` | 教育版（需 ED 部署码） | `verorun-edu` | 否 |
+| `omni` | 全能力版（桌面 + 服务统一部署） | `verorun-standard` | 否 |
 
 ### 一键部署（Ubuntu 22.04 / 24.04）
 
 ```bash
 # 生产站点（带域名）
-curl -fsSL https://raw.githubusercontent.com/fanjumin/verorun-pro/master/deploy/install.sh \
-  | sudo env INSTALL_TYPE=website bash -s -- install your-domain.com
+git clone git@github.com:fanjumin/verorun-code.git && cd verorun-code
+sudo env INSTALL_TYPE=website bash deploy/install.sh install your-domain.com
 
 # 企业内网（IP 访问）
-curl -fsSL https://raw.githubusercontent.com/fanjumin/verorun-pro/master/deploy/install.sh \
-  | sudo env INSTALL_TYPE=professional bash
+sudo env INSTALL_TYPE=professional bash deploy/install.sh install
 ```
 
 区域选择：`--region=cn`（中国大陆，默认 `api.verorun.cn`）/ `--region=global`（国际，默认 `api.verorun.com`）。
@@ -120,7 +119,7 @@ flask run --port 8081
 
 ## 引擎底座
 
-### AI 引擎 — 多角色 Agent 矩阵（9 核心角色 + 发行版专属）
+### AI 引擎 — 多角色 Agent 矩阵（Athena + 9 个子角色 = 10 个核心角色）
 
 VeroRun 将复杂任务交给一组有分工、可评审的 Agent 角色：主控分解任务，子角色各司其职，评审质疑方案，决策签署结论。
 
@@ -255,25 +254,6 @@ v2 另外补齐一整套研究栈（源自专项实施方案）：`secmaster` �
 
 ---
 
-### VeroGuard 守护层
-
-将健康监控、代码完整性校验、加密心跳合并为单进程，7 个核心模块（health / integrity / fingerprint / runtime / communicator / executor / self_protect）：
-
-| 通道 | 间隔 | 机制 |
-|---|---|---|
-| 健康看门狗 | 30s | 服务健康检查、分级恢复（重启 → 回滚）、webhook 告警 |
-| 完整性校验 | 300s | 对加密 manifest（AES-GCM）逐文件 SHA256 比对 |
-| 心跳上报 | 300s | AES-256-GCM + HMAC-SHA256 签名 + TLS1.3，5 分钟防重放窗口 |
-
-- **自我保护**：双进程（`guardian` 监控业务服务，`self_protect` 监控 guardian），pipe / pidfile 心跳，父进程死亡自动重启。
-- **阶梯恢复**：重启 → GitHub 回滚（`guardian.py --rollback-now` 支持手动触发），带冷却期防止循环回滚。
-- **每日快照**：`verorun-guardian-snapshot.timer`（systemd，每日）在回滚前预先快照状态。
-- **签名发布链**：Ed25519 签名的发布清单 + 完整性清单 + 官方 token 校验；版本降级保护（`min/max_version`）；构建期 `build_id` 来源水印。
-- **CI 新鲜度门禁**：`tests.yml` 每次运行都校验 `veroguard/data/manifest.json` 与 `VERSION` 一致，清单过期则 CI 直接失败（修复方式：GitHub Actions 手动触发 "Refresh VeroGuard Manifest"）。
-- **远程命令**（6 个）：`warn`、`lock_ai`、`lock_full`、`shutdown`、`self_destruct`、`update_config`；破坏性命令（`shutdown` / `self_destruct`）额外要求本地 ops-token 确认。
-
----
-
 ## 插件生态
 
 全生命周期管理（6 状态：`UNKNOWN → INSTALLED → ENABLED → ACTIVE → DISABLED → UNINSTALLED`），含错误状态 `ERROR`。
@@ -329,7 +309,9 @@ v2 另外补齐一整套研究栈（源自专项实施方案）：`secmaster` �
 
 ## 商业模型与区域路由
 
-**三阶段漏斗**：标准企业包与教育版免费分发获客（公开仓库 `verorun-pro` 与 `verorun-edu`）→ 插件购买、订阅与商业授权持续变现 → VeroGuard 在客户侧保护代码资产与许可权益。**数据飞轮愿景**：以领域知识资产为核心，知识库经业务使用持续自进化，支撑领域模型微调与智能设备训练。
+**分发与版本**：VeroRun 以单一代码库构建版本家族——标准企业包、finance-desktop、research-desktop、minipro、omni（版本组成由 `deploy/editions/*.yaml` 驱动；按 tag 以签名 Release 资产发布）。商业部署依据下方 EULA 授权。
+
+**商业模型**：插件购买、订阅与商业授权构成主要收入来源；标准企业包按需装配插件，商业生产部署需有效商业授权。
 
 **区域路由**：`VERORUN_REGION=cn` → `api.verorun.cn`；`=global` → `api.verorun.com`。所有远程服务（许可 / 心跳 / 守护）按区域动态解析，支持单 URL 环境变量覆盖。
 
@@ -426,58 +408,6 @@ VeroRun/
 
 ---
 
-## 代码规模指标（Codebase Metrics）
-
-基于 v0.62.0 工作副本（2026-10-03）实测，采用 `cloc` 式单遍扫描（行数指标为 v0.62.0 快照；模块表中的插件数已同步至 v0.66.0），按各语言注释语法把每个源文件的每一行归类为 **代码 / 注释 / 空行**。统计已排除：构建产物与第三方 vendored 代码（`__pycache__`、`node_modules`、`backups/`、`data/`、`tmp/`、`outputs/`、`server_backup/`、`_ssh/`、`.stock_deps/` 等隐藏依赖缓存、压缩打包产物），以及 `docs/` 下的内部工程文档（方案、会话交接、审计报告）——因此数据仅反映第一方产品源码。
-
-**合计：300,787 行代码，1,874 个文件**（另有 47,686 行注释、48,550 行空行）。剔除提示词/文档格式（Markdown、Text）后，可执行代码 + 标记 ≈ **280,200 行**。
-
-### 按语言
-
-| 语言 | 代码 | 注释 | 空行 | 文件 |
-|---|---:|---:|---:|---:|
-| Python | 167,508 | 42,230 | 35,269 | 945 |
-| HTML（Jinja2 模板 / 后台页面） | 50,490 | 323 | 3,007 | 233 |
-| Markdown（产品 README、提示词种子） | 20,594 | 0 | 6,566 | 222 |
-| YAML（角色、种子、CI、配置） | 20,438 | 619 | 645 | 137 |
-| JavaScript | 15,574 | 2,024 | 1,512 | 93 |
-| CSS | 11,152 | 648 | 661 | 39 |
-| JSON（插件清单、发布清单） | 7,269 | 0 | 60 | 79 |
-| Shell（部署/运维脚本） | 4,374 | 1,178 | 458 | 17 |
-| SQL（迁移 / 种子） | 2,585 | 640 | 335 | 61 |
-| 其他（TS/JSX/SVG/Batch/Env/Text） | 803 | 24 | 37 | 48 |
-| **合计** | **300,787** | **47,686** | **48,550** | **1,874** |
-
-### 按模块（仅源码语言）
-
-| 模块 | 代码行 | 占比 | 职责 |
-|---|---:|---:|---|
-| `plugins/` | 186,784 | 62.1% | 应用层——50 个插件（插件数已同步至 v0.66.0） |
-| `admin/` | 21,257 | 7.1% | 管理后台（8084） |
-| `main_site/` | 15,794 | 5.3% | 平台控制台（8083） |
-| `plugin_manager/` | 14,815 | 4.9% | 生命周期 / 商店 / 许可 |
-| `auth-center/` | 13,723 | 4.6% | 共享鉴权/模型/服务/路由 |
-| `agent_matrix/` | 12,319 | 4.1% | AI 引擎：编排 + UnifiedLLM + PromptResolver |
-| `i18n/` | 9,063 | 3.0% | 国际化（en, zh-CN） |
-| `deploy/` | 7,297 | 2.4% | 安装脚本、systemd、Nginx |
-| `static/` | 4,211 | 1.4% | 前端静态资源 |
-| `orchestrator/` | 4,014 | 1.3% | DAG 工作流引擎 |
-| `sdks/` + `veroguard/` + `tools/` + `providers/` + `shared/` + 其余 | ~11,500 | ~3.8% | CLI SDK、守护层、工具、Provider、共享工具、主题 |
-
-严格内核（`agent_matrix` + `orchestrator` + `plugin_manager` + `veroguard` + `providers` + `shared`）≈ **33.4k 行 ≈ 11.9%** 可执行代码——契合"业务由插件声明"的设计准则：应用层体量远大于内核。
-
-### 最大插件（源码行数）
-
-`site_builder` 23,166 · `stock_analysis` 16,897 · `mini_app_builder` 11,052 · `veroscholar` 8,969 · `chatbot` 8,574 · `ai_relay` 8,029 · `analytics` 7,876 · `vault` 7,439 · `health_check` 7,135 · `ali_api` 6,965。
-
-### 分析注记
-
-- **语言画像**：Python 主导（占可执行代码 59.8%），配服务端渲染的 HTML 控制台（50.5k 行）——属 Flask 单体 + 插件架构，而非 SPA 技术栈；前端 JS 仅限编辑器（React Flow）与可视化。
-- **注释密度**：Python 注释约 17.2%（含 docstring）——对 167k 行代码库属健康水平；风险不在数量而在复杂子系统（VeroGuard、许可、工作流引擎）的论证深度。
-- **测试面**：内核与插件均有仓内 `tests/` 套件（`shared`、`plugin_manager`、`sdks/cli`、`stock_analysis`、`veroscholar`、`cogevolution_substrate`、`shop`、`subscription`、`iot_hub`），约 30+ 单元 / API 测试模块；质量保障另由 `docs/` 下有日期的回归 / 审计报告承载。扩大可执行的 CI 覆盖仍是最高杠杆的工程投入。
-
----
-
 ## 文档
 
 - `GUIDE.md` — 安装与部署指南
@@ -512,22 +442,27 @@ VeroRun 采用**源码可见（Source-Available）的专有许可**，依据 [Ve
 
 | 仓库 | 性质 | 内容 | 许可管辖 |
 |---|---|---|---|
-| `verorun-pro` | 公开 | 标准企业包（通用引擎，插件经商店按需安装） | EULA v1.0 |
 | `verorun-code` | 私有 | 完整源码（全部插件、授权组件与 VeroGuard） | 私有分发条款 |
-| `verorun-edu` | 公开 | 教育版（EDU 插件白名单，仅含教育模块） | EULA v1.0 |
 
 **EULA v1.0 要点**：可见 Python 源码可读可改（用于定制与集成）；预编译二进制（.pyd/.so/.dll/可执行文件）禁止反编译、反汇编、逆向；禁止再分发、转售、二次许可；禁止用于竞争性产品；不得移除版权、许可密钥或 DRM 机制；商业生产部署需有效商业授权。
 
 **与 VeroGuard 的一致性**：VeroGuard 的健康监控、完整性校验、自我保护与远程命令等能力，是 EULA 第 2.2 条（禁止反编译二进制）与第 3 条（禁止移除授权/DRM 机制）的落地执行，用于守护本许可的授权边界与商业资产。EULA 专有许可使资产守护机制在法律上自洽。
 
+### VeroGuard 运行机制
+
+将健康监控、代码完整性校验、加密心跳合并为单进程，7 个核心模块（health / integrity / fingerprint / runtime / communicator / executor / self_protect）：
+
+| 通道 | 间隔 | 机制 |
+|---|---|---|
+| 健康看门狗 | 30s | 服务健康检查、分级恢复（重启 → 回滚）、webhook 告警 |
+| 完整性校验 | 300s | 对加密 manifest（AES-GCM）逐文件 SHA256 比对 |
+| 心跳上报 | 300s | AES-256-GCM + HMAC-SHA256 签名 + TLS1.3，5 分钟防重放窗口 |
+
+- **自我保护**：双进程（`guardian` 监控业务服务，`self_protect` 监控 guardian），pipe / pidfile 心跳，父进程死亡自动重启。
+- **阶梯恢复**：重启 → GitHub 回滚（`guardian.py --rollback-now` 支持手动触发），带冷却期防止循环回滚。
+- **每日快照**：`verorun-guardian-snapshot.timer`（systemd，每日）在回滚前预先快照状态。
+- **签名发布链**：Ed25519 签名的发布清单 + 完整性清单 + 官方 token 校验；版本降级保护（`min/max_version`）；构建期 `build_id` 来源水印。
+- **CI 新鲜度门禁**：`tests.yml` 每次运行都校验 `veroguard/data/manifest.json` 与 `VERSION` 一致，清单过期则 CI 直接失败（修复方式：GitHub Actions 手动触发 "Refresh VeroGuard Manifest"）。
+- **远程命令**（6 个）：`warn`、`lock_ai`、`lock_full`、`shutdown`、`self_destruct`、`update_config`；破坏性命令（`shutdown` / `self_destruct`）额外要求本地 ops-token 确认。
+
 Copyright (c) 2024-2026 VeroRun AI. All rights reserved. 详见 [LICENSE](LICENSE)。
-
----
-
-## 本地开发工具
-
-### 本地开发工具（不进入版本控制）
-
-- `tools/dev_insight/` 是一个**仅本地**的开发辅助工具，用于分析 VeroRun 架构（系统核心 + 业务插件），产出 JSON / Markdown / HTML 报告，以及面向 AI 助手的精简版 `AI_CONTEXT.md`。
-- 已通过 `.git/info/exclude` **从 Git 排除**；请**不要**提交它或其 `out/` 产物。
-- 使用：`python tools/dev_insight/insight.py`

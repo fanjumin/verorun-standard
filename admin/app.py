@@ -269,6 +269,22 @@ try:
 except Exception as e:
     print(f'[DB] default admin bootstrap warning: {e}')
 
+# ===== Agent Matrix 建表 + 系统角色种子（必须早于 PluginManager 装启）=====
+# 全新空库首启时，PluginManager 的插件归属校验（插件标准 §2.2）要读
+# agent_matrix.managed_modules（resolve_agent_roles ② 通道）；建表若滞后到
+# 下方 init_agent_matrix()（原位置在 PluginManager 之后），走 ② 的插件会命中
+# UndefinedTable，enable 失败并卡在 installed/blocked，路由被门卫一律 404。
+# 此处只做幂等 schema + 角色种子；seed_prompts / 审批 / MCP 等仍由下方原块负责。
+try:
+    from agent_matrix.models import init_agent_matrix_tables, seed_default_agents
+    init_agent_matrix_tables()
+    seed_default_agents()
+    print('[Agent Matrix] ✅ schema + roles ready (pre-plugin bootstrap)')  # i18n:tech — 启动诊断
+except Exception as e:
+    print(f'[Agent Matrix] ❌ schema bootstrap failed: {e}')  # i18n:tech — 启动诊断
+    import traceback
+    traceback.print_exc()
+
 # ── i18n: 启动时从 YAML 播种到 DB（已移至 gunicorn_config.py post_fork） ──
 # seed_from_yaml 通过 pg_try_advisory_lock + post_fork 延迟初始化，避免阻塞 worker
 # 注册管理后台需要的 blueprint — 包含 user_bp（管理员基本设置 /user/config）

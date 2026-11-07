@@ -41,7 +41,7 @@ DOWNLOAD_MIRROR_PREFIX = os.environ.get('DOWNLOAD_MIRROR_PREFIX', '').strip()
 
 # 部署版本（阶段 3）：商店按 compatible_editions 过滤插件（空数组=全版本兼容）。
 # 统一走 agent_matrix.current_edition()（单一事实源：VR_EDITION→RELEASE_EDITION→DEPLOY_TYPE，
-# 旧名归一 official→enterprise、*-desktop→去连字符名、edu→research；
+# 旧名归一 official→enterprise、*-desktop→去连字符名；
 # **不含 pro→finance**，见 agent_matrix.models._EDITION_ALIASES）；
 # agent_matrix 不可用时兜底旧 DEPLOY_EDITION 环境变量（该兜底路径不做归一化）。
 def _resolve_deploy_edition() -> str:
@@ -300,9 +300,8 @@ class StoreAPIClient:
         """阶段 3：按部署版本（DEPLOY_EDITION）过滤插件。
 
         空数组 = 全版本兼容（旧插件未标注不拦截）；
-        非空时必须包含当前版本（大小写不敏感，双侧均过 normalize_edition，
-        旧 catalog 的 edu 与现行 research 视为同版本；pro 不在别名表内，
-        与 finance 是并列 ID，插件须在 compatible_editions 里显式列出）。
+        非空时必须包含当前版本（大小写不敏感，双侧均过 normalize_edition）。
+        pro / edu / edge 三版已下架，出现即由 normalize_edition 直接抛错。
         """
         if not compatible_editions:
             return True

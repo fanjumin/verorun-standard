@@ -13,14 +13,24 @@ agent_matrix/models.py 再导出本模块的全部公开符号，既有调用方
 import os
 
 # ── 发行版 edition 归一化（单一事实源：VR_EDITION / RELEASE_EDITION / DEPLOY_TYPE）──
-# 现行发行版 ID 共 8 个（定稿后不再变更；显示名走 i18n，与 ID 解耦）：
-#   enterprise 企业版 / standard 标准版 / tarka 塔卡投研 / pro 专业版 / finance 金融版 /
-#   research 科研版 / minipro 小程序版 / edge 边缘版
-# 注意：pro（专业版）与 finance（金融版）是两个**独立** ID，不可再合并。
+# 现行发行版 ID 共 6 个（定稿后不再变更；显示名走 i18n，与 ID 解耦）：
+#   enterprise 企业版 / standard 标准版 / tarka 塔卡投研 /
+#   finance 金融版 / research 科研版 / minipro 小程序版
+# 2026-11-07 负责人裁决：pro（专业版）、edu（教育版）、edge（边缘版）三版现行均不存在，
+# 已物理删除（ID / 别名 / 桥接 / 种子 / 文案全部移除），不做兼容垫片。
 # tarka（2026-11-01 用户裁决）：公开产品「塔卡投研」的发行 ID。不用 standard 命名，
 # 因 standard 同时是发布仓库 fanjumin/verorun-standard 的名字，二者混用会产生误解；
 # 兼容口径由下文 _EDITION_COMPAT_UNION 承接（声明 standard 的插件在 tarka 下同样放行）。
-_EDITION_IDS = ('enterprise', 'standard', 'tarka', 'pro', 'finance', 'research', 'minipro', 'edge')
+_EDITION_IDS = ('enterprise', 'standard', 'tarka', 'finance', 'research', 'minipro')
+
+# 已下架发行版及其历史旧名（**仅**用于 fail-loud 诊断，禁止在此恢复任何语义）。
+# 命中即报错：下架后若继续静默直传，<stem>.yaml 必然缺失 → include 白名单为空 →
+# 全插件可见且授权判定失效（见 edition_artifact_stem 的说明）。
+_RETIRED_EDITION_IDS = (
+    'pro', 'pro-web',
+    'edu', 'edu-desktop',
+    'edge', 'vr_test_edge', 'edge-computing',
+)
 
 # 历史旧名 / 别名 → 现行 ID（大小写不敏感）
 # 'official' 为 enterprise 的历史别名，过渡期保留；显式写入 enterprise 同样有效。
@@ -29,18 +39,13 @@ _EDITION_ALIASES = {
     'enterprise-web': 'enterprise',
     'standard-web': 'standard',
     'tarka-web': 'tarka',
-    'pro-web': 'pro',
     'finance-desktop': 'finance',
     'research-desktop': 'research',
     # 全网智能客服：旧名（omni / omni-desktop）→ 现行 ID omni-service（2026-10-21 用户裁决：
     # 桌面版废弃，改服务器 + 轻壳的 omni-service 版）
     'omni': 'omni-service',
     'omni-desktop': 'omni-service',
-    'edu': 'research',
-    'edu-desktop': 'research',
     'mini': 'minipro',
-    'vr_test_edge': 'edge',
-    'edge-computing': 'edge',
 }
 
 
@@ -73,7 +78,7 @@ def edition_compat_values(edition: str = None) -> tuple:
 
 
 # ── canonical ID → 磁盘产物名（**唯一**桥接点）──
-# canonical ID（_EDITION_IDS，8 个）与磁盘产物命名历史上分叉：
+# canonical ID（_EDITION_IDS，6 个）与磁盘产物命名历史上分叉：
 #   deploy/editions/<stem>.yaml、agent_matrix/roles/<stem>/
 # 磁盘侧仍沿用旧名 / 连字符名（official / finance-desktop / research-desktop）。
 # 二者必须显式桥接，**禁止**在各消费点自行字符串拼接：`f'{current_edition()}.yaml'`
@@ -89,22 +94,35 @@ _EDITION_ARTIFACT_STEMS = {
     # 磁盘产物沿用连字符名 omni-service.yaml，与 finance/research 同惯例。
     'omni': 'omni-service',
     'omni-service': 'omni-service',
-    # pro（专业版）是金融桌面版的**旧商用名**，与 finance 共用同一套磁盘产物。
-    # 真实代码依据（3 处，均早于本次修复）：
-    #   deploy/entrypoint.sh:83 case 分支把 finance|research|pro|finance-desktop|research-desktop 归一处理
-    #   agent_matrix/seed_prompts.py:88 「('pro','finance','finance-desktop') → finance-desktop」
-    #   .github/workflows/sync-to-pro.yml:99 产物写 .verorun-edition=finance-desktop
-    # 另有 2 处只是**注释声称**（非实现，不得再充作依据）：version.py:19 docstring、
-    #   store.py:42 注释 —— 其中后者写的「pro→finance」与 store.py:285-287 的实现矛盾
-    #   （_EDITION_ALIASES 里没有 pro，normalize_edition('pro') == 'pro'）。
-    # 口径边界（第五轮 N5-5 澄清）：pro 在 **canonical ID 维度**是与 finance 并列的
-    # 独立 ID（见 _EDITION_IDS），插件 compatible_editions 按该口径过滤；
-    # 本表只决定它的**磁盘产物解析**，不合并 ID。
-    'pro': 'finance-desktop',
 }
 
 
 def edition_artifact_stem(edition: str = None) -> str:
-    """canonical ID → 磁盘产物名主干；未登记的一律同名直传。"""
+    """canonical ID → 磁盘产物名主干；未登记的一律同名直传。
+
+    已下架发行版（pro / edu / edge 及其历史旧名）**直接抛错**：下架后若继续静默
+    同名直传，``deploy/editions/<stem>.yaml`` 必然缺失 → include 白名单取数落空 →
+    全部插件可见、可装，且授权判定同时失效（静默放开，而非报错）。
+    """
     e = edition or current_edition()
+    if e in _RETIRED_EDITION_IDS:
+        raise RuntimeError(
+            f'发行版已下架: {e!r}（pro / edu / edge 三版已移除）。'
+            f'请把 VR_EDITION / RELEASE_EDITION / DEPLOY_TYPE 改为: '
+            f'{", ".join(_EDITION_IDS)}'
+        )
     return _EDITION_ARTIFACT_STEMS.get(e, e)
+
+
+# ── 内测通道（2026-11-07 用户裁决）──
+# 内测版与正式版共用同一 edition（finance）与同一套磁盘产物（角色集 / include 白名单），
+# 唯一差异是「关闭授权强制」。因此用**单一环境变量**做发行通道标识，而不是新增 edition ID：
+#   VERORUN_CHANNEL=beta  → 内测版（免授权，界面标注「内测版」）
+#   未设置 / 其它值        → 正式版（行为完全不变，授权 fail-closed）
+# 这样 pack 脚本只需注入一个变量，roles/include/payload 校验全部沿用正式版口径。
+_BETA_CHANNEL_VALUES = ('beta', 'insider')
+
+
+def is_beta_channel() -> bool:
+    """是否内测通道（VERORUN_CHANNEL=beta）；正式版构建不注入该变量。"""
+    return (os.getenv('VERORUN_CHANNEL') or '').strip().lower() in _BETA_CHANNEL_VALUES

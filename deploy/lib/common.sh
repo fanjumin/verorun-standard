@@ -49,6 +49,8 @@ if [ -z "${SPARSE_DIRS+x}" ]; then
     SPARSE_DIRS="admin auth-center main_site health_service veroguard plugin_manager agent_matrix orchestrator i18n shared providers themes static deploy scripts plugins/site_domains plugins/email plugins/sms plugins/im_gateway plugins/_base plugins/stock_analysis"
 fi
 : "${FORCE_UPDATE:=0}"              # 审计 C-3：force-overwrite local modifications during update (used with --force)
+: "${ENV_REBUILT:=0}"               # WO-003 批次3：1 = 本次 update_env 从零重建 .env（密钥轮换），非补齐缺失键
+: "${BACKUP_DIR:=/var/backups/verorun}"  # WO-003：站外备份根目录（必须在 APP_HOME 之外）
 : "${PIP_MIRROR:=}"
 : "${PIP_MIRROR_DETECTED:=}"
 : "${VR_ADMIN_CREDS_FILE:=/root/.verorun-creds}"
@@ -364,11 +366,14 @@ ensure_git_auth() {
                     echo -e "${FAIL} Use: sudo bash deploy/install-official.sh update"
                     exit 1
                 fi
-                echo -e "${WARN} Git origin mismatch detected — correcting:"
-                echo -e "${WARN}   was: ${current_url}"
-                echo -e "${WARN}   now: ${GIT_REPO}"
-                git -C "${APP_HOME}" remote set-url origin "${GIT_REPO}"
-                done_step "Git remote corrected to ${GIT_REPO}"
+                # WO-002 批次1 要求 4：更新通道绝不静默换源。旧实现直接 set-url 把站点 origin
+                # 改回脚本默认仓库；现改为打印差异并中止，由运维确认归属后手工修正。
+                echo -e "${FAIL} Git origin mismatch — refusing to continue." >&2
+                echo -e "${FAIL}   current : ${current_url}" >&2
+                echo -e "${FAIL}   expected: ${GIT_REPO}" >&2
+                echo -e "${INFO}   fix: 确认归属后手工执行 git -C ${APP_HOME} remote set-url origin <expected-repo>" >&2
+                echo -e "${INFO}   若现有 origin 才是正确的，请用 GIT_REPO='${current_url}' 重跑本脚本。" >&2
+                exit 1
             fi
         fi
         return 0
@@ -892,6 +897,9 @@ resolve_vr_threads() {
 update_env() {
     local env_file="${APP_HOME}/.env"
     if [ ! -f "${env_file}" ]; then
+        # WO-003 批次3：区分"补齐缺失键"与"从零重建"——.env 不存在即重建，全部密钥轮换。
+        # 调用方（制品通道）据此判定为失败路径，不得当作"更新成功"。
+        ENV_REBUILT=1
         generate_env
         return
     fi
@@ -971,17 +979,17 @@ EOF
 # ══════════════════════════════════════════════════════════════════════
 # systemd services (four services + the guardian daemon)
 # ══════════════════════════════════════════════════════════════════════
-# 精简版（edu / minipro / omni-service）：无声用户控制台服务（verorun-auth / 8083），只有 Admin 身份。
+# 精简版（minipro / omni-service）：无声用户控制台服务（verorun-auth / 8083），只有 Admin 身份。
 # 其他版本（production / lan / code / dev）完整保留 8083 平台用户控制台。
 _skip_user_console() {
     case "${DEPLOY_TYPE:-production}" in
-        edu|minipro|omni-service) return 0 ;;
+        minipro|omni-service) return 0 ;;
         *) return 1 ;;
     esac
 }
 
 # 服务器裁剪版（omni-service）：额外关闭用户登录服务（verorun-main / 8081）。
-# 其余版本（含精简版 edu/minipro）保留 8081 用户登录。
+# 其余版本（含精简版 minipro）保留 8081 用户登录。
 _skip_user_login() {
     case "${DEPLOY_TYPE:-production}" in
         omni-service) return 0 ;;
@@ -1044,7 +1052,7 @@ SVCEOF
     else
         write_one_service "verorun-main" 8081 "auth_server" "--timeout 120 --log-level warning"
     fi
-    # 8083 — Platform / User Console (skipped in 精简版 edu/minipro, only Admin identity)
+    # 8083 — Platform / User Console (skipped in 精简版 minipro, only Admin identity)
     if _skip_user_console; then
         echo -e "${INFO} 精简版 ${DEPLOY_TYPE:-production}: skipping verorun-auth (8083, user console)"
     else
@@ -1062,7 +1070,7 @@ SVCEOF
 
 write_guardian_service() {
     local file="${SERVICE_DIR}/verorun-guardian.service"
-    # 精简版（edu/minipro）无 verorun-auth(8083)，Wants 不含该服务
+    # 精简版（minipro）无 verorun-auth(8083)，Wants 不含该服务
     local _gmain="verorun-main.service"
     local _gwants="verorun-auth.service"
     if _skip_user_login; then
@@ -1167,7 +1175,7 @@ GENVEOF
 # ══════════════════════════════════════════════════════════════════════
 write_sudoers() {
     local sudoers_file="/etc/sudoers.d/verorun"
-    # 精简版（edu/minipro）无 verorun-auth(8083)，不授予其 restart 权限；
+    # 精简版（minipro）无 verorun-auth(8083)，不授予其 restart 权限；
     # 服务器裁剪版（omni-service）同时无 verorun-main(8081)，亦不授予。
     local _auth_sudoers=""
     if ! _skip_user_console; then
@@ -1598,8 +1606,8 @@ do_rollback() {
 
 # ══════════════════════════════════════════════════════════════════════
 # C-1 unified deployment functions (审计 R4 enabled: shared by the entry scripts, driven by DEPLOY_TYPE)
-# DEPLOY_TYPE: production | lan | code | edu
-# Defined by each entry script before sourcing this file (install.sh=production/lan/edu, install-code=code).
+# DEPLOY_TYPE: production | lan | code | dev | omni-service
+# Defined by each entry script before sourcing this file (install.sh=production/lan, install-code=code).
 # The entry scripts no longer define same-named functions themselves,
 # so Bash no longer has "later definitions overriding earlier ones"; the unified versions here take effect directly.
 # ══════════════════════════════════════════════════════════════════════
@@ -1679,9 +1687,6 @@ generate_env() {
             ;;
         code)
             _env_header="VeroRun config — auto-generated by ${INSTALL_SCRIPT} (no-domain / LAN mode, full plugins)"
-            ;;
-        edu)
-            _env_header="VeroRun Educational config — auto-generated by ${INSTALL_SCRIPT} (no-domain, edu license)"
             ;;
     esac
 
@@ -1763,15 +1768,9 @@ DOWNLOAD_MIRROR_PREFIX=https://gitee.com
 APP_REGION=${REGION}
 ENVEOF
 
-    # Education edition: mark edition + persist the deployment code for VeroGuard / auth plugins to read (written only for the edu type)
-    if [ "${DEPLOY_TYPE}" = "edu" ]; then
-        echo "VR_EDITION=edu" >> "${env_file}"
-        echo "EDU_CODE=${EDU_CODE:-}" >> "${env_file}"
-    fi
-
     # 桌面版分版（科研桌面版 research-desktop / 金融桌面版 finance-desktop / 官方版 official 等）：
     # 产物根目录的 .verorun-edition 标识驱动 VR_EDITION，供 agent_matrix._current_edition() 消费，
-    # 驱动角色集与插件 overlay。标识存在时覆盖上面的 edu 旧分支（双保险）。
+    # 驱动角色集与插件 overlay。标识存在时覆盖上面的 DEPLOY_TYPE 推断。
     if [ -f "${APP_HOME}/.verorun-edition" ]; then
         local _edition_marker
         _edition_marker=$(tr -d '[:space:]' < "${APP_HOME}/.verorun-edition")
@@ -2464,6 +2463,65 @@ _sync_commerce_static() {
 #   verorun-guardian.bin（可选；缺失时 guardian 不启用，与既有 STD-4 行为一致）
 # 限制：制品模式无 .git，install.sh rollback（基于 git）不可用。
 # ══════════════════════════════════════════════════════════════════════
+
+# ── WO-003 批次3：制品通道运行时状态指纹（升级前采集 / 升级后断言）──────────
+# 记录 .env 与 data/.crypto_salt 的 md5、data/ 文件清单与数量；升级后逐项比对。
+# 任一项不一致（.env 变化 / salt 变化 / data 文件减少或丢失）→ 立即中止，不重启服务。
+_fingerprint_capture() {
+    local out="$1"
+    local _env_md5 _salt_md5 _count
+    _env_md5=$(md5sum "${APP_HOME}/.env" 2>/dev/null | awk '{print $1}' || true)
+    _salt_md5=$(md5sum "${APP_HOME}/data/.crypto_salt" 2>/dev/null | awk '{print $1}' || true)
+    _count=$(find "${APP_HOME}/data" -type f 2>/dev/null | wc -l | tr -d ' ' || true)
+    {
+        echo "ENV_MD5=${_env_md5}"
+        echo "SALT_MD5=${_salt_md5}"
+        echo "DATA_COUNT=${_count:-0}"
+        find "${APP_HOME}/data" -type f 2>/dev/null | LC_ALL=C sort | sed 's/^/DATA_FILE /'
+    } > "${out}"
+    chmod 600 "${out}" 2>/dev/null || true
+}
+
+_fingerprint_verify() {
+    local before="$1"
+    local _env_before _salt_before _count_before
+    local _env_now _salt_now _count_now _missing _rc=0
+    _env_before=$(sed -n 's/^ENV_MD5=//p' "${before}" 2>/dev/null | head -n1 || true)
+    _salt_before=$(sed -n 's/^SALT_MD5=//p' "${before}" 2>/dev/null | head -n1 || true)
+    _count_before=$(sed -n 's/^DATA_COUNT=//p' "${before}" 2>/dev/null | head -n1 || true)
+    _env_now=$(md5sum "${APP_HOME}/.env" 2>/dev/null | awk '{print $1}' || true)
+    _salt_now=$(md5sum "${APP_HOME}/data/.crypto_salt" 2>/dev/null | awk '{print $1}' || true)
+    _count_now=$(find "${APP_HOME}/data" -type f 2>/dev/null | wc -l | tr -d ' ' || true)
+    if [ "${_env_before}" != "${_env_now}" ]; then
+        echo -e "${FAIL} .env changed during artifact update: ${_env_before:-<none>} -> ${_env_now:-<none>}"
+        _rc=1
+    fi
+    if [ "${_salt_before}" != "${_salt_now}" ]; then
+        echo -e "${FAIL} data/.crypto_salt changed during artifact update: ${_salt_before:-<none>} -> ${_salt_now:-<none>}"
+        _rc=1
+    fi
+    if [ "${_count_now:-0}" -lt "${_count_before:-0}" ]; then
+        echo -e "${FAIL} data/ file count dropped: ${_count_before:-0} -> ${_count_now:-0}"
+        _rc=1
+    fi
+    _missing=$(comm -23 \
+        <(sed -n 's/^DATA_FILE //p' "${before}" | LC_ALL=C sort) \
+        <(find "${APP_HOME}/data" -type f 2>/dev/null | LC_ALL=C sort) 2>/dev/null | head -n 20 || true)
+    if [ -n "${_missing}" ]; then
+        echo -e "${FAIL} data/ files lost during artifact update:"
+        echo "${_missing}" | sed 's/^/    /'
+        _rc=1
+    fi
+    if [ "${_rc}" != "0" ]; then
+        echo -e "${FAIL} Runtime fingerprint assertion failed — artifact update aborted, services NOT restarted." >&2
+        echo -e "${INFO}   before snapshot: ${before}" >&2
+        echo -e "${INFO}   恢复指引：从 ${BACKUP_DIR}/<timestamp>/ 取回 .env 与 .crypto_salt，" >&2
+        echo -e "${INFO}   并把 APP_HOME/data/ 从站外备份还原，再重跑 update。" >&2
+        exit 1
+    fi
+    done_step "Runtime state preserved (.env / .crypto_salt / data files unchanged)"
+}
+
 pull_release_artifact() {
     step "Pull code (Release artifact channel)"
     if [ ! -d "${RELEASE_DIR}" ]; then
@@ -2482,18 +2540,40 @@ pull_release_artifact() {
         echo -e "${FAIL} release_manifest.json/.sig missing in ${RELEASE_DIR} — refuse artifact install（无签名清单无法通过完整性门禁）"
         exit 1
     fi
-    # 目录处置：已是 verorun 安装（VERSION + .verorun-edition 在位）→ 原地重装/升级；
-    # 否则非空目录交由交互式冲突处理（与 clone 通道的 resolve_directory_conflict 一致）。
-    # 默认 RELEASE_DIR=${APP_HOME}-release 位于 APP_HOME 之外，清空不会误删制品。
-    if [ -d "${APP_HOME}" ] && [ -n "$(ls -A "${APP_HOME}" 2>/dev/null)" ]; then
+    # ── 通道隔离（WO-003）：git 检出目录禁止走制品通道，否则 .git 与站点状态会被一并清掉 ──
+    if [ -d "${APP_HOME}/.git" ]; then
+        echo -e "${FAIL} ${APP_HOME} 是 git 检出目录 — 拒绝以制品通道安装/更新。"
+        echo -e "${INFO}   该站点请用 INSTALL_SOURCE=git（或 install-*.sh update）更新。"
+        exit 1
+    fi
+    # ── 先解压到暂存目录并校验，再动 APP_HOME ──
+    # 旧实现"先 find -delete 后解压"：tar 损坏/中断即留下空目录，且 .env/venv/data 一并消失。
+    local _stage
+    _stage="$(mktemp -d "${RELEASE_DIR}/stage.XXXXXX")"
+    tar -xzf "${_tarball}" -C "${_stage}"
+    if [ ! -f "${_stage}/VERSION" ] || [ ! -f "${_stage}/.verorun-edition" ]; then
+        echo -e "${FAIL} 制品不是 verorun 发行包（VERSION/.verorun-edition 缺失）— 已中止，APP_HOME 未改动"
+        echo -e "${INFO}   暂存目录保留用于排查：${_stage}"
+        exit 1
+    fi
+    mkdir -p "${APP_HOME}"
+    # 原地升级：只清代码树，保留运行时状态（旧实现会把 .env / venv / data / logs 一起删掉）
+    if [ -n "$(ls -A "${APP_HOME}" 2>/dev/null)" ]; then
         if [ -f "${APP_HOME}/VERSION" ] && [ -f "${APP_HOME}/.verorun-edition" ]; then
-            find "${APP_HOME}" -mindepth 1 -delete 2>/dev/null || true
+            local _entry
+            for _entry in "${APP_HOME}"/* "${APP_HOME}"/.[!.]*; do
+                [ -e "${_entry}" ] || continue
+                case "$(basename "${_entry}")" in
+                    .env|venv|data|logs|plugins-data|.rollback|instance|uploads) continue ;;
+                esac
+                rm -rf "${_entry}"
+            done
         else
             resolve_directory_conflict "${APP_HOME}"
         fi
     fi
-    mkdir -p "${APP_HOME}"
-    tar -xzf "${_tarball}" -C "${APP_HOME}"
+    cp -a "${_stage}/." "${APP_HOME}/"
+    rm -rf "${_stage}"
     cp "${RELEASE_DIR}/release_manifest.json" "${RELEASE_DIR}/release_manifest.sig" "${APP_HOME}/"
     if [ -f "${RELEASE_DIR}/verorun-guardian.bin" ]; then
         mkdir -p "${APP_HOME}/veroguard/dist"
@@ -2986,25 +3066,74 @@ do_update() {
     before_commit=$(git -C "${APP_HOME}" log --oneline -1 2>/dev/null || echo "unknown")
 
     step "Backup current version"
-    mkdir -p "${APP_HOME}/.rollback"
+    # WO-003：备份必须落在 APP_HOME **之外** —— 旧实现把 .env.bak 放在 .rollback/，
+    # 而制品通道清空 APP_HOME 时备份与原件一起消失，等于没有备份。
+    # 批次3（验收 B5）：改为 ${BACKUP_DIR}/<timestamp>/ 快照目录，内含 .env / .crypto_salt / before_commit。
+    local _backup_dir="${BACKUP_DIR}"
+    local _snap_dir="${_backup_dir}/$(date +%Y%m%d-%H%M%S)"
+    mkdir -p "${_snap_dir}" "${APP_HOME}/.rollback"
+    chmod 700 "${_backup_dir}" "${_snap_dir}" 2>/dev/null || true
+    if [ -f "${APP_HOME}/.env" ]; then
+        cp "${APP_HOME}/.env" "${_snap_dir}/.env" && chmod 600 "${_snap_dir}/.env" 2>/dev/null || true
+        echo -e "${INFO} .env backed up to ${_snap_dir}/.env"
+    fi
+    if [ -f "${APP_HOME}/data/.crypto_salt" ]; then
+        cp "${APP_HOME}/data/.crypto_salt" "${_snap_dir}/.crypto_salt" && chmod 600 "${_snap_dir}/.crypto_salt" 2>/dev/null || true
+        echo -e "${INFO} data/.crypto_salt backed up to ${_snap_dir}/.crypto_salt"
+    fi
+    echo "${before_commit}" > "${_snap_dir}/before_commit"
+    # 备份可读性校验（WO-003 批次2 要求 3）：备份不可用即中止，绝不在无备份的情况下继续
+    if [ -f "${APP_HOME}/.env" ] && [ ! -s "${_snap_dir}/.env" ]; then
+        echo -e "${FAIL} Backup verification failed: ${_snap_dir}/.env is empty — aborting update." >&2
+        exit 1
+    fi
     cp "${APP_HOME}/.env" "${APP_HOME}/.rollback/.env.bak" 2>/dev/null || true
     echo "${before_commit}" > "${APP_HOME}/.rollback/before_commit"
     done_step "Environment backed up"
 
     step "Restore locally modified files"
     # 审计 C-3：by default refuse to overwrite local modifications (prevents destroying user customizations/hot fixes); with --force, back up the diff first, then restore
+    # WO-002 批次3：旧实现只查 `git diff`（工作区 vs 索引），staged 改动、本地领先 origin 的 commit
+    # 全部绕过拦截 → 随后 reset --hard 一并抹掉且不留备份。改为三查：unstaged / staged / ahead。
     if [ -d "${APP_HOME}/.git" ]; then
-        if ! git -C "${APP_HOME}" diff --quiet; then
-            if [ "${FORCE_UPDATE:-0}" != "1" ]; then
+        local _dirty_unstaged=0 _dirty_staged=0 _ahead=0
+        git -C "${APP_HOME}" diff --quiet || _dirty_unstaged=1
+        git -C "${APP_HOME}" diff --cached --quiet || _dirty_staged=1
+        # fetch 之前 origin/<branch> 可能尚不存在 → 记 0，真正的分叉拦截在 merge 失败后的硬断言里
+        _ahead=$(git -C "${APP_HOME}" rev-list --count "origin/${GIT_BRANCH}..HEAD" 2>/dev/null || echo 0)
+        if [ "${_dirty_unstaged}" = "1" ] || [ "${_dirty_staged}" = "1" ] || [ "${_ahead}" != "0" ]; then
+            local _patch="${_backup_dir}/local-patch-$(date +%Y%m%d-%H%M%S).diff"
+            if [ "${_dirty_unstaged}" = "1" ]; then
                 echo -e "${FAIL} Local modifications detected — refusing to overwrite them."
+                echo -e "${FAIL}   type: unstaged (working tree vs index), $(git -C "${APP_HOME}" diff --name-only | wc -l | tr -d ' ') file(s)"
+                git -C "${APP_HOME}" diff --name-only | head -n 20 | sed 's/^/    /' || true
+            fi
+            if [ "${_dirty_staged}" = "1" ]; then
+                echo -e "${FAIL} Local modifications detected — refusing to overwrite them."
+                echo -e "${FAIL}   type: staged (index vs HEAD), $(git -C "${APP_HOME}" diff --cached --name-only | wc -l | tr -d ' ') file(s)"
+                git -C "${APP_HOME}" diff --cached --name-only | head -n 20 | sed 's/^/    /' || true
+            fi
+            if [ "${_ahead}" != "0" ]; then
+                echo -e "${FAIL} Local commits ahead of origin/${GIT_BRANCH}: ${_ahead}"
+                git -C "${APP_HOME}" log --oneline "origin/${GIT_BRANCH}..HEAD" | head -n 20 | sed 's/^/    /' || true
+            fi
+            if [ "${FORCE_UPDATE:-0}" != "1" ]; then
                 echo -e "${INFO} To review:  git -C ${APP_HOME} diff"
-                echo -e "${INFO} To backup:  git -C ${APP_HOME} diff > ${APP_HOME}/.rollback/local-patch-$(date +%s).diff"
+                echo -e "${INFO} To backup:  git -C ${APP_HOME} diff > ${_patch}"
+                echo -e "${INFO}             git -C ${APP_HOME} diff --cached >> ${_patch}"
+                echo -e "${INFO}             git -C ${APP_HOME} log origin/${GIT_BRANCH}..HEAD >> ${_patch}"
                 echo -e "${INFO} Re-run with '--force' to auto-restore (a backup diff is saved first)."
                 exit 1
             fi
-            mkdir -p "${APP_HOME}/.rollback"
-            git -C "${APP_HOME}" diff > "${APP_HOME}/.rollback/local-patch-$(date +%s).diff"
-            echo -e "${WARN} Local modifications detected (backed up to .rollback/local-patch-*.diff), restoring to git version..."
+            # --force：备份必须写到 APP_HOME 之外（旧实现写在 .rollback/，制品通道会连目录一起清掉）
+            mkdir -p "${_backup_dir}"
+            {
+                git -C "${APP_HOME}" diff
+                git -C "${APP_HOME}" diff --cached
+                git -C "${APP_HOME}" log --oneline "origin/${GIT_BRANCH}..HEAD" 2>/dev/null || true
+            } > "${_patch}"
+            chmod 600 "${_patch}" 2>/dev/null || true
+            echo -e "${WARN} Local changes backed up to ${_patch}, restoring tracked files to HEAD..."
             git -C "${APP_HOME}" diff --name-only -z | xargs -0 git -C "${APP_HOME}" checkout --
             done_step "Locally modified files restored (diff saved)"
         else
@@ -3025,7 +3154,11 @@ do_update() {
     local _code_label=""
     # ── INSTALL_SOURCE=release：制品通道更新（重新解压新版本资产；无 .git → rollback 不可用）──
     if [ "${INSTALL_SOURCE:-git}" = "release" ]; then
+        # WO-003 批次3：升级前采集运行时状态指纹，升级后逐项断言（.env / data/.crypto_salt / data/）
+        local _fp_before="${_backup_dir}/fingerprint-$(date +%Y%m%d-%H%M%S).txt"
+        _fingerprint_capture "${_fp_before}"
         pull_release_artifact
+        _fingerprint_verify "${_fp_before}"
         _code_label="artifact:$(cat "${APP_HOME}/.verorun-edition" 2>/dev/null || echo unknown)@$(cat "${APP_HOME}/VERSION" 2>/dev/null || echo '?')"
     elif [ ! -d "${APP_HOME}/.git" ]; then
         if [ "${DEPLOY_TYPE}" = "production" ]; then
@@ -3041,7 +3174,19 @@ do_update() {
     else
         git config --global --add safe.directory "${APP_HOME}" 2>/dev/null || true
         cd "${APP_HOME}"
-        git remote set-url origin "${GIT_REPO}"
+        _cur_origin="$(git remote get-url origin 2>/dev/null || true)"
+        if [ -z "${_cur_origin}" ]; then
+            git remote add origin "${GIT_REPO}"
+            echo -e "${INFO} origin set to ${GIT_REPO}"
+        elif [ "${_cur_origin}" != "${GIT_REPO}" ]; then
+            # WO-002：更新绝不静默换源。旧实现无条件 set-url，把生产站 origin 改成公开仓后
+            # merge --ff-only 必失败 → reset --hard 公开仓 → 站点被整体替换。
+            echo -e "${FAIL} origin mismatch — refusing to update." >&2
+            echo -e "${FAIL}   current : ${_cur_origin}" >&2
+            echo -e "${FAIL}   expected: ${GIT_REPO}" >&2
+            echo -e "${FAIL}   fix     : GIT_REPO='${_cur_origin}' 重跑，或改用对应 install-*.sh" >&2
+            exit 1
+        fi
         export GIT_TERMINAL_PROMPT=0
         # 无人值守加固 ①：pre-warm known_hosts (see do_install) — a fresh root env stalls git fetch on host-key verification.
         ensure_git_auth
@@ -3057,17 +3202,42 @@ do_update() {
         if [ "${_fetch_ok}" != "1" ]; then
             echo -e "${FAIL} Git fetch failed after 3 attempts (${GIT_TIMEOUT}s timeout each) — aborting"
             echo -e "${INFO} Check origin remote: git -C ${APP_HOME} remote -v"
-            echo -e "${INFO} If it points to a mirror (ghfast.top/ghproxy), reset it:"
-            echo -e "${INFO}   git -C ${APP_HOME} remote set-url origin ${GIT_REPO}"
+            echo -e "${INFO} Update never rewrites origin automatically. If it is wrong, stop here,"
+            echo -e "${INFO} confirm with the site owner, fix it manually, then re-run the update:"
+            echo -e "${INFO}   git -C ${APP_HOME} remote set-url origin <expected-repo>"
             exit 1
         fi
-        git merge "origin/${GIT_BRANCH}" --ff-only 2>/dev/null || {
+        if ! git merge "origin/${GIT_BRANCH}" --ff-only 2>/dev/null; then
+            # WO-002 批次3：reset --hard 之前的硬断言。非快进 = 历史分叉，reset 会丢弃本地 commit；
+            # 只有在工作区/索引干净且无本地领先 commit 时才允许兜底，否则必须 --force 显式放行。
+            local _pre_unstaged=0 _pre_staged=0 _pre_ahead=0
+            git -C "${APP_HOME}" diff --quiet || _pre_unstaged=1
+            git -C "${APP_HOME}" diff --cached --quiet || _pre_staged=1
+            _pre_ahead=$(git -C "${APP_HOME}" rev-list --count "origin/${GIT_BRANCH}..HEAD" 2>/dev/null || echo 0)
+            if [ "${_pre_unstaged}" = "1" ] || [ "${_pre_staged}" = "1" ] || [ "${_pre_ahead}" != "0" ]; then
+                if [ "${FORCE_UPDATE:-0}" != "1" ]; then
+                    echo -e "${FAIL} Non-fast-forward update with local commits/changes — refusing to reset." >&2
+                    echo -e "${FAIL}   unstaged=${_pre_unstaged} staged=${_pre_staged} ahead=${_pre_ahead}" >&2
+                    echo -e "${FAIL}   reset would discard: git -C ${APP_HOME} log origin/${GIT_BRANCH}..HEAD" >&2
+                    echo -e "${INFO}   Re-run with '--force' to accept the reset (a snapshot is saved first)." >&2
+                    exit 1
+                fi
+                local _pre_patch="${_backup_dir}/pre-reset-$(date +%Y%m%d-%H%M%S).patch"
+                mkdir -p "${_backup_dir}"
+                {
+                    git -C "${APP_HOME}" diff
+                    git -C "${APP_HOME}" diff --cached
+                    git -C "${APP_HOME}" log --oneline "origin/${GIT_BRANCH}..HEAD" 2>/dev/null || true
+                } > "${_pre_patch}"
+                chmod 600 "${_pre_patch}" 2>/dev/null || true
+                echo -e "${WARN} Pre-reset snapshot saved to ${_pre_patch}"
+            fi
             echo -e "${WARN} Fast-forward merge failed, falling back to reset"
             git reset --hard "origin/${GIT_BRANCH}" || {
                 echo -e "${FAIL} Git reset failed."
                 exit 1
             }
-        }
+        fi
     fi
     if [ "${INSTALL_SOURCE:-git}" = "release" ]; then
         # 制品通道：插件已随 tarball 内置，无需 sparse-checkout；无 .git → 跳过 commit 对比
@@ -3095,7 +3265,16 @@ do_update() {
     fi
 
     step "Update .env (fill missing keys)"
+    ENV_REBUILT=0
     update_env
+    # WO-003 批次3：制品通道下 .env 被从零重建 = 密钥全部轮换，属失败路径，绝不能当作"更新成功"。
+    if [ "${INSTALL_SOURCE:-git}" = "release" ] && [ "${ENV_REBUILT}" = "1" ]; then
+        echo -e "${FAIL} .env was rebuilt from scratch on the artifact channel — update aborted." >&2
+        echo -e "${FAIL}   JWT_SECRET / PG_PASSWORD / PLUGIN_LICENSE_SECRET 等已被随机重置。" >&2
+        echo -e "${INFO}   Restore it from ${_backup_dir}/<timestamp>/.env, then re-run the update." >&2
+        echo -e "${INFO}   Services were NOT restarted." >&2
+        exit 1
+    fi
     done_step ".env synced"
 
     # 审计 R3-M2：verify the VeroGuard integrity manifest after a code update (signed, no local regeneration)
@@ -3321,30 +3500,6 @@ print_summary() {
             echo "  ║    systemctl status verorun-{main,auth,admin,guardian}       ║"
             echo "  ║    bash deploy/${INSTALL_SCRIPT} update                         ║"
             echo "  ╚══════════════════════════════════════════════════════════════╝"
-            echo ""
-            ;;
-        edu)
-            PUBLIC_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
-            echo ""
-            echo "  +----------------------------------------------+"
-            echo "  |     Educational Deployment Complete!         |"
-            echo "  +----------------------------------------------+"
-            echo "  -> Main site:   http://localhost/"
-            echo "  -> Admin:       http://localhost/admin/"
-            echo "  -> Console:     http://localhost/auth/"
-            if [ -n "${PUBLIC_IP}" ]; then
-            echo "  -> LAN access:  http://${PUBLIC_IP}/  (same paths)"
-            fi
-            echo "  -> Edu license: ${EDU_CODE:-NOT SET}"
-            if [ "${APPROVE_MIGRATE:-0}" = "1" ]; then
-            echo "  ==============================================="
-            echo "  -> Admin login: ${VR_ADMIN_USERNAME:-administrator} / ***HIDDEN***"
-            fi
-            echo "  ==============================================="
-            echo "  -> Useful commands:"
-            echo "    systemctl status verorun-{main,auth,admin,guardian}"
-            echo "    bash deploy/${INSTALL_SCRIPT} update"
-            echo "  +----------------------------------------------+"
             echo ""
             ;;
         dev)

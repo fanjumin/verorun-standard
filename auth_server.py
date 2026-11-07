@@ -20,7 +20,7 @@ sys.path.append(_SCRIPT_DIR)
 
 from services.deployment_config import deploy
 
-from flask import Flask, render_template, make_response, request, jsonify, redirect
+from flask import Flask, render_template, make_response, request, jsonify
 import urllib.request as _ur
 from auth_blueprint import register_auth
 
@@ -44,15 +44,6 @@ def _site_route(rule, **kw):
         return lambda fn: fn
     return app.route(rule, **kw)
 
-
-def _is_edu():
-    """教育版：无主站/无用户登录/无用户面板，所有公开入口统一导向 Admin 登录。"""
-    return os.environ.get('DEPLOY_TYPE', '').strip().lower() == 'edu'
-
-
-def _edu_admin_login():
-    """教育版公开入口统一重定向到管理后台登录。"""
-    return redirect('/admin/login')
 
 app = Flask(__name__, static_folder=None)
 # static_folder=None：关闭 Flask 内置 /static 处理器，改由下方显式路由接管。
@@ -173,8 +164,6 @@ def _get_site_plans():
 @app.route('/')
 def site_home():
     """Render the main landing page using the existing theme template."""
-    if _is_edu():
-        return _edu_admin_login()
     # 站点根路径由 site_builder 接管：存在已发布 home 页时渲染站点首页，
     # 否则回落到平台产品落地页（无行为回归）。
     try:
@@ -206,8 +195,6 @@ def site_home():
 @app.route('/pricing')
 def site_pricing():
     """独立定价页：渲染 site_pricing.html，套餐卡片来自插件 sub_items（DB 驱动）。"""
-    if _is_edu():
-        return _edu_admin_login()
     import json as _json
     site_plans = _get_site_plans()
     brand = {}
@@ -240,16 +227,12 @@ def site_pricing():
 
 @app.route('/features')
 def site_features():
-    if _is_edu():
-        return _edu_admin_login()
     site_plans = _get_site_plans()
     return render_template('public_home.html', LANG=deploy.LANG, site_plans=site_plans)
 
 
 @_site_route('/contact')
 def site_contact():
-    if _is_edu():
-        return _edu_admin_login()
     site_plans = _get_site_plans()
     return render_template('public_home.html', LANG=deploy.LANG, site_plans=site_plans)
 
@@ -257,8 +240,6 @@ def site_contact():
 @app.route('/login')
 def login_page():
     """Unified SSO login page."""
-    if _is_edu():
-        return _edu_admin_login()
     from services.brand_service import get_brand_settings
     brand = get_brand_settings() or {}
     from version import get_version
@@ -268,8 +249,6 @@ def login_page():
 @_site_route('/register')
 def register_page():
     """Unified SSO register page."""
-    if _is_edu():
-        return _edu_admin_login()
     from services.brand_service import get_brand_settings
     brand = get_brand_settings() or {}
     from version import get_version

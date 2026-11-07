@@ -248,7 +248,7 @@ def is_enterprise_edition() -> bool:
     """企业版判定：VR_EDITION（归一化后）== 'enterprise' ∧ 官方签名凭证有效（强校验）。
 
     企业版仅 VeroRun 官方自用，拥有全部插件权限，无需单独激活 License。
-    客户版（standard/pro/finance/research/minipro/edge）走正常付费校验。
+    客户版（standard / tarka / finance / research / minipro）走正常付费校验。
     即使客户在 .env 写入 VR_EDITION=official（历史别名，归一化后同为
     enterprise），缺少 verorun-code 私有仓库中的签名凭证仍会被判定为
     非企业版（fail-closed）。

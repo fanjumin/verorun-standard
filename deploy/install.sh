@@ -30,11 +30,10 @@
 #                       Note: no .git in artifact mode → `rollback` unavailable.
 #                       Default RELEASE_DIR=${APP_HOME}-release.
 #
-# Supported INSTALL_TYPE values: website | professional | development | educational | omni
+# Supported INSTALL_TYPE values: website | professional | development | omni
 #   website      → DEPLOY_TYPE=production (domain + HTTPS)
 #   professional → DEPLOY_TYPE=lan         (no domain, LAN access)
 #   development  → DEPLOY_TYPE=dev         (verorun-code SSH, no plugins)
-#   educational  → DEPLOY_TYPE=edu         (no domain, edu license)
 #   omni         → DEPLOY_TYPE=omni-service (全网智能客服服务版：服务器 + 轻壳，裁剪用户登录/网站，只留 admin/health/guardian)
 #
 # install-code.sh is the team full-plugin (code) shortcut; Development maps to dev (no plugins).
@@ -43,7 +42,7 @@
 set -euo pipefail
 
 # ── Default config ────────────────────────────────────────────────────
-: "${GIT_REPO:=https://github.com/fanjumin/verorun-pro.git}"
+: "${GIT_REPO:=}"
 : "${GIT_BRANCH:=master}"
 : "${APP_USER:=${SUDO_USER:-$(whoami)}}"
 # home is /root when APP_USER=root (not /home/root), consistent with install-code.sh / install-dev.sh
@@ -52,6 +51,22 @@ if [ "${APP_USER}" = "root" ]; then
 else
     : "${APP_HOME:=/home/${APP_USER}/verorun}"
 fi
+
+# ── WO-002：代码源优先级 = 显式 GIT_REPO > 现有 origin > 脚本默认 ──────────
+# 旧行为直接把默认值写进 GIT_REPO，apply_deploy_type 无法区分"用户指定"与"脚本默认"，
+# 更新时又把默认值无条件 set-url 回 origin —— tarka.cn 的生产 origin 因此被改成公开仓。
+if [ -n "${GIT_REPO}" ]; then
+    echo "[GIT_REPO] explicit override: ${GIT_REPO}"
+else
+    GIT_REPO="https://github.com/fanjumin/verorun-pro.git"
+    if [ -d "${APP_HOME}/.git" ]; then
+        _origin_url="$(git -C "${APP_HOME}" remote get-url origin 2>/dev/null || true)"
+        if [ -n "${_origin_url}" ]; then
+            GIT_REPO="${_origin_url}"
+        fi
+    fi
+    echo "[GIT_REPO] ${GIT_REPO} (from: $(if [ -d "${APP_HOME}/.git" ]; then echo existing-origin; else echo script-default; fi))"
+fi
 : "${VENV_DIR:=${APP_HOME}/venv}"
 : "${INSTALL_SOURCE:=git}"                 # git | release — release: install from Release assets (artifact channel)
 : "${RELEASE_DIR:=${APP_HOME}-release}"    # staging dir holding Release assets (artifact channel)
@@ -59,7 +74,7 @@ fi
 : "${SERVICE_DIR:=/etc/systemd/system}"
 : "${DOMAIN:=}"
 : "${REGION:=global}"                # cn | global
-: "${DEPLOY_TYPE:=production}"       # production | lan | code | dev | edu | omni-service — default; select_deploy_type may override
+: "${DEPLOY_TYPE:=production}"       # production | lan | code | dev | omni-service — default; select_deploy_type may override
 : "${VR_ADMIN_USERNAME:=}"
 : "${VR_ADMIN_PASSWORD:=}"
 : "${SSL_EMAIL:=}"
@@ -78,21 +93,10 @@ else
     # → fetch the shared library from verorun-pro (public repo, matching the one-command install link) into a temp file and load it
     # 审计 D10: source is fixed to verorun-pro (verorun-code is a private repo, inaccessible to anonymous users);
     # Verify against a SHA-256 allowlist after fetching, to guard against CDN/repo poisoning.
-    # 审计 F-02：教育版（INSTALL_TYPE=educational）从 verorun-edu 拉取 common.sh 并用其哈希校验。
-    # 注意：EDU_COMMON_SHA256 与 COMMON_SHA256 默认 pin 同一哈希——两仓库 common.sh 必须由 CI
-    # （sync-to-pro / sync-to-edu 的 git archive）同步保持一致，否则教育版一键安装会因哈希不匹配而失败；
-    # 如需独立 pin，可用 EDU_COMMON_SHA256 环境变量覆盖。
-    if [ "${INSTALL_TYPE:-}" = "educational" ]; then
-        _COMMON_REMOTE="${EDU_COMMON_REMOTE:-https://raw.githubusercontent.com/fanjumin/verorun-edu/master/deploy/lib/common.sh}"
-        _COMMON_MIRROR="${EDU_COMMON_MIRROR:-https://ghfast.top/https://raw.githubusercontent.com/fanjumin/verorun-edu/master/deploy/lib/common.sh}"
-        # Computed and backfilled at release time by deploy/scripts/sign_release.py (LF-normalized hash)
-        _COMMON_SHA256="${EDU_COMMON_SHA256:-a2d349a8332f883495ad049e5f9d5778618fb808d10cd06a9bfd9db07e4fb3b5}"
-    else
-        _COMMON_REMOTE="${COMMON_REMOTE:-https://raw.githubusercontent.com/fanjumin/verorun-pro/master/deploy/lib/common.sh}"
-        _COMMON_MIRROR="${COMMON_MIRROR:-https://ghfast.top/https://raw.githubusercontent.com/fanjumin/verorun-pro/master/deploy/lib/common.sh}"
-        # Computed and backfilled at release time by deploy/scripts/sign_release.py (LF-normalized hash)
-        _COMMON_SHA256="${COMMON_SHA256:-a2d349a8332f883495ad049e5f9d5778618fb808d10cd06a9bfd9db07e4fb3b5}"
-    fi
+    _COMMON_REMOTE="${COMMON_REMOTE:-https://raw.githubusercontent.com/fanjumin/verorun-pro/master/deploy/lib/common.sh}"
+    _COMMON_MIRROR="${COMMON_MIRROR:-https://ghfast.top/https://raw.githubusercontent.com/fanjumin/verorun-pro/master/deploy/lib/common.sh}"
+    # Computed and backfilled at release time by deploy/scripts/sign_release.py (LF-normalized hash)
+    _COMMON_SHA256="${COMMON_SHA256:-261aa42e9bade1066e9388669b1198a8641fb8bc027f64d5a25131003e333d60}"
     _tmp_common="$(mktemp)"
     # Audit P3-2: clean up the temp file on Ctrl+C interruption
     trap 'rm -f "${_tmp_common}"' EXIT
@@ -139,7 +143,7 @@ fi
 
 # ══════════════════════════════════════════════════════════════════════
 # Deploy type resolution (unified entry, build-2026.08.11)
-# DEPLOY_TYPE: production | lan | code | dev | edu | omni-service
+# DEPLOY_TYPE: production | lan | code | dev | omni-service
 # ══════════════════════════════════════════════════════════════════════
 select_deploy_type() {
     # ================================================================
@@ -153,7 +157,6 @@ select_deploy_type() {
                 website)      DEPLOY_TYPE="production" ;;
                 professional) DEPLOY_TYPE="lan" ;;
                 development)  DEPLOY_TYPE="dev" ;;
-                educational)  DEPLOY_TYPE="edu" ;;
                 omni)         DEPLOY_TYPE="omni-service" ;;
                 *) echo -e "${FAIL} Unknown INSTALL_TYPE: ${INSTALL_TYPE}"; exit 1 ;;
             esac
@@ -166,7 +169,7 @@ select_deploy_type() {
         if ! { exec 3<>/dev/tty; } 2>/dev/null; then
             echo -e "${FAIL} No interactive terminal available — pass INSTALL_TYPE explicitly:"
             echo -e "${INFO}   curl ... | sudo env INSTALL_TYPE=professional bash"
-            echo -e "${INFO}   INSTALL_TYPE: website | professional | development | educational | omni"
+            echo -e "${INFO}   INSTALL_TYPE: website | professional | development | omni"
             exit 1
         fi
         exec 3>&-
@@ -174,18 +177,16 @@ select_deploy_type() {
         echo "  VeroRun installer wizard - select a deployment type"
         echo "  ----------------------------------------------"
         echo "  [1] Website        Production (requires domain + HTTPS)"
-        echo "  [2] Professional   Pro edition (no domain, LAN access)"
+        echo "  [2] Professional   LAN deployment (no domain, LAN access)"
         echo "  [3] Development    Dev edition (verorun-code, no plugins, requires SSH key)"
-        echo "  [4] Educational    Edu edition (no domain, requires edu license code)"
-        echo "  [5] Omni Service   全网智能客服服务版（服务器+轻壳，裁剪用户登录/网站，需公网 IP/域名）"
-        echo -n "  Enter your choice [1-5]: " > /dev/tty
+        echo "  [4] Omni Service   全网智能客服服务版（服务器+轻壳，裁剪用户登录/网站，需公网 IP/域名）"
+        echo -n "  Enter your choice [1-4]: " > /dev/tty
         read -r _choice < /dev/tty
         case "${_choice}" in
             1) DEPLOY_TYPE="production" ;;
             2) DEPLOY_TYPE="lan" ;;
             3) DEPLOY_TYPE="dev" ;;
-            4) DEPLOY_TYPE="edu" ;;
-            5) DEPLOY_TYPE="omni-service" ;;
+            4) DEPLOY_TYPE="omni-service" ;;
             *) echo -e "${FAIL} Invalid choice, please try again"; exit 1 ;;
         esac
         echo -e "${INFO} Deploy type selected: ${DEPLOY_TYPE}"
@@ -245,12 +246,20 @@ apply_deploy_type() {
             fi
             SPARSE_DIRS="${SPARSE_DIRS:-} plugins"
             ;;
-        edu)
-            # Educational edition: verorun-edu over HTTPS, no domain, bundled plugins
-            GIT_REPO="https://github.com/fanjumin/verorun-edu.git"
-            # 全量检出（含全部插件）——教育版需运行全部插件（VeroScholar 等）。
-            # 2026-08-20：sparse 白名单漏 plugins/ 曾导致插件被清空、蓝图挂载失败、
-            # 菜单点击落入 SPA catch-all 出现重叠 Admin。教育版必须全量。
+        edu|educational)
+            # 教育版已于 2026-11-07 下架（pro / edu / edge 三版移除），此处 fail-loud：
+            # 老 .env 若仍带 DEPLOY_TYPE=edu，静默继续会走默认仓库并装出错误版本。
+            echo -e "${FAIL} DEPLOY_TYPE=edu has been removed (educational edition retired)." >&2
+            echo -e "${FAIL}   Supported: production | lan | code | dev | omni-service" >&2
+            echo -e "${FAIL}   Migrate the site to 'code' or 'production' before updating." >&2
+            exit 1
+            ;;
+        tarka|finance|finance-desktop|research|research-desktop|minipro)
+            # WO-002：私有发行版（桌面/迷你）与 code 同源，必须走 verorun-code 全量检出。
+            # 仅当 GIT_REPO 仍等于脚本默认值时才切换 —— 显式 env 与现有 origin 优先（见文件头）。
+            if [ "${GIT_REPO}" = "https://github.com/fanjumin/verorun-pro.git" ]; then
+                GIT_REPO="git@github.com:fanjumin/verorun-code.git"
+            fi
             SPARSE_DIRS=""
             ;;
         omni-service)
@@ -399,60 +408,6 @@ do_configure_domain() {
 # Summary — Audit C-1: print_summary unified into lib/common.sh (driven by DEPLOY_TYPE)
 # ==========================================================================
 
-# ── Educational license placeholder (interface fixed)────────────────────────────────
-# Future email verification / CN plugin licensing plugs in here; the deploy layer only performs ED-code + check validation
-_edu_license_check() {
-    if [ "${DEPLOY_TYPE}" != "edu" ] || [ "${DEPLOY_MODE}" != "install" ]; then
-        return 0
-    fi
-
-    echo -e "${INFO} Educational license - enter your edu deployment code (ED-XXXX)"
-    if [ -z "${EDU_CODE:-}" ]; then
-        echo -n "  Deployment code: " > /dev/tty
-        read -r EDU_CODE < /dev/tty
-    else
-        echo -e "${INFO}  Deployment code (from env EDU_CODE): ${EDU_CODE}"
-    fi
-    EDU_CODE="${EDU_CODE// /}"
-    if [ -z "${EDU_CODE}" ]; then
-        echo -e "${FAIL} Educational deployment code must not be empty"; exit 1
-    fi
-    # 审计 TEST-KEY：教育版测试部署码白名单 —— 仅供开发/测试环境放行本次校验，
-    # 不经过云端 is_valid 校验，也不写入正式部署用途。其他任意码照旧走云端校验。
-    case "${EDU_CODE}" in
-        TEST-DEV-0001|EDU-TEST-0001)
-            echo -e "${WARN} [TEST] Educational TEST key accepted: ${EDU_CODE} (dev/test only, NOT for production)"
-            export EDU_CODE
-            return 0
-            ;;
-    esac
-    # Region-aware validation endpoint (follows license_service's region routing convention);
-    # 审计 F5 修复：EDU_LICENSE_ENDPOINT 允许离网/内网部署覆盖云端端点
-    local _edu_url="${EDU_LICENSE_ENDPOINT:-}"
-    if [ -z "${_edu_url}" ]; then
-        case "${REGION}" in
-            cn)     _edu_url="https://api.verorun.cn" ;;
-            *)      _edu_url="https://api.verorun.com" ;;
-        esac
-    fi
-    # 审计 F5 修复：校验前先做端点可达性预检，不可达时显式告警并给出降级指引（而非运行期静默失败）
-    if ! curl -fsS --connect-timeout 6 --max-time 12 "${_edu_url}/health" >/dev/null 2>&1; then
-        echo -e "${WARN} Edu license endpoint unreachable: ${_edu_url}"
-        echo -e "${WARN}   - 离网/内网部署请通过 EDU_LICENSE_ENDPOINT 指定内网 license 服务地址"
-        echo -e "${WARN}   - 或先配置 DNS / 放行出网后再安装，以免许可证校验失败"
-    fi
-    local _edu_check
-    _edu_check=$(curl -fsSL --connect-timeout 10 --max-time 20 \
-        "${_edu_url}/api/subscription/check?code=${EDU_CODE}" 2>/dev/null \
-        || echo '{"success":false}')
-    # 审计 F-17：用 python 解析 JSON 而非 grep 文本匹配（字段顺序/空白/嵌套变化不再误判）
-    if ! echo "${_edu_check}" | python3 -c 'import sys,json; d=json.load(sys.stdin); sys.exit(0 if d.get("is_valid") else 1)' 2>/dev/null; then
-        echo -e "${FAIL} Educational deployment code validation failed, please check and retry"; exit 1
-    fi
-    export EDU_CODE
-    echo -e "${OK} Educational deployment code verified"
-}
-
 # ── Main entry ──────────────────────────────────────────────────────────
 
 # Must run as root
@@ -475,9 +430,6 @@ if [ -f "${APP_HOME}/.env" ] && grep -q "^VR_EDITION=official" "${APP_HOME}/.env
     echo -e "${FAIL} Use: sudo bash deploy/install-official.sh"
     exit 1
 fi
-
-# ── Educational license validation (only in edu + install modes) ──
-_edu_license_check
 
 # Audit A-1: install mode approves DB migration and seed by default, ready to use after install (same as install-local.sh)
 if [ "${DEPLOY_MODE}" = "install" ]; then

@@ -96,8 +96,8 @@ def _detect_edition():
     """轻量 edition 判定，返回 **磁盘产物名**（供 PROMPT_SEEDS.editions 比对）。
 
     不 import agent_matrix.models，避免其模块级数据库副作用在迁移脚本上下文触发异常。
-    读取 VR_EDITION → RELEASE_EDITION → DEPLOY_TYPE，归一化：edu/research/research-desktop
-    → research-desktop、pro/finance/finance-desktop → finance-desktop、其余→standard。
+    读取 VR_EDITION → RELEASE_EDITION → DEPLOY_TYPE，归一化：research/research-desktop
+    → research-desktop、finance/finance-desktop → finance-desktop、其余→standard。
 
     与 agent_matrix.models.current_edition() **口径不同**（后者返回 canonical ID：
     research / finance，且 pro 不并入 finance）。两者对应关系见
@@ -105,9 +105,9 @@ def _detect_edition():
     """
     e = (os.getenv('VR_EDITION') or os.getenv('RELEASE_EDITION')
          or os.getenv('DEPLOY_TYPE') or '').strip().lower()
-    if e in ('edu', 'research', 'research-desktop'):
+    if e in ('research', 'research-desktop'):
         return 'research-desktop'
-    if e in ('pro', 'finance', 'finance-desktop'):
+    if e in ('finance', 'finance-desktop'):
         return 'finance-desktop'
     if e in ('omni', 'omni-desktop', 'omni-service'):
         return 'omni-service'

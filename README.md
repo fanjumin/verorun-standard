@@ -1,26 +1,28 @@
-# VeroRun — Enterprise Multi-Core AI Operating System
+# VeroRun — Enterprise AI Operating System for Agentic Workloads
 
-[![Version](https://img.shields.io/badge/version-0.66.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.67.0-blue.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-EULA%20v1.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)]()
 [![Plugins](https://img.shields.io/badge/plugins-50-orange.svg)]()
 
-**VeroRun is a multi-core AI operating system that makes intelligent execution trustworthy, verifiable, and traceable — driven by core capabilities including agent collaboration, knowledge retrieval, content generation, and process orchestration, deployed on customer-owned servers.**
+**VeroRun is an enterprise AI operating system deployed on customer-owned servers: the kernel defines how it runs, plugins declare what runs — making intelligent execution trustworthy, verifiable, and traceable.**
 
-The engine core provides five intelligent execution primitives: **Multi-Agent collaboration** (role matrix + task decomposition + parallel dispatch + self-evaluating retry + Reflexion memory evolution), **knowledge retrieval** (RAG hybrid search: pgvector vectors + pg_trgm keywords + RRF fusion + hierarchical memory), **process orchestration** (DAG workflow engine + event-bus triggers + Cron scheduling), **model access** (UnifiedLLM gateway, provider-agnostic, transparent routing + automatic failover), and **asset protection** (VeroGuard integrity verification + offline HMAC-SHA256 licensing). Primitives are triggered via HTTP API, Cron, or the event bus; the Master Agent decomposes instructions into subtasks, dispatches them to specialized Agents for parallel execution, and aggregates the results — producing PPTX/DOCX/Markdown documents, images, structured data, knowledge-base embeddings, or alert notifications. Business capabilities are assembled on top of the kernel as plugins — a plugin is an application, a plugin is an industry.
+The engine core is a persistent multi-agent runtime built on five execution primitives — **Multi-Agent collaboration** (role matrix + task decomposition + parallel dispatch + self-evaluating retry + Reflexion memory evolution), **knowledge retrieval** (RAG hybrid search: pgvector vectors + pg_trgm keywords + RRF fusion + hierarchical memory), **process orchestration** (DAG workflow engine + event-bus triggers + Cron scheduling), **model access** (UnifiedLLM gateway, provider-agnostic, transparent routing + automatic failover), and **platform integrity** (VeroGuard runtime integrity verification + offline licensing). The Master Agent (Athena) decomposes instructions into subtasks, dispatches them to specialized Agents for parallel execution, and aggregates the results — producing PPTX/DOCX/Markdown documents, images, structured data, knowledge-base embeddings, or alert notifications. All business capabilities are declared and assembled as plugins — a plugin is an application, a plugin is an industry.
+
+> **Data ownership**: VeroRun runs entirely on customer-owned infrastructure. Customer business data never leaves the deployment and is never used for model training. VeroGuard exists to protect the licensing and integrity of the VeroRun platform itself — it does not hold, manage, or claim any rights over customer assets.
 
 ---
 
 ## Key Features
 
-- **Orchestrable Multi-Role Agent Matrix**: Athena (master) + 9 core sub-roles, plus edition-specific research / finance roles, role division + task-decomposition orchestration, auto-registration of extended agents.
-- **Four-Stage Discussion Protocol (Agent Discussion v2.0)**: Planner → Reviewer → Revise → Decider, separating generation from review, intercepting plans before they land.
+- **Orchestrable Multi-Role Agent Matrix**: Athena (master) + 9 typed sub-roles = 10 core roles, plus edition-specific research / finance roles, role division + task-decomposition orchestration, auto-registration of extended agents.
+- **Four-Stage Discussion Protocol (Agent Discussion v2.0)**: Planner → Reviewer → Revise → Decider, separating generation from review and gatekeeping plans before execution.
 - **Dynamic Prompt System**: database-driven `PromptResolver`, four-layer assembly + scenario differentiation + multi-version management.
 - **Cognitive Evolution Engine (CogEvolution)**: RAG vector retrieval, layered memory, Reflexion learning, Prompt Evolution, forming a "memory → reflection → optimization → behavioral evolution" loop.
 - **Visual Workflow Engine**: DAG node orchestration, Cron scheduling, tiered worker pools — a general execution carrier for any process.
-- **Multi-Provider LLM Gateway (UnifiedLLM)**: provider-agnostic unified API, 14 landed providers — 9 self-hosted vendors (DeepSeek / OpenAI / Ollama / Gemini / Grok / KIMI / 智谱 GLM / Anthropic / Edge-TTS) + 5 aggregators (阿里百炼 DashScope / 腾讯 TokenHub / 百度千帆 / OpenRouter / SiliconFlow) + 120 model seed records (main seed 96 + OpenRouter free-tier 24), transparent model substitution, automatic failover, key management, budget gate, 4-level quota — **zero kernel hardcoded provider/model** (engine.py PROVIDER_CONFIGS removed, all provider/model resolved from `system_config` + database seed, tools.py markdown/docx unified).
-- **Runtime-Free Plugin Config**: plugin-level provider/model no longer hardcoded — both `enterprise_verify` OCR + audit and plugins that previously had fallback literals (`mini_app_builder`, `analytics`) now read from `system_config` keys (`ai_text_provider` / `ai_text_model` / `enterprise_verify_ocr_*` / `enterprise_verify_audit_*`).
-- **VeroGuard Guard Layer**: health monitoring + integrity verification + encrypted heartbeat, dual-process mutual protection, client-side asset protection; Ed25519-signed releases, integrity manifests, and source watermarks guard the supply chain.
+- **Multi-Provider LLM Gateway (UnifiedLLM)**: provider-agnostic unified API, 14 landed providers — 9 self-hosted vendors (DeepSeek / OpenAI / Ollama / Gemini / Grok / KIMI / Zhipu GLM / Anthropic / Edge-TTS) + 5 aggregators (Alibaba Bailian DashScope / Tencent TokenHub / Baidu Qianfan / OpenRouter / SiliconFlow) + 120 model seed records (main seed 96 + OpenRouter free-tier 24), transparent model substitution, automatic failover, key management, budget gate, 4-level quota — **zero kernel hardcoded provider/model**.
+- **Deliverables Hub**: one research report, three synchronized export formats (XLSX / PPTX / Markdown) from a single pipeline — regenerate with adjusted assumptions, edit table figures, and all formats re-render in sync.
+- **Zero-Literal Plugin Configuration**: plugin-level provider/model are no longer hardcoded — `enterprise_verify` OCR + audit settings and the fallback literals in `mini_app_builder` and `analytics` now read `system_config` keys (`ai_text_provider` / `ai_text_model` / `enterprise_verify_ocr_*` / `enterprise_verify_audit_*`).
 - **Plugin Ecosystem**: 50 built-in plugins carry any business form, full lifecycle management, plugin marketplace, licensing engine.
 
 Kernel design principle: **business semantics are declared entirely by plugins** — adding a business capability is equivalent to assembling a plugin, keeping the kernel stable.
@@ -55,7 +57,7 @@ Kernel design principle: **business semantics are declared entirely by plugins**
 |---|---|---|---|---|
 | 8081 | main domain | `verorun-main` | `auth_server` | Main site, login, captcha proxy |
 | 8083 | `platform.*` | `verorun-auth` | `main_site` (Platform Console) | User console, subscription |
-| 8084 | `admin.*` | `verorun-admin` | `admin.app` | Admin panel, Agent matrix, automation, CMS |
+| 8084 | `admin.*` | `verorun-admin` | `admin/app.py` | Admin panel, Agent matrix, automation, CMS |
 | 8085 | — | `verorun-health` | `health_service.app` | Internal health check endpoint |
 | — | — | `verorun-guardian` | `veroguard.guardian` | Unified daemon (health + integrity + heartbeat) |
 
@@ -82,21 +84,20 @@ Kernel design principle: **business semantics are declared entirely by plugins**
 
 | `INSTALL_TYPE` | Scenario | Repository | Domain/HTTPS |
 |---|---|---|---|
-| `website` | Production site (domain + HTTPS) | `verorun-pro` | Yes |
-| `professional` | Enterprise intranet (LAN access) | `verorun-pro` | No |
+| `website` | Production site (domain + HTTPS) | `verorun-code` | Yes |
+| `professional` | Enterprise intranet (LAN access) | `verorun-code` | No |
 | `development` | Development (full source, requires SSH key) | `verorun-code` | No |
-| `educational` | Education edition (requires ED deploy code) | `verorun-edu` | No |
+| `omni` | Omni edition (desktop + service unified deployment) | `verorun-standard` | No |
 
 ### One-command Deployment (Ubuntu 22.04 / 24.04)
 
 ```bash
 # Production site (with domain)
-curl -fsSL https://raw.githubusercontent.com/fanjumin/verorun-pro/master/deploy/install.sh \
-  | sudo env INSTALL_TYPE=website bash -s -- install your-domain.com
+git clone git@github.com:fanjumin/verorun-code.git && cd verorun-code
+sudo env INSTALL_TYPE=website bash deploy/install.sh install your-domain.com
 
 # Enterprise intranet (IP-based access)
-curl -fsSL https://raw.githubusercontent.com/fanjumin/verorun-pro/master/deploy/install.sh \
-  | sudo env INSTALL_TYPE=professional bash
+sudo env INSTALL_TYPE=professional bash deploy/install.sh install
 ```
 
 Region selection: `--region=cn` (Mainland China, defaults to `api.verorun.cn`) / `--region=global` (international, defaults to `api.verorun.com`).
@@ -137,11 +138,11 @@ VeroRun hands complex tasks to a group of specialized, reviewable Agent roles: t
 | Media | `media` | sub | siliconflow/FLUX.1-pro | Multimodal media: image understanding (recognition, OCR, diagram analysis) + generation (text-to-image, covers, illustrations) |
 | Office | `office` | sub | deepseek/deepseek-v4-flash | Enterprise operations: HR affairs, administration, secretarial documents |
 | Business | `business` | sub | deepseek/deepseek-v4-flash | Business analysis, products, orders, supply chain, reviews, wishlist |
-| Stock Analyst | `stock_analyst` | sub | gemini/gemini-2.5-flash | Financial analysis: market data, indicators, strategy research (core role, finance-desktop 默认装配) |
+| Stock Analyst | `stock_analyst` | sub | gemini/gemini-2.5-flash | Financial analysis: market data, indicators, strategy research (core role, default in finance-desktop) |
 
-> 以上 10 个为核心角色（根目录 `agent_matrix/roles/`，`is_system=1`）。发行版在其上叠加专属角色：finance-desktop 含 `rs_compliance`/`rs_fundamental`/`rs_risk`/`rs_quant`/`rs_pm`/`rs_planner`/`ops` 等 8 个；research-desktop 含 `veroscholar`/`academic_writer`/`lit_scout`/`method_architect`/`peer_auditor`/`thesis_smith` 等 7 个。
+> The 10 roles above are the core roles (root `agent_matrix/roles/`, `is_system=1`). Editions layer dedicated roles on top: finance-desktop adds 8 including `rs_compliance`/`rs_fundamental`/`rs_risk`/`rs_quant`/`rs_pm`/`rs_planner`/`ops`; research-desktop adds 7 including `veroscholar`/`academic_writer`/`lit_scout`/`method_architect`/`peer_auditor`/`thesis_smith`.
 
-**Edition-Specific Roles** (shipped per edition — finance-desktop / research-desktop; layered on the 10 core roles above):
+**Edition-Specific Roles** (shipped per edition — finance-desktop / research-desktop; layered on the 10 core roles above; research-desktop since 2.0.0 also wires `net_proxy` (unified egress proxy) and `im_gateway` (IM notifications) as general-capability channels):
 
 | Role | Slug | Purpose |
 |---|---|---|
@@ -227,7 +228,7 @@ The financial-analysis plugin (`stock_analysis`) shipped v2.0.0 on top of three 
 
 - **Fine-grained permissions**: replaces blanket admin checks with a three-tier model — `stock.read` / `stock.write` / `stock.admin` — enforced on every endpoint; JWT carries the user's permission list.
 - **MCP upgrade**: Provider access supports MCP **Streamable HTTP** transport while remaining backward-compatible with stdio.
-- **Explicit adjustment (复权) semantics**: an adjustment-factor engine with a corporate-action table (`sa_corp_action`, `sa_adj_factor`) removes the prior look-ahead/declared-close ambiguity.
+- **Explicit adjustment (fu-quan) semantics**: an adjustment-factor engine with a corporate-action table (`sa_corp_action`, `sa_adj_factor`) removes the prior look-ahead/declared-close ambiguity.
 
 The v2 plugin also adds a full research stack, drawn from a dedicated implementation plan: `secmaster` symbol resolution, a **Provider v2 contract** (`base_v2.py` / `FetchResult` with provenance), FMP / Polygon / terminal / user-supplied data sources, an evidence-bundle anti-hallucination layer, financial normalization (TTM / DuPont / Beneish M-Score / Altman Z), valuation models (DCF / reverse DCF / comps / PB-ROE), a factor lab with six backtest rules, and a compliance/audit framework (approval workflow, silence periods, audit retention).
 
@@ -246,7 +247,7 @@ Any task drivable by agent collaboration and process orchestration can be arrang
 
 | Capability | Description |
 |---|---|
-| Provider access | 14 landed providers — 9 self-hosted vendors (DeepSeek / OpenAI / Ollama / Gemini / Grok / KIMI / 智谱 GLM / Anthropic / Edge-TTS) + 5 aggregators (阿里百炼 DashScope / 腾讯 TokenHub / 百度千帆 / OpenRouter / SiliconFlow); endpoint is provider-level with per-model override; each provider carries a `kind` (vendor / aggregator); legacy Hunyuan retired — Tencent served via TokenHub |
+| Provider access | 14 landed providers — 9 self-hosted vendors (DeepSeek / OpenAI / Ollama / Gemini / Grok / KIMI / Zhipu GLM / Anthropic / Edge-TTS) + 5 aggregators (Alibaba Bailian DashScope / Tencent TokenHub / Baidu Qianfan / OpenRouter / SiliconFlow); endpoint is provider-level with per-model override; each provider carries a `kind` (vendor / aggregator); legacy Hunyuan retired — Tencent served via TokenHub |
 | Dual addressing | via `provider_model_id` (recommended) or legacy `provider + model` |
 | Client cache | 5-minute TTL, thread-safe |
 | Key resolution priority | `provider_api_keys` table (encrypted) → environment vars → `system_config` table |
@@ -256,25 +257,6 @@ Any task drivable by agent collaboration and process orchestration can be arrang
 | 4-level quota | priority User > Model > Module > Global |
 
 **Orchestration**: UnifiedLLM shields provider differences from upper layers — applications all talk the same API shape while the gateway handles interface translation, model routing, and automatic failover behind the scenes. Models are addressed dynamically by capability and cost, enabling transparent substitution and automatic degradation; onboarding a new provider or switching models is transparent to business code.
-
----
-
-### VeroGuard Guard Layer
-
-Unifies health monitoring, code-integrity verification, and encrypted heartbeat into a single process across 7 core modules (health / integrity / fingerprint / runtime / communicator / executor / self_protect):
-
-| Channel | Interval | Mechanism |
-|---|---|---|
-| Health watchdog | 30s | Service health checks, tiered recovery (restart → rollback), webhook alerts |
-| Integrity verification | 300s | Per-file SHA256 comparison against an encrypted manifest (AES-GCM) |
-| Heartbeat report | 300s | AES-256-GCM + HMAC-SHA256 signing + TLS 1.3, 5-minute anti-replay window |
-
-- **Self-protection**: dual-process (`guardian` monitors business services, `self_protect` monitors the guardian) with pipe / pidfile heartbeat and automatic restart on parent death.
-- **Tiered recovery**: restart → GitHub rollback (`guardian.py --rollback-now` for manual trigger), with a cooldown window to prevent rollback loops.
-- **Daily snapshot**: `verorun-guardian-snapshot.timer` (systemd, daily) snapshots state ahead of rollback.
-- **Signed release chain**: Ed25519-signed release manifests + integrity manifests + official token verification; version-scope downgrade protection (`min/max_version`); build-time `build_id` source watermarks. Release manifests are no longer committed to the repo (`release_manifest.json` / `release_manifest.sig` are gitignored) — they are generated and re-signed at build time by `deploy/scripts/sign_release.py` and published as signed Release assets, so the signing key never enters git history.
-- **CI freshness gate**: `tests.yml` verifies `veroguard/data/manifest.json` matches `VERSION` on every run; a stale manifest fails CI (fix via the "Refresh VeroGuard Manifest" GitHub Actions workflow).
-- **Remote commands** (6): `warn`, `lock_ai`, `lock_full`, `shutdown`, `self_destruct`, `update_config`; destructive commands (`shutdown` / `self_destruct`) additionally require a local ops-token confirmation.
 
 ---
 
@@ -289,9 +271,9 @@ Full lifecycle management (6 states: `UNKNOWN → INSTALLED → ENABLED → ACTI
 | `memory_engine` | Agent collaboration / Knowledge retrieval | Cognitive evolution engine: RAG + layered memory + Reflexion + Prompt Evolution |
 | `project_workspace` | Knowledge retrieval | Project-level document RAG, schema isolation, semantic retrieval with citations |
 | `content_factory` | Process orchestration | Multi-source collection → AI processing → review → publish, listens to `cron.tick` |
-| `health_check` | Asset protection | Auto health inspection + AI Fixer fault analysis + alerts |
+| `health_check` | Platform integrity | Auto health inspection + AI Fixer fault analysis + alerts |
 | `analytics` | Process orchestration | Server-side privacy-first analytics, workflow nodes: report / AI insight / alert / CSV |
-| `vault` | Asset protection | Full/incremental backup, AES-256-GCM encryption, multi-target storage |
+| `vault` | Platform integrity | Full/incremental backup, AES-256-GCM encryption, multi-target storage |
 
 ### Domain Plugins
 
@@ -300,7 +282,7 @@ Full lifecycle management (6 states: `UNKNOWN → INSTALLED → ENABLED → ACTI
 | Knowledge management | `chatbot`, `memory_engine`, `project_workspace`, `veroscholar` (incl. Discovery Engine) |
 | Research & assessment | `search_hub`, `survey`, `assessment` |
 | Analytical engines | `bayes_engine`, `butterfly_engine`, `chaos_engine` |
-| Edge / IIoT evolution | `cogevolution_substrate` (CES 边缘/IIoT 进化底座，能力 memory.curate/extract/iiot；与 `memory_engine` v0.62.1 起 conflicts 互斥，默认不启用), `ros_bridge`, `blender_bridge` |
+| Edge / IIoT evolution | `cogevolution_substrate` (CES edge/IIoT evolution substrate; capabilities memory.curate/extract/iiot; mutually exclusive with `memory_engine` via conflicts since v0.62.1, disabled by default), `ros_bridge`, `blender_bridge` |
 | Content publishing | `content_factory`, `site_builder`, `mini_app_builder`, `ads`, `social_push` |
 | Business operations | `shop`, `payment`, `logistics`, `subscription`, `coupons`, `order_notify`, `reviews`, `wishlist`, `stock_analysis`, `risk_control`, `ai_relay`, `hr_recruit`, `multi_asset` |
 | Communications | `im_gateway`, `email`, `sms`, `oauth_config`, `verification`, `omni_service` |
@@ -327,13 +309,15 @@ Content generation is one of the general capabilities carried by the engine, cov
 - **AI site building** (`site_builder`): generates websites, themes, and pages, presenting content in site form.
 - **Mini programs** (`mini_app_builder`): extends content capabilities to the mini-program front-end.
 
-Content generation and the knowledge retrieval, process orchestration, model access, and asset protection primitives can be combined on demand by business plugins to form complete applications.
+Content generation and the knowledge retrieval, process orchestration, model access, and platform integrity primitives can be combined on demand by business plugins to form complete applications.
 
 ---
 
-## Business Model & Regional Routing
+## Distribution & Regional Routing
 
-**Three-stage funnel**: free distribution of the standard enterprise package and the education edition for lead generation (public `verorun-pro` and `verorun-edu` repositories) → plugin purchases, subscriptions, and commercial licenses for recurring revenue → VeroGuard protects code assets and licensing rights on the customer side. **Data-flywheel vision**: centered on domain knowledge assets, knowledge bases self-evolve through business usage, powering domain-model fine-tuning and intelligent-device training.
+**Distribution & editions**: VeroRun ships as a family of editions built from a single codebase — standard enterprise package, finance-desktop, research-desktop, minipro, and omni (edition composition driven by `deploy/editions/*.yaml`; published as signed per-tag Release assets). Commercial deployments are licensed per the EULA below.
+
+**Commercial model**: plugin purchases, subscriptions, and commercial licensing are the primary revenue streams; standard enterprise packages assemble plugins on demand, and production commercial deployment requires a valid commercial license.
 
 **Regional routing**: `VERORUN_REGION=cn` → `api.verorun.cn`; `=global` → `api.verorun.com`. All remote services (licensing / heartbeat / daemon) resolve dynamically by region, with single-URL environment-variable override.
 
@@ -430,58 +414,6 @@ VeroRun/
 
 ---
 
-## Codebase Metrics
-
-Measured on the v0.63.0 working copy (2026-10-05) with a `cloc`-style single-pass scan (line counts are the v0.63.0 snapshot; the plugin count in the module table is synced to v0.66.0) that classifies every line of every source file as **code / comment / blank** using language-specific comment syntax. Excluded from the count: build artifacts and vendored third-party code (`__pycache__`, `node_modules`, `backups/`, `data/`, `tmp/`, `outputs/`, `server_backup/`, `_ssh/`, hidden dependency caches such as `.stock_deps/`, minified bundles), and the internal engineering documents under `docs/` (plans, session handoffs, audit reports) — so the numbers reflect first-party product source only.
-
-**Total: 300,787 code lines across 1,874 files** (plus 47,686 comment and 48,550 blank lines). Excluding prompt/documentation formats (Markdown, Text), executable code + markup ≈ **280,200 lines**.
-
-### By Language
-
-| Language | Code | Comment | Blank | Files |
-|---|---:|---:|---:|---:|
-| Python | 167,508 | 42,230 | 35,269 | 945 |
-| HTML (Jinja2 templates / admin pages) | 50,490 | 323 | 3,007 | 233 |
-| Markdown (product READMEs, prompt seeds) | 20,594 | 0 | 6,566 | 222 |
-| YAML (roles, seeds, CI, configs) | 20,438 | 619 | 645 | 137 |
-| JavaScript | 15,574 | 2,024 | 1,512 | 93 |
-| CSS | 11,152 | 648 | 661 | 39 |
-| JSON (plugin manifests, release manifests) | 7,269 | 0 | 60 | 79 |
-| Shell (deploy/ops scripts) | 4,374 | 1,178 | 458 | 17 |
-| SQL (migrations / seeds) | 2,585 | 640 | 335 | 61 |
-| Other (TS/JSX/SVG/Batch/Env/Text) | 803 | 24 | 37 | 48 |
-| **Total** | **300,787** | **47,686** | **48,550** | **1,874** |
-
-### By Module (source languages only)
-
-| Module | Code lines | Share | Role |
-|---|---:|---:|---|
-| `plugins/` | 186,784 | 62.1% | Application layer — 50 plugins (count synced to v0.66.0) |
-| `admin/` | 21,257 | 7.1% | Admin console (8084) |
-| `main_site/` | 15,794 | 5.3% | Platform console (8083) |
-| `plugin_manager/` | 14,815 | 4.9% | Lifecycle / marketplace / licensing |
-| `auth-center/` | 13,723 | 4.6% | Shared auth/models/services/routes |
-| `agent_matrix/` | 12,319 | 4.1% | AI engine: orchestration + UnifiedLLM + PromptResolver |
-| `i18n/` | 9,063 | 3.0% | Internationalization (en, zh-CN) |
-| `deploy/` | 7,297 | 2.4% | Install scripts, systemd, Nginx |
-| `static/` | 4,211 | 1.4% | Front-end assets |
-| `orchestrator/` | 4,014 | 1.3% | DAG workflow engine |
-| `sdks/` + `veroguard/` + `tools/` + `providers/` + `shared/` + rest | ~11,500 | ~3.8% | CLI SDK, guard layer, tooling, providers, shared utils, themes |
-
-Kernel proper (`agent_matrix` + `orchestrator` + `plugin_manager` + `veroguard` + `providers` + `shared`) ≈ **33.4k lines ≈ 11.9%** of executable code — consistent with the "business is declared by plugins" design principle: the application layer dwarfs the kernel.
-
-### Largest Plugins (source lines)
-
-`site_builder` 23,166 · `stock_analysis` 16,897 · `mini_app_builder` 11,052 · `veroscholar` 8,969 · `chatbot` 8,574 · `ai_relay` 8,029 · `analytics` 7,876 · `vault` 7,439 · `health_check` 7,135 · `ali_api` 6,965.
-
-### Analyst Notes
-
-- **Language profile**: Python-dominant (59.8% of executable code) with server-rendered HTML consoles (50.5k lines) — a Flask monolith-plus-plugins architecture rather than an SPA stack; front-end JS is confined to editors (React Flow) and visualization.
-- **Comment density**: Python carries ~17.2% comment lines (docstrings included) — healthy for a 167k-line codebase; the remaining risk is not volume but rationale depth in complex subsystems (VeroGuard, licensing, workflow engine).
-- **Test surface**: in-repo `tests/` suites exist across core and plugins (`shared`, `plugin_manager`, `sdks/cli`, `stock_analysis`, `veroscholar`, `cogevolution_substrate`, `shop`, `subscription`, `iot_hub`), ~30+ unit / API test modules; quality assurance is additionally carried by dated regression/audit reports under `docs/`. Expanding executable CI coverage remains the highest-leverage engineering investment.
-
----
-
 ## Documentation
 
 - `GUIDE.md` — installation & deployment guide
@@ -490,8 +422,8 @@ Kernel proper (`agent_matrix` + `orchestrator` + `plugin_manager` + `veroguard` 
 - `sdks/README.md` — SDK usage
 - `deploy/README.md` — deployment notes
 - `plugins/memory_engine/README.md` — cognitive evolution engine
-- `help/core/` — 用户指南（终端用户手册，00-overview → 99-faq）
-- `docs/plugin-standard-v1.8.md` — 插件开发标准（v1.8，现行规范）
+- `help/core/` — end-user manual (00-overview → 99-faq)
+- `docs/plugin-standard-v1.8.md` — plugin development standard (v1.8, current)
 - `docs/official-api-security-spec.md` — official API security spec (token revocation + command signing)
 - `docs/security-remediation-tracker.md` — copyright-protection audit remediation tracker
 
@@ -516,22 +448,27 @@ VeroRun is distributed under a **source-available proprietary license** per the 
 
 | Repository | Nature | Content | Governing terms |
 |---|---|---|---|
-| `verorun-pro` | Public | Standard enterprise package (general engine, plugins installed on demand via the marketplace) | EULA v1.0 |
 | `verorun-code` | Private | Full source (all plugins, licensing components, and VeroGuard) | Private distribution terms |
-| `verorun-edu` | Public | Education edition (EDU plugin allowlist, education modules only) | EULA v1.0 |
 
 **EULA v1.0 highlights**: visible Python source may be read and modified (for customization and integration); precompiled binaries (.pyd/.so/.dll/executables) may not be decompiled, disassembled, or reverse-engineered; no redistribution, resale, or sublicensing; no use to build competing products; no removal of copyright notices, license keys, or DRM mechanisms; production commercial deployment requires a valid commercial license.
 
 **Consistency with VeroGuard**: VeroGuard's health monitoring, integrity verification, self-protection, and remote-command capabilities are the operational enforcement of EULA §2.2 (no decompiling binaries) and §3 (no removing licensing/DRM mechanisms), guarding the license boundary and commercial assets. The EULA proprietary license makes the asset-protection mechanism legally self-consistent.
 
+### VeroGuard Runtime
+
+Unifies health monitoring, code-integrity verification, and encrypted heartbeat into a single process across 7 core modules (health / integrity / fingerprint / runtime / communicator / executor / self_protect):
+
+| Channel | Interval | Mechanism |
+|---|---|---|
+| Health watchdog | 30s | Service health checks, tiered recovery (restart → rollback), webhook alerts |
+| Integrity verification | 300s | Per-file SHA256 comparison against an encrypted manifest (AES-GCM) |
+| Heartbeat report | 300s | AES-256-GCM + HMAC-SHA256 signing + TLS 1.3, 5-minute anti-replay window |
+
+- **Self-protection**: dual-process (`guardian` monitors business services, `self_protect` monitors the guardian) with pipe / pidfile heartbeat and automatic restart on parent death.
+- **Tiered recovery**: restart → GitHub rollback (`guardian.py --rollback-now` for manual trigger), with a cooldown window to prevent rollback loops.
+- **Daily snapshot**: `verorun-guardian-snapshot.timer` (systemd, daily) snapshots state ahead of rollback.
+- **Signed release chain**: Ed25519-signed release manifests + integrity manifests + official token verification; version-scope downgrade protection (`min/max_version`); build-time `build_id` source watermarks. Release manifests are no longer committed to the repo (`release_manifest.json` / `release_manifest.sig` are gitignored) — they are generated and re-signed at build time by `deploy/scripts/sign_release.py` and published as signed Release assets, so the signing key never enters git history.
+- **CI freshness gate**: `tests.yml` verifies `veroguard/data/manifest.json` matches `VERSION` on every run; a stale manifest fails CI (fix via the "Refresh VeroGuard Manifest" GitHub Actions workflow).
+- **Remote commands** (6): `warn`, `lock_ai`, `lock_full`, `shutdown`, `self_destruct`, `update_config`; destructive commands (`shutdown` / `self_destruct`) additionally require a local ops-token confirmation.
+
 Copyright (c) 2024-2026 VeroRun AI. All rights reserved. See [LICENSE](LICENSE) for details.
-
----
-
-## Local Development Tools
-
-### Local Development Tool (not versioned)
-
-- `tools/dev_insight/` is a **local-only** developer tool that analyzes the VeroRun architecture (system core + business plugins) and emits JSON / Markdown / HTML reports plus a token-friendly `AI_CONTEXT.md` for AI assistants.
-- It is **excluded from Git** via `.git/info/exclude`; do **not** commit it or its `out/` output.
-- Usage: `python tools/dev_insight/insight.py`

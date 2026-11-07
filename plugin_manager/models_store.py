@@ -100,7 +100,7 @@ CREATE TABLE IF NOT EXISTS store_plugins (
                     CHECK(price_interval IN ('onetime','month','year')),
     price_quarter_fen BIGINT DEFAULT 0,             -- 季价（分，订阅插件三档价之一）
     price_year_fen    BIGINT DEFAULT 0,             -- 年价（分，订阅插件三档价之一）
-    compatible_editions TEXT DEFAULT '[]',          -- JSON array：适用版本（pro/standard/edge...）
+    compatible_editions TEXT DEFAULT '[]',          -- JSON array：适用版本（canonical ID，见 shared/edition.py）
     trial_days      BIGINT DEFAULT 0,               -- 试用天数
     download_url    TEXT DEFAULT '',                 -- 下载地址
     package_hash    TEXT DEFAULT '',                 -- 包签名哈希
@@ -414,8 +414,8 @@ CREATE INDEX IF NOT EXISTS idx_plugin_dist_rules_hidden ON plugin_distribution_r
 CREATE TABLE IF NOT EXISTS edition_catalog (
     id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     edition         TEXT NOT NULL UNIQUE,            -- 发行版唯一 ID（分流判定唯一依据）：
-                                                    --   enterprise / standard / pro /
-                                                    --   finance / research / minipro / edge
+                                                    --   enterprise / standard / tarka /
+                                                    --   finance / research / minipro
     label           TEXT NOT NULL DEFAULT '',        -- i18n 键（如 Edition Enterprise）
     form_factor     TEXT NOT NULL DEFAULT '',        -- desktop | web | edge
     enabled         BIGINT NOT NULL DEFAULT 1,
@@ -619,11 +619,9 @@ _EDITION_CATALOG_SEED = (
     ('enterprise', 'Edition Enterprise',   'web',     ()),
     ('standard',   'Edition Standard',     'web',     ()),
     ('tarka',      'Edition Tarka',        'web',     ()),
-    ('pro',        'Edition Professional', 'web',     ()),
     ('finance',    'Edition Finance',      'desktop', ()),
     ('research',   'Edition Research',     'desktop', ()),
     ('minipro',    'Edition Mini Program', 'web',     ()),
-    ('edge',       'Edition Edge',         'edge',    ()),
 )
 
 

@@ -46,22 +46,9 @@ DEFAULT_PRICING_RULES: Dict[str, Any] = {
         'price_fen': 1,              # free_or_penny 模式：父订阅后配件价（1 分 = 0.01 元；0 = 免费）
         'fixed_percent': 0.1,        # fixed_percent 模式：配件价 = 父价 × 该比例
     },
-    'bundles': {
-        'pro': {
-            'display_name': 'VeroRun Pro',
-            # 包内插件清单（13 个内置订阅插件）；随版本定义调整
-            'plugins': [
-                'site_builder', 'analytics', 'visitor_profile', 'vault',
-                'health_check', 'oauth_config', 'email', 'site_domains',
-                'im_gateway', 'sms', 'captcha_embedded', 'chatbot',
-                'memory_engine',
-            ],
-            # Pro 包包含 site_domains 20 域名权益（已确认），包价已覆盖该项
-            'include_site_domains_20': True,
-            'discount': 0.5,          # 包价 = Σ(包内单品月价) × 折扣
-            'anchor': None,           # 可选锚定：最贵单品 × anchor（优先级高于 discount）
-        },
-    },
+    # 版本包（2026-11-07 用户裁决：Pro 版已下架，版本包定价一并移除）。
+    # 机制保留：如需重启版本包销售，在此登记新包键即可（compute_bundle_price 按本表查配置）。
+    'bundles': {},
 }
 
 _PRICING_RULES_URL = os.environ.get(
@@ -203,7 +190,7 @@ def compute_bundle_price(bundle_id: str, plugin_month_prices: Dict[str, int],
     """计算版本包三档价与对比信息。
 
     Args:
-        bundle_id: 版本包标识（如 'pro'）
+        bundle_id: 版本包标识（须存在于 rules['bundles']，不存在时抛 ValueError）
         plugin_month_prices: {插件 identifier: 月价(分)}，仅需包内插件
         rules: 定价规则
 

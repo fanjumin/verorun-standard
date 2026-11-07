@@ -900,30 +900,6 @@ def list_knowledge():
             
             rows = db.execute(query, params).fetchall()
 
-            # 科研版密级过滤（仅 edu 生效；非 edu 行为不变）
-            if os.getenv('DEPLOY_TYPE', '').strip().lower() == 'edu' and rows:
-                from services.kb_permission import check_confidentiality
-                role = payload.get('role', 'user')
-                user_id = payload.get('user_id')
-                # 批量查询项目成员角色（避免逐行查询）
-                project_ids = {str(r['project_id']) for r in rows if r.get('project_id')}
-                memberships = {}
-                if project_ids:
-                    try:
-                        phs = ','.join(['%s'] * len(project_ids))
-                        ms = db.execute(
-                            f'SELECT project_id, role FROM project_workspace.project_members '
-                            f'WHERE user_id=%s AND project_id IN ({phs})',
-                            [str(user_id)] + sorted(project_ids)).fetchall()
-                        memberships = {str(m['project_id']): m['role'] for m in ms}
-                    except Exception:
-                        memberships = {}
-                rows = [r for r in rows
-                        if r.get('scope') == 'user' and str(r.get('owner_id')) == str(user_id)
-                        or role == 'super_admin'
-                        or check_confidentiality(r.get('confidentiality') or 'internal',
-                                                 role, memberships.get(str(r.get('project_id')), ''))]
-            
             # 获取总数
             count_query = "SELECT COUNT(*) as total FROM knowledge_blocks WHERE deleted_at IS NULL"
             count_params = []

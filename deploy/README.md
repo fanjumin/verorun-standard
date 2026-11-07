@@ -14,7 +14,6 @@
 - [Post-Install Configuration](#post-install-configuration)
 - [Troubleshooting](#troubleshooting)
 - [Manual Step-by-Step Installation](#manual-step-by-step-installation)
-- [Educational Edition（教育版）](#educational-edition教育版)
 - [Release Signing（发布签名）](#release-signing发布签名)
 
 ---
@@ -91,13 +90,12 @@ curl -fsSL https://raw.githubusercontent.com/fanjumin/verorun-pro/master/deploy/
 | `website` | production | Domain + HTTPS, public deployment | `install.sh` |
 | `professional` | lan | No domain, LAN access, verorun-pro | `install-local.sh` |
 | `development` | dev | No plugins, verorun-code (SSH), requires deploy key | `install-dev.sh` |
-| `educational` | edu | No domain, edu license required | (new) |
 
 > `install-code.sh` is preserved as an independent shortcut for Team (code) deployments (full plugins).
 
 **中国内地网络提示：** `install.sh` 默认 `GIT_REPO=https://github.com/fanjumin/verorun-pro.git`
 （HTTPS 公开仓，浅克隆 `--depth 1`）；仅 `development`（SSH `git@github.com:fanjumin/verorun-code.git`）
-与 `educational`（HTTPS verorun-edu）类型切换仓库。内地服务器直连 GitHub 传输易中途被掐断
+会切换仓库。内地服务器直连 GitHub 传输易中途被掐断
 （`fetch-pack: unexpected disconnect`）——HTTPS 克隆会自动回退到
 ghfast.top / ghproxy.net 镜像；也可改用 gitee 源
 （`GIT_REPO=git@gitee.com:fanjumin/verorun-code.git`，需配置 deploy key）、本地 bundle
@@ -105,41 +103,6 @@ ghfast.top / ghproxy.net 镜像；也可改用 gitee 源
 「中国内地网络：安装克隆 GitHub 失败」小节。另请确保部署脚本为 2026-08-27 之后版本
 （旧版克隆参数为 60s × 2 次，新版默认 120s × 3 次并含多项修复）。
 
-
-### Educational Edition（教育版）
-
-```bash
-# One-command edu install (no domain, edu license code required)
-curl -fsSL https://raw.githubusercontent.com/fanjumin/verorun-edu/master/deploy/install.sh | sudo env INSTALL_TYPE=educational bash
-```
-
-> **部署码（EDU_CODE）：** 有真实终端（TTY）时会交互式提示输入部署码（ED-XXXX）。
-> **无 TTY（CI / 纯管道）时必须显式传 `EDU_CODE`**，否则脚本尝试从 `/dev/tty` 读取会失败退出：
->
-> ```bash
-> curl -fsSL https://raw.githubusercontent.com/fanjumin/verorun-edu/master/deploy/install.sh \
->   | sudo env INSTALL_TYPE=educational EDU_CODE=ED-XXXX bash
-> ```
-> 测试部署码 `TEST-DEV-0001` / `EDU-TEST-0001` 仅放行开发/测试环境，不用于生产。
-
-> **common.sh 同步依赖（audit F-02）：** 教育版一键安装从 `verorun-edu` 拉取
-> `deploy/lib/common.sh`，其校验哈希 `EDU_COMMON_SHA256` 与 `verorun-pro` 的
-> `COMMON_SHA256` **默认 pin 同一值**。两仓库的 common.sh 内容由
-> `sync-to-pro.yml` / `sync-to-edu.yml`（`git archive` 按 tag 导出）自动保持同步；
-> 若不同步，教育版一键安装会因哈希不匹配而**校验失败中止**。
->
-> 如需独立 pin（例如 edu 仓库 fork 出不同内容），用环境变量覆盖：
->
-> ```bash
-> # 实际哈希可用 sha256sum deploy/lib/common.sh 计算（LF 归一化）
-> curl -fsSL https://raw.githubusercontent.com/fanjumin/verorun-edu/master/deploy/install.sh \
->   | sudo env INSTALL_TYPE=educational EDU_COMMON_SHA256=<64-hex> bash
-> ```
->
-> **许可端点（audit F5）：** 校验前脚本会对许可端点做一次可达性预检。默认端点按
-> `REGION` 选择：`cn` → `https://api.verorun.cn`，其余 → `https://api.verorun.com`。
-> 离网/内网部署可用 `EDU_LICENSE_ENDPOINT` 环境变量覆盖为内网 license 服务地址；
-> 端点不可达时会先打印 `[WARN]` 提示（而非运行期静默失败）。
 
 **Alternatively — clone then run locally:**
 
@@ -705,13 +668,13 @@ sudo nginx -t && sudo systemctl restart nginx
 # 在仓库根目录运行（幂等）
 python3 deploy/scripts/sign_release.py
 
-# CI 门禁：校验全部 pin（含 EDU_COMMON_SHA256）是否与当前 common.sh 一致，不一致则退出码非 0
+# CI 门禁：校验全部 pin 是否与当前 common.sh 一致，不一致则退出码非 0
 python3 deploy/scripts/sign_release.py --check
 ```
 
 - 哈希按 **LF 归一化**计算（匹配 GitHub raw 内容；Windows CRLF 检出不影响）。
-- `install.sh` 内含两个 pin：`COMMON_SHA256`（verorun-pro）与 `EDU_COMMON_SHA256`（verorun-edu），
-  均由 `sign_release.py` 回填同一值（两仓库 common.sh 内容需同步）。
+- `install.sh` / `install-code.sh` / `install-official.sh` 各含一个 `_COMMON_SHA256` pin，
+  均由 `sign_release.py` 回填同一值。
 - `.github/workflows/tests.yml` 已接入 `sign_release.py --check` 作为发布质量门禁：
   若 common.sh 被修改但未回填，CI 直接失败。
 
