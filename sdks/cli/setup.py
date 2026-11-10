@@ -7,7 +7,7 @@ import os
 
 from setuptools import setup, find_packages
 
-_PACKAGED_FALLBACK = "0.67.5"
+_PACKAGED_FALLBACK = "0.67.6"
 
 
 def _read_repo_version() -> str:

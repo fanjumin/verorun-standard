@@ -9,7 +9,6 @@ window.l_ai_hub = function() {
   var mc = document.getElementById("mc");
   var tabs = [
     { id: "providers", label: "{{ _('Providers') }}",   icon: "🔑" },
-    { id: "keys",      label: "{{ _('Provider Keys') }}", icon: "🔐" },
     { id: "models",    label: "{{ _('Model Mgmt') }}",    icon: "🔧" },
     { id: "matrix",    label: "{{ _('Role Settings') }}", icon: "🤖" },
     { id: "prompts",   label: "{{ _('Prompts') }}",       icon: "📝" },
@@ -43,6 +42,11 @@ window.l_ai_hub = function() {
 
 // Tab 切换函数
 window.aiHubSwitchTab = function(tabId) {
+  // 2026-11-10：「供应商密钥」并入「供应商」页（密钥随供应商行内展开），
+  // case 'keys' 仅为旧链接/书签兼容保留，不再出现在 Tab 栏。
+  if (tabId === 'keys') {
+    if (window.l_ai_providers) { tabId = 'providers'; }
+  }
   // 更新 Tab 激活状态
   var allTabs = document.querySelectorAll('.ai-tab');
   for (var i = 0; i < allTabs.length; i++) {

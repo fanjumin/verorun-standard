@@ -32,12 +32,18 @@ window.l_ai_providers=function(targetId){
     return null;
   }
 
-  window.aipGoKeys=function(){
-    if(document.querySelector('.ai-tab[data-tab="keys"]') && window.aiHubSwitchTab){
-      aiHubSwitchTab('keys'); return;
+  // 2026-11-10：「供应商密钥」独立 Tab 已并入本页，密钥在供应商行下方就地展开
+  window.aipToggleKeys=function(slug,pid){
+    var tr=document.getElementById('aip-krow-'+pid);
+    var host=document.getElementById('aip-khost-'+pid);
+    if(!tr||!host)return;
+    var open=tr.style.display!=='none';
+    tr.style.display=open?'none':'';
+    if(open)return;
+    if(!host.getAttribute('data-loaded')){
+      host.setAttribute('data-loaded','1');
+      if(window.l_provider_keys)window.l_provider_keys('aip-khost-'+pid,slug);
     }
-    if(window.l_ai_hub){ l_ai_hub(); if(window.aiHubSwitchTab) aiHubSwitchTab('keys'); }
-    else if(window.l_provider_keys){ l_provider_keys('mc'); }
   };
 
   function renderList(){
@@ -62,13 +68,16 @@ window.l_ai_providers=function(targetId){
         h+='<td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+escAttr(p.endpoint_url||'')+'">'+esc(p.endpoint_url||'—')+'</td>';
         h+='<td>'+cnt+'</td>';
         var kk=keyOf(p.slug);
-        h+='<td>'+(kk&&kk.has_value?'<span class="bdg on" title="'+escAttr(kk.key_preview||'')+'">{{ _('Configured') }}</span>':'<span class="bdg off">{{ _('Not Set') }}</span>')+'</td>';
+        var kn=_keys.filter(function(x){return x.provider===p.slug}).length;
+        h+='<td>'+(kk&&kk.has_value?'<span class="bdg on" title="'+escAttr(kk.key_preview||'')+'">{{ _('Configured') }}'+(kn>1?' ×'+kn:'')+'</span>':'<span class="bdg off">{{ _('Not Set') }}</span>')+'</td>';
         h+='<td>'+(p.is_active?'<span class="bdg on">{{ _('Enabled') }}</span>':'<span class="bdg off">{{ _('Disable') }}</span>')+'</td>';
-        h+='<td><button class="bo" style="padding:2px 10px;font-size:11px;cursor:pointer" onclick="aipGoKeys()">{{ _('Provider Keys') }}</button> ';
+        h+='<td><button class="bo" style="padding:2px 10px;font-size:11px;cursor:pointer" onclick="aipToggleKeys(\''+escAttr(p.slug)+'\','+p.id+')">{{ _('Provider Keys') }} ▾</button> ';
         h+='<button class="bo" style="padding:2px 10px;font-size:11px;cursor:pointer" onclick="aiHubSyncProvider(\''+escAttr(p.slug)+'\')">{{ _('Fetch models') }}</button> ';
         h+='<button class="bo" style="padding:2px 10px;font-size:11px;cursor:pointer" onclick="aipShowForm('+p.id+')">{{ _('Edit') }}</button> ';
         h+='<button class="bo" style="padding:2px 10px;font-size:11px;color:var(--rose);cursor:pointer" onclick="aipDelete('+p.id+')">{{ _('Delete') }}</button></td>';
         h+='</tr>';
+        // 密钥展开行（默认折叠，点「供应商密钥 ▾」就地渲染该供应商的密钥池）
+        h+='<tr id="aip-krow-'+p.id+'" style="display:none"><td colspan="8" style="padding:0"><div id="aip-khost-'+p.id+'"></div></td></tr>';
       });
       h+='</tbody></table>';
     }

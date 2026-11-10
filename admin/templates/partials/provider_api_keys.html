@@ -1,4 +1,7 @@
-window.l_provider_keys=function(targetId){
+window.l_provider_keys=function(targetId, providerFilter){
+  // providerFilter：2026-11-10 新增。传入供应商 slug 时只渲染该供应商的密钥，
+  // 供「供应商」页行内展开复用（「供应商密钥」独立 Tab 已并入供应商页）。
+  var _pf = providerFilter || '';
   if(!targetId) document.getElementById("pt").textContent="{{ _('Provider Keys') }}";
   var target=document.getElementById(targetId||"mc");
   render();
@@ -9,14 +12,16 @@ window.l_provider_keys=function(targetId){
       .then(function(r){return r.json()})
       .then(function(d){
         if(!d.success){target.innerHTML='<div class="em">{{ _('Load failed') }}</div>';return}
-        renderList(d.data||[]);
+        var _all=d.data||[];
+        if(_pf) _all=_all.filter(function(k){return k.provider===_pf});
+        renderList(_all);
       }).catch(function(){target.innerHTML='<div class="em">{{ _('Load failed') }} — <a href="javascript:l_provider_keys()">{{ _('Retry') }}</a></div>'});
   }
 
   function renderList(keys){
     var h='<div class="cd">';
     h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">';
-    h+='<h3 style="margin:0;font-size:16px;color:var(--accent)">{{ _('Provider Keys') }}</h3>';
+    h+='<h3 style="margin:0;font-size:16px;color:var(--accent)">{{ _('Provider Keys') }}'+( _pf?' <code style="font-size:12px;color:var(--accent2)">'+esc(_pf)+'</code>':'')+'</h3>';
     h+='<span style="flex:1"></span>';
     h+='<button class="bp" onclick="showForm()" style="padding:6px 16px;font-size:13px;cursor:pointer">+ {{ _('Add') }}</button>';
     h+='</div>';
@@ -43,7 +48,7 @@ window.l_provider_keys=function(targetId){
       h+='</tbody></table>';
     }
     h+='</div>';
-    if(targetId) h = '<div class="ai-hub-subtitle">{{ _('AI Hub') }} <span style="color:var(--dim)">&rsaquo;</span> {{ _('Provider Keys') }}</div>' + h;
+    if(targetId && !_pf) h = '<div class="ai-hub-subtitle">{{ _('AI Hub') }} <span style="color:var(--dim)">&rsaquo;</span> {{ _('Provider Keys') }}</div>' + h;
     target.innerHTML=h;
   }
 
@@ -104,6 +109,8 @@ h+='</div>';
           if(skip.indexOf(p.slug)>=0)return;
           sel.innerHTML+='<option value="'+escAttr(p.slug)+'"'+(isEdit&&key.provider===p.slug?' selected':'')+'>'+esc(p.name)+' ('+esc(p.slug)+')</option>';
         });
+        // 行内展开模式下新建密钥：默认预选当前供应商
+        if(!isEdit && _pf && skip.indexOf(_pf)<0) sel.value=_pf;
       }).catch(function(){
         var sel=document.getElementById('pk-provider');
         sel.innerHTML='<option>{{ _('Load failed') }}</option>';

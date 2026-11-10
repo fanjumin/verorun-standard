@@ -519,6 +519,20 @@ def index():
     return redirect(f'{site_url}/login?redirect=' + quote(request.url))
 
 
+@app.route('/favicon.ico')
+def favicon_ico():
+    """站点根 /favicon.ico（浏览器默认请求路径，此前 404）——
+    优先跳转系统品牌配置的 favicon，缺省回落静态 PNG。"""
+    try:
+        _b = get_brand_settings() or {}
+        _u = (_b.get('favicon_url') or '').strip()
+        if _u:
+            return redirect(_u)
+    except Exception:
+        pass
+    return redirect('/static/favicon-32x32.png')
+
+
 @app.route('/robots.txt')
 def robots_txt():
     """站点根 robots.txt（此前缺失，返回 404 且无 Sitemap 指引）"""

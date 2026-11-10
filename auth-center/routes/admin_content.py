@@ -201,12 +201,13 @@ def _save_brand_image(subdir, file_key):
     os.makedirs(admin_dir, exist_ok=True)
     with open(os.path.join(admin_dir, fname), 'wb') as f:
         f.write(data)
-    # Sync to all other services that might serve brand images
-    for svc in ('platform',):
-        svc_dir = os.path.join(base, svc, 'static', 'brand')
-        os.makedirs(svc_dir, exist_ok=True)
-        with open(os.path.join(svc_dir, fname), 'wb') as f:
-            f.write(data)
+    # Sync 到真正被 /static/brand 路由读取的位置（仓库根 static/brand）。
+    # 原先只写 platform/static/brand（该服务已下线）→ admin 域名的
+    # /static/brand/<file> 恒 404（admin/app.py 的 BRAND_STATIC 指向根 static）。
+    shared_dir = os.path.join(base, 'static', 'brand')
+    os.makedirs(shared_dir, exist_ok=True)
+    with open(os.path.join(shared_dir, fname), 'wb') as f:
+        f.write(data)
     return f'/static/brand/{fname}', None
 
 
