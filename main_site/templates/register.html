@@ -267,6 +267,14 @@
     </div>
   </div>
   <div class="rf">
+    <label class="rf-label" for="regEmailPwdConfirm">{{ _('Confirm Password') }}</label>
+    <div class="rf-pwd-row">
+      <input autocomplete="new-password" class="rf-in" id="regEmailPwdConfirm" oninput="checkEmailPwdMatch()" placeholder="{{ _('Re-enter password') }}" style="border-top-right-radius:0;border-bottom-right-radius:0;padding-left:14px" type="password"/>
+      <button class="rf-pwd-eye" id="regEmailPwdConfirmEye" onclick="toggleRegEmailPwdConfirm()" title="{{ _('Show/Hide Password') }}" type="button">👁</button>
+    </div>
+    <div class="rf-msg" id="regEmailPwdConfirmMsg"></div>
+  </div>
+  <div class="rf">
     <label class="rf-label" for="regEmailUsername">{{ _('Username') }}</label>
     <div class="rf-wrap">
       <span class="rf-icon">@</span>
@@ -602,6 +610,22 @@ function toggleRegEmailPwd() {
   el.type = el.type === 'password' ? 'text' : 'password';
 }
 
+function toggleRegEmailPwdConfirm() {
+  const el = document.getElementById('regEmailPwdConfirm');
+  el.type = el.type === 'password' ? 'text' : 'password';
+}
+
+function checkEmailPwdMatch() {
+  const pw = document.getElementById('regEmailPwd').value;
+  const cp = document.getElementById('regEmailPwdConfirm').value;
+  if (!cp) { hideMsg('regEmailPwdConfirmMsg'); return; }
+  if (pw !== cp) {
+    showMsg('regEmailPwdConfirmMsg', _('Passwords do not match'), 'error');
+  } else {
+    hideMsg('regEmailPwdConfirmMsg');
+  }
+}
+
 /* ── Email: password strength meter (reuse evalPwdStrength with email-prefixed IDs) ── */
 function evalEmailPwdStrength(pw) {
   // Mirror of evalPwdStrength but targeting email-prefixed element IDs
@@ -685,6 +709,8 @@ async function submitEmailRegistration() {
   }
   if (!code) { showToast('error', _('Please enter verification code')); return; }
   if (!pw || pw.length < 10) { showToast('error', _('Please set a valid password')); return; }
+  const pw2 = document.getElementById('regEmailPwdConfirm').value || '';
+  if (pw2 !== pw) { showToast('error', _('Passwords do not match')); return; }
   if (!username) { showToast('error', _('Please enter username')); return; }
   if (!emailUsernameAvailable) {
     showToast('error', _('Please confirm username availability'));

@@ -11,6 +11,7 @@ DB config keys (priority):
     aliyun_sms_secret
     aliyun_sms_sign_name
 """
+import json
 import os
 from .base import BaseSMSProvider
 
@@ -33,10 +34,37 @@ class AliyunSMSProvider(BaseSMSProvider):
     def __init__(self):
         self._cfg = None
 
+    @staticmethod
+    def _load_plugin_config():
+        """Read plugin_registry.config for the SMS plugin.
+
+        The admin SMS settings page persists credentials via
+        PluginManager.set_config_batch('sms', ...), i.e. plugin_registry.config.
+        The provider historically read only system_config, so UI-saved
+        credentials were silently ignored. Read plugin config first, then
+        fall back to system_config / environment.
+        """
+        try:
+            from plugin_manager.models import get_registry_db
+            with get_registry_db() as conn:
+                row = conn.execute(
+                    "SELECT config FROM plugin_registry WHERE identifier='sms'"
+                ).fetchone()
+            if row and row.get('config'):
+                data = json.loads(row['config'])
+                return data if isinstance(data, dict) else {}
+        except Exception:
+            pass
+        return {}
+
     def _load_config(self):
         if self._cfg is not None:
             return self._cfg
         cfg = {'access_key': '', 'secret': '', 'sign_name': ''}
+        plugin_cfg = self._load_plugin_config()
+        cfg['access_key'] = str(plugin_cfg.get('aliyun_sms_access_key') or '')
+        cfg['secret'] = str(plugin_cfg.get('aliyun_sms_secret') or '')
+        cfg['sign_name'] = str(plugin_cfg.get('aliyun_sms_sign_name') or '')
         try:
             from models import get_db
             with get_db() as conn:
@@ -44,11 +72,11 @@ class AliyunSMSProvider(BaseSMSProvider):
                     "SELECT key, value FROM system_config WHERE key IN "
                     "('aliyun_sms_access_key','aliyun_sms_secret','aliyun_sms_sign_name')"
                 ).fetchall():
-                    if row['key'] == 'aliyun_sms_access_key':
+                    if row['key'] == 'aliyun_sms_access_key' and not cfg['access_key']:
                         cfg['access_key'] = row['value']
-                    elif row['key'] == 'aliyun_sms_secret':
+                    elif row['key'] == 'aliyun_sms_secret' and not cfg['secret']:
                         cfg['secret'] = row['value']
-                    elif row['key'] == 'aliyun_sms_sign_name':
+                    elif row['key'] == 'aliyun_sms_sign_name' and not cfg['sign_name']:
                         cfg['sign_name'] = row['value']
         except Exception:
             pass

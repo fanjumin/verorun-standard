@@ -141,7 +141,11 @@ h+='</div>';
       if(!r.ok)throw new Error('HTTP '+r.status);
       return r.json().catch(function(){throw new Error('Invalid response');});
     }).then(function(d){
-      if(d.success){closeModal();render();showToast('{{ _('Saved') }}','success')}
+      if(d.success){
+        closeModal();render();showToast('{{ _('Saved') }}','success');
+        // 人性化接线：密钥保存成功后立即拉取该供应商的模型目录，有差异时引导到审核页。
+        if(keyVal && window.aiHubSyncProvider){ window.aiHubSyncProvider(data.provider); }
+      }
       else{showToast(d.error||'{{ _('Operation failed') }}','error');throw null}
     }).catch(function(e){
       if(e)showToast('{{ _('Save failed') }}: '+e.message,'error');

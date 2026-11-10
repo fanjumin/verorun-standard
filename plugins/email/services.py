@@ -641,7 +641,9 @@ def fetch_inbox(page=1, per_page=20, keyword=''):
     """
     cfg_err = mail_config_error()
     if cfg_err:
-        return {"error": cfg_err, "items": [], "total": 0}
+        # needs_config 标记：routes 层据此返回 422 NEEDS_CONFIG（缺配置≠故障，
+        # 壳层拦截器抑制「网关异常」红字，改走配置引导；2026-11-10）
+        return {"error": cfg_err, "needs_config": True, "items": [], "total": 0}
     try:
         imap = _connect_imap()
     except Exception as e:
@@ -704,6 +706,11 @@ def _fetch_one_inbox(imap, uid):
 
 
 def read_email(uid):
+    # 前置判空与 fetch_inbox 对齐：未配置时 _connect_imap 会拿空凭据去 login，
+    # 服务器回 BAD invalid command，用户看到的是玄学报错而非「去配置」。
+    cfg_err = mail_config_error()
+    if cfg_err:
+        return {"error": cfg_err, "needs_config": True}
     try:
         imap = _connect_imap()
     except Exception as e:
@@ -1033,7 +1040,7 @@ def list_folders():
     """列出邮箱文件夹（IMAP LIST）；失败返回 {"error", "folders": []}。"""
     cfg_err = mail_config_error()
     if cfg_err:
-        return {"error": cfg_err, "folders": []}
+        return {"error": cfg_err, "needs_config": True, "folders": []}
     try:
         imap = _connect_imap()
     except Exception as e:

@@ -311,8 +311,8 @@ def sms_login():
             user = {'id': user_id, 'phone': phone}
         conn.commit()
     # user may be sqlite3.Row or dict
-    is_admin_val = user['is_admin'] if isinstance(user, dict) else (user['is_admin'] if 'is_admin' in user.keys() else 0)
-    nickname_val = user.get('display_name', '') if isinstance(user, dict) else (user['display_name'] if user['display_name'] else '')
+    is_admin_val = user.get('is_admin', 0) if isinstance(user, dict) else (user['is_admin'] if 'is_admin' in user.keys() else 0)
+    nickname_val = (user.get('display_name') or '') if isinstance(user, dict) else (user['display_name'] if user['display_name'] else '')
     # Inject role for admin users
     role = 'user'
     if is_admin_val:

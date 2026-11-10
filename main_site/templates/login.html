@@ -9,8 +9,23 @@
 <link rel="stylesheet" href="/static/css/landing.css">
 <link rel="stylesheet" href="/static/puzzle-captcha.css">
 <link rel="stylesheet" href="/static/css/login.css">
+<link rel="stylesheet" href="/static/css/tarka-unified.css?v=20261108g"/>
+<style>
+/* 2026-11-10 登录页居中简化：隐藏左侧套餐栏，登录卡片水平居中 */
+.login-split{display:flex!important;justify-content:center!important;align-items:center!important;gap:0!important;padding:0!important}
+.login-left{display:none!important}
+.login-right{flex:0 1 100%!important;max-width:460px!important;width:100%!important;display:flex!important;justify-content:center!important;align-items:center!important}
+.login-right .login-card{margin:0 auto!important;width:100%!important}
+.login-container{display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important}
+/* 无障碍：跳转锚点 + 视觉隐藏（仅屏幕阅读器可读） */
+.skip-link{position:absolute;left:-9999px;top:0;z-index:9999;padding:10px 16px;background:#111;color:#fff;border-radius:0 0 6px 0;font-size:14px;text-decoration:none}
+.skip-link:focus{left:0}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+</style>
 </head>
 <body>
+<a class="skip-link" href="#loginForms">{{ _('Skip to login form') }}</a>
+<h1 class="sr-only">{{ _('Log In / Register') }}</h1>
 <div class="login-page">
 
 <div class="login-bg"></div>

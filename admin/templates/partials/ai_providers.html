@@ -1,26 +1,44 @@
 // ============================================================
 // AI Hub · 供应商维护（Demo 模块①）
-// 录入内容仅限：名称、标识(slug)、描述、调用端点地址、启用状态。
-// 端点是供应商级唯一配置，模型不再各自填写端点；本页不含任何密钥字段。
+// 录入内容：名称、标识(slug)、描述、调用端点地址、启用状态。
+// 端点是供应商级唯一配置，模型不再各自填写端点。
+// 人性化接线：本页展示密钥配置状态，并支持一键拉取模型 / 跳转密钥页。
 // ============================================================
 
 window.l_ai_providers=function(targetId){
   if(!targetId) document.getElementById("pt").textContent="{{ _('Providers') }}";
   var _target=document.getElementById(targetId||"mc");
   var _data=null;
+  var _keys=[];
 
   render();
 
   function render(){
     _target.innerHTML='<div class="lo"><div class="s"></div>{{ _('Loading...') }}</div>';
-    fetch("/admin/providers",{headers:{"Authorization":"Bearer "+T}})
-      .then(function(r){return r.json()})
-      .then(function(d){
-        if(!d.success){_target.innerHTML='<div class="em">{{ _('Load failed') }} — <a href="javascript:l_ai_providers(\''+(targetId||'')+'\')">{{ _('Retry') }}</a></div>';return}
-        _data=d.data||[];
-        renderList();
-      }).catch(function(){_target.innerHTML='<div class="em">{{ _('Load failed') }} — <a href="javascript:l_ai_providers(\''+(targetId||'')+'\')">{{ _('Retry') }}</a></div>'});
+    var p1=fetch("/admin/providers",{headers:{"Authorization":"Bearer "+T}}).then(function(r){return r.json()});
+    var p2=fetch("/admin/provider-api-keys",{headers:{"Authorization":"Bearer "+T}})
+      .then(function(r){return r.json()}).catch(function(){return {success:false,data:[]}});
+    Promise.all([p1,p2]).then(function(res){
+      var d=res[0]||{}, kd=res[1]||{};
+      if(!d.success){_target.innerHTML='<div class="em">{{ _('Load failed') }} — <a href="javascript:l_ai_providers(\''+(targetId||'')+'\')">{{ _('Retry') }}</a></div>';return}
+      _data=d.data||[];
+      _keys=kd.success?(kd.data||[]):[];
+      renderList();
+    }).catch(function(){_target.innerHTML='<div class="em">{{ _('Load failed') }} — <a href="javascript:l_ai_providers(\''+(targetId||'')+'\')">{{ _('Retry') }}</a></div>'});
   }
+
+  function keyOf(slug){
+    for(var i=0;i<_keys.length;i++){ if(_keys[i].provider===slug) return _keys[i]; }
+    return null;
+  }
+
+  window.aipGoKeys=function(){
+    if(document.querySelector('.ai-tab[data-tab="keys"]') && window.aiHubSwitchTab){
+      aiHubSwitchTab('keys'); return;
+    }
+    if(window.l_ai_hub){ l_ai_hub(); if(window.aiHubSwitchTab) aiHubSwitchTab('keys'); }
+    else if(window.l_provider_keys){ l_provider_keys('mc'); }
+  };
 
   function renderList(){
     var h='<div class="cd">';
@@ -33,7 +51,7 @@ window.l_ai_providers=function(targetId){
       h+='<div class="em">{{ _('No provider API keys configured. Click "Add" to create one.') }}</div>';
     }else{
       h+='<table class="dt"><thead><tr>';
-      h+='<th>{{ _('Name') }}</th><th>{{ _('Slug') }}</th><th>{{ _('Description') }}</th><th>{{ _('API Endpoint') }}</th><th>{{ _('Models') }}</th><th>{{ _('Status') }}</th><th>{{ _('Actions') }}</th>';
+      h+='<th>{{ _('Name') }}</th><th>{{ _('Slug') }}</th><th>{{ _('Description') }}</th><th>{{ _('API Endpoint') }}</th><th>{{ _('Models') }}</th><th>{{ _('Has Key') }}</th><th>{{ _('Status') }}</th><th>{{ _('Actions') }}</th>';
       h+='</tr></thead><tbody>';
       _data.forEach(function(p){
         var cnt=(p.models||[]).length;
@@ -43,8 +61,12 @@ window.l_ai_providers=function(targetId){
         h+='<td style="color:var(--dim)">'+esc(p.description||'')+'</td>';
         h+='<td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+escAttr(p.endpoint_url||'')+'">'+esc(p.endpoint_url||'—')+'</td>';
         h+='<td>'+cnt+'</td>';
+        var kk=keyOf(p.slug);
+        h+='<td>'+(kk&&kk.has_value?'<span class="bdg on" title="'+escAttr(kk.key_preview||'')+'">{{ _('Configured') }}</span>':'<span class="bdg off">{{ _('Not Set') }}</span>')+'</td>';
         h+='<td>'+(p.is_active?'<span class="bdg on">{{ _('Enabled') }}</span>':'<span class="bdg off">{{ _('Disable') }}</span>')+'</td>';
-        h+='<td><button class="bo" style="padding:2px 10px;font-size:11px;cursor:pointer" onclick="aipShowForm('+p.id+')">{{ _('Edit') }}</button> ';
+        h+='<td><button class="bo" style="padding:2px 10px;font-size:11px;cursor:pointer" onclick="aipGoKeys()">{{ _('Provider Keys') }}</button> ';
+        h+='<button class="bo" style="padding:2px 10px;font-size:11px;cursor:pointer" onclick="aiHubSyncProvider(\''+escAttr(p.slug)+'\')">{{ _('Fetch models') }}</button> ';
+        h+='<button class="bo" style="padding:2px 10px;font-size:11px;cursor:pointer" onclick="aipShowForm('+p.id+')">{{ _('Edit') }}</button> ';
         h+='<button class="bo" style="padding:2px 10px;font-size:11px;color:var(--rose);cursor:pointer" onclick="aipDelete('+p.id+')">{{ _('Delete') }}</button></td>';
         h+='</tr>';
       });

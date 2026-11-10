@@ -519,6 +519,38 @@ def index():
     return redirect(f'{site_url}/login?redirect=' + quote(request.url))
 
 
+@app.route('/robots.txt')
+def robots_txt():
+    """站点根 robots.txt（此前缺失，返回 404 且无 Sitemap 指引）"""
+    base = request.host_url.rstrip('/')
+    body = '\n'.join([
+        'User-agent: *',
+        'Allow: /',
+        'Disallow: /admin',
+        'Disallow: /api/',
+        'Disallow: /user-console/',
+        'Disallow: /orders',
+        'Disallow: /api-keys',
+        '',
+        'Sitemap: %s/sitemap.xml' % base,
+        '',
+    ])
+    return Response(body, mimetype='text/plain')
+
+
+@app.route('/sitemap.xml')
+def sitemap_xml():
+    """站点地图：仅列出无需登录即可访问的公开页面"""
+    base = request.host_url.rstrip('/')
+    paths = ['/', '/start', '/brand', '/services', '/cases',
+             '/ai-experience', '/download/', '/docs/', '/insights']
+    urls = ''.join('  <url><loc>%s%s</loc></url>\n' % (base, p) for p in paths)
+    xml = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+           '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+           + urls + '</urlset>\n')
+    return Response(xml, mimetype='application/xml')
+
+
 @app.route('/api-keys')
 def api_keys_page():
     return redirect('/', 301)

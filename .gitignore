@@ -165,6 +165,8 @@ tools/
 !plugins/survey/tools/
 !plugins/search_hub/tools/
 !plugins/stock_analysis/tools/
+!plugins/multi_asset/tools/
+!plugins/content_factory/tools/
 site/
 deploy/caddy/
 docs/*

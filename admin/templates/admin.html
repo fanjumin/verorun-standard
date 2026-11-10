@@ -115,4 +115,10 @@
 {% if not admin_skip_ai_relay %}
 {% include 'plugins/ai_relay/templates/relay_admin.html' ignore missing %}
 {% endif %}
+{# 2026-11-10 P1-01：菜单 key 与插件渲染函数名对齐（历史菜单使用短名，
+   找不到 window.l_<key>() 时面板会提示「插件渲染函数未找到」）。
+   仅补别名，不改菜单配置；插件未加载时仍保持未定义，便于定位真实缺失。 #}
+if(typeof window.l_coupons==='undefined')window.l_coupons=window.l_coupons_plugin;
+if(typeof window.l_translations==='undefined')window.l_translations=window.l_i18n_translations;
+if(typeof window.l_domains==='undefined')window.l_domains=window.l_site_domains;
 {% include 'partials/tail.html' %}

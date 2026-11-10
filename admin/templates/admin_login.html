@@ -284,6 +284,7 @@ body::after {
   .tm-btn-send { width: 100%; }
 }
 </style>
+<link rel="stylesheet" href="/static/puzzle-captcha.css">
 </head>
 <body>
 
@@ -328,6 +329,9 @@ body::after {
         </div>
         <div class="tm-msg" id="pwdMsg"></div>
       </div>
+      <div class="tm-field">
+        <div id="puzzle-captcha"></div>
+      </div>
       <button type="button" class="tm-btn-primary" id="loginPwdBtn" onclick="pwdLogin()">
         <span class="tm-btn-text">{{ _('Log In') }}</span><div class="tm-spinner"></div>
       </button>
@@ -370,8 +374,15 @@ body::after {
 
 </div><!-- /tm-page -->
 
+<script src="/static/puzzle-captcha.js"></script>
 <script>
 let cd = 0, cdTimer = null, tab = 'pwd';
+
+// ── 滑块验证码 token（非强制校验，仅用于风险采集）──
+let capToken = '';
+document.addEventListener('captcha-success', e => {
+  capToken = (e.detail && e.detail.token) || '';
+});
 
 // ── 从 URL 获取 client_type 参数 ──
 function getClientType() {
@@ -410,7 +421,7 @@ async function pwdLogin() {
     const r = await fetch('/admin/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password, client_type: getClientType() })
+      body: JSON.stringify({ username, password, client_type: getClientType(), captcha_id: capToken })
     });
     const d = await r.json();
     if (d.ok) {
@@ -485,7 +496,7 @@ async function codeLogin() {
     const r = await fetch('/admin/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, code, client_type: getClientType() })
+      body: JSON.stringify({ username, code, client_type: getClientType(), captcha_id: capToken })
     });
     const d = await r.json();
     if (d.ok) {

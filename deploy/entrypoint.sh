@@ -97,7 +97,7 @@ case "${_edition_lc}" in
         ;;
     pro|pro-web|edu|edu-desktop|edge|vr_test_edge|edge-computing)
         echo "ERROR: edition '${_edition_lc}' has been removed (pro / edu / edge)." >&2
-        echo "       Set VR_EDITION to one of: enterprise standard tarka finance research minipro" >&2
+        echo "       Set VR_EDITION to one of: enterprise standard tarka finance research minipro omni-service" >&2
         exit 1
         ;;
     *)

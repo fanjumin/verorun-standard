@@ -20,7 +20,7 @@
   "description": "SMS Service — phone verification code sending with Aliyun/Twilio providers",
   "tagline": "短信验证码与通知服务",
   "tagline_subtitle": "阿里云/Twilio 双渠道 · 验证码生成与校验",
-  "author": "VeroRun",
+  "author": "Tarka",
   "min_app_version": "0.10.0",
   "compatible_editions": ["enterprise", "standard", "finance", "research", "minipro", "omni-service"],
   "agent_role": "service",

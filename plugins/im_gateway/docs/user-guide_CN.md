@@ -6,7 +6,7 @@
 
 ## 1. 前置条件
 
-- VeroRun App ≥ 0.10.0。
+- Tarka App ≥ 0.10.0。
 - 目标渠道的 bot token / webhook URL。
 
 ---

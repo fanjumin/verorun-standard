@@ -9,6 +9,7 @@ window.l_ai_hub = function() {
   var mc = document.getElementById("mc");
   var tabs = [
     { id: "providers", label: "{{ _('Providers') }}",   icon: "🔑" },
+    { id: "keys",      label: "{{ _('Provider Keys') }}", icon: "🔐" },
     { id: "models",    label: "{{ _('Model Mgmt') }}",    icon: "🔧" },
     { id: "matrix",    label: "{{ _('Role Settings') }}", icon: "🤖" },
     { id: "prompts",   label: "{{ _('Prompts') }}",       icon: "📝" },
@@ -54,6 +55,7 @@ window.aiHubSwitchTab = function(tabId) {
   // 委托给各模块的嵌入式渲染函数
   switch (tabId) {
     case 'providers': l_ai_providers('aiHubContent');     break;
+    case 'keys':      l_provider_keys('aiHubContent');    break;
     case 'models':   l_model_providers('aiHubContent'); break;
     case 'matrix':   l_role_settings('aiHubContent');    break;
     case 'prompts':  l_prompts_db('aiHubContent');    break;

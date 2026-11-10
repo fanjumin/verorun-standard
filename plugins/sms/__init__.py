@@ -21,7 +21,7 @@ class SmsPlugin(BasePlugin):
         info = getattr(self, 'plugin_info', None)
         return getattr(info, 'version', None) or '0.1.0'
     description = 'SMS Service — phone verification code sending with Aliyun/Twilio providers'
-    author = 'VeroRun'
+    author = 'Tarka'
 
     def get_config_value(self, key: str, default=None):
         """优先 PluginManager，回退到 plugin.json 默认值"""

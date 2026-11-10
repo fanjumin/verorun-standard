@@ -49,6 +49,7 @@ if [ -z "${SPARSE_DIRS+x}" ]; then
     SPARSE_DIRS="admin auth-center main_site health_service veroguard plugin_manager agent_matrix orchestrator i18n shared providers themes static deploy scripts plugins/site_domains plugins/email plugins/sms plugins/im_gateway plugins/_base plugins/stock_analysis"
 fi
 : "${FORCE_UPDATE:=0}"              # 审计 C-3：force-overwrite local modifications during update (used with --force)
+: "${ACCEPT_REPO_CHANGE:=0}"        # L1-C：显式接受 origin 仓库变更（防止站点换源后静默更新，需 --accept-repo-change）
 : "${ENV_REBUILT:=0}"               # WO-003 批次3：1 = 本次 update_env 从零重建 .env（密钥轮换），非补齐缺失键
 : "${BACKUP_DIR:=/var/backups/verorun}"  # WO-003：站外备份根目录（必须在 APP_HOME 之外）
 : "${PIP_MIRROR:=}"
@@ -491,6 +492,95 @@ Host github.com
 SSHCONF
     chmod 600 "${_ssh_conf}" 2>/dev/null || true
     echo -e "${WARN} GitHub SSH port 22 unreachable — switched to ssh.github.com:443"
+}
+
+# ══════════════════════════════════════════════════════════════════════
+# L1：仓库归属与变更防护（全部只读，绝不 set-url）
+# 背景：WO-002 修复的 origin 校验与 GIT_REPO 同源（install.sh:61-66 从 origin 取值），
+# 条件恒等成立；中毒站点（origin 已被历史缺陷改成公开仓）仍会走进
+# fetch → merge 失败 → 干净树放行 → reset --hard 公开仓 的自毁链路。
+# 这里补两道闸：发行版↔公开仓白名单、origin 变更熔断。
+# ══════════════════════════════════════════════════════════════════════
+
+# 归一化仓库 URL：镜像前缀 / SSH 写法 / 协议前缀 / .git 后缀 / 大小写。
+# 必须两侧同用，否则会引入新的误判。
+_norm_repo_url() {
+    local _u="${1:-}"
+    _u="${_u,,}"
+    _u="${_u#https://ghfast.top/}"
+    _u="${_u#https://ghproxy.net/}"
+    _u="${_u#https://}"
+    _u="${_u#http://}"
+    _u="${_u#ssh://}"
+    _u="${_u#git://}"
+    _u="${_u#git@}"
+    _u="${_u%/}"
+    _u="${_u%.git}"
+    _u="${_u%/}"
+    case "${_u}" in
+        *:*) _u="${_u%%:*}/${_u#*:}" ;;   # github.com:owner/repo → github.com/owner/repo
+    esac
+    printf '%s' "${_u}"
+}
+
+# 读取站点发行版：.env 优先（权威），环境变量兜底。
+_edition_from_env_file() {
+    local _v=""
+    if [ -f "${APP_HOME}/.env" ]; then
+        _v=$(grep '^VR_EDITION=' "${APP_HOME}/.env" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+    fi
+    [ -n "${_v}" ] || _v="${VR_EDITION:-}"
+    # 清洗引号/空白/CR：.env 手工编辑过或 CRLF 时，不能被误判成未知发行版而阻断标准版更新。
+    _v="${_v//\"/}"; _v="${_v//\'/}"; _v="${_v//[[:space:]]/}"
+    printf '%s' "${_v}"
+}
+
+# L1-A：公开内核仓 verorun-pro 只允许 standard 使用。
+# 用单值白名单而非枚举私有发行版：新增发行版默认拒绝，不会漏判，也无需在 bash 侧
+# 复制 shared/edition.py 的别名表。
+_guard_repo_ownership() {
+    local _origin="$1" _ed
+    [ "$(_norm_repo_url "${_origin}")" = "github.com/fanjumin/verorun-pro" ] || return 0
+    _ed="$(_edition_from_env_file)"
+    _ed="${_ed,,}"
+    case "${_ed}" in
+        ''|standard|standard-web) return 0 ;;
+    esac
+    echo -e "${FAIL} 发行版 '${_ed}' 不允许使用公开核心仓，已中止更新。" >&2
+    echo -e "${FAIL}   origin : ${_origin}" >&2
+    echo -e "${FAIL}   只有 standard 允许使用 verorun-pro。" >&2
+    echo -e "${INFO}   origin 疑似被历史缺陷改写，请人工确认后修正（更新永不自动改 origin）。" >&2
+    echo -e "${INFO}   核对：git -C ${APP_HOME} remote -v" >&2
+    exit 1
+}
+
+# L1-C：origin 与上次成功更新时不一致 → 熔断，需 --accept-repo-change 显式放行。
+_guard_repo_change() {
+    local _origin="$1" _last=""
+    [ -f "${APP_HOME}/.env" ] || return 0
+    _last=$(grep '^VR_GIT_REPO_LAST=' "${APP_HOME}/.env" 2>/dev/null | tail -1 | cut -d= -f2- || true)
+    [ -n "${_last}" ] || return 0
+    [ "$(_norm_repo_url "${_last}")" != "$(_norm_repo_url "${_origin}")" ] || return 0
+    if [ "${ACCEPT_REPO_CHANGE:-0}" = "1" ]; then
+        echo -e "${WARN} origin 变更已接受（--accept-repo-change）：${_last} → ${_origin}"
+        return 0
+    fi
+    echo -e "${FAIL} origin 与上次成功更新不一致，已熔断。" >&2
+    echo -e "${FAIL}   last: ${_last}" >&2
+    echo -e "${FAIL}   now : ${_origin}" >&2
+    echo -e "${INFO}   若为人工换源，重跑并加 --accept-repo-change。" >&2
+    exit 1
+}
+
+# 幂等写入 .env 单键（存在则整行替换，不存在则追加）。
+_env_set_kv() {
+    local _key="$1" _val="$2" _file="${APP_HOME}/.env"
+    [ -f "${_file}" ] || return 0
+    if grep -q "^${_key}=" "${_file}" 2>/dev/null; then
+        sed -i "s|^${_key}=.*|${_key}=${_val}|" "${_file}"
+    else
+        printf '%s=%s\n' "${_key}" "${_val}" >> "${_file}"
+    fi
 }
 
 _resolve_git_repo() {
@@ -2560,17 +2650,50 @@ pull_release_artifact() {
     # 原地升级：只清代码树，保留运行时状态（旧实现会把 .env / venv / data / logs 一起删掉）
     if [ -n "$(ls -A "${APP_HOME}" 2>/dev/null)" ]; then
         if [ -f "${APP_HOME}/VERSION" ] && [ -f "${APP_HOME}/.verorun-edition" ]; then
-            local _entry
+            local _entry _name _del
             for _entry in "${APP_HOME}"/* "${APP_HOME}"/.[!.]*; do
                 [ -e "${_entry}" ] || continue
-                case "$(basename "${_entry}")" in
-                    .env|venv|data|logs|plugins-data|.rollback|instance|uploads) continue ;;
+                _name="$(basename "${_entry}")"
+                # 保留集（优先级最高）：运行时状态 + 可重建缓存 + 依赖目录。
+                # 旧清单缺 .cache / node_modules / .requirements_hash —— 每次制品更新都会重装依赖。
+                case "${_name}" in
+                    .env|venv|node_modules|data|logs|plugins-data|.rollback|instance|uploads|.cache|.requirements_hash) continue ;;
                 esac
-                rm -rf "${_entry}"
+                # 零插件架构（2026-11-07）：plugins/ 是业务插件根，归用户与商店所有，
+                # 升级一律不清理。内核只保证 plugins/_base 垫片存在；其实体在
+                # shared/plugin_base/（随 shared/ 正常更新），由下方 cp -a 合并刷新。
+                if [ "${_name}" = "plugins" ]; then
+                    echo -e "${INFO} [KEEP] plugins（业务插件根，升级不清理）"
+                    continue
+                fi
+                # 删除集 = 固定代码清单 ∪ 新包顶层条目（未知顶层条目视为站点资产，保留）
+                _del=0
+                case "${_name}" in
+                    admin|auth-center|main_site|health_service|veroguard|plugin_manager|agent_matrix|orchestrator|i18n|shared|providers|themes|static|templates|deploy|scripts|tools|tests|docs|evals|sdks|help|plugins) _del=1 ;;
+                    *.py|requirements*.txt|requirements.lock|VERSION|.verorun-edition|package.json|package-lock.json|Dockerfile|docker-compose.yml) _del=1 ;;
+                esac
+                if [ "${_del}" = "1" ] || [ -e "${_stage}/${_name}" ]; then
+                    echo -e "${INFO} [CLEAN] ${_name}"
+                    if [ "${_name}" = "veroguard" ] && [ -d "${_entry}/dist" ]; then
+                        # veroguard/dist 是嵌套保留路径：guardian 二进制被 .gitignore 排除、不在制品包内，
+                        # 整目录删除会让 guardian 静默消失（fail-closed 的 ExecStart 直接起不来）。
+                        find "${_entry}" -mindepth 1 -maxdepth 1 ! -name dist -exec rm -rf {} + 2>/dev/null || true
+                        echo -e "${INFO} [KEEP] veroguard/dist（guardian 二进制）"
+                    else
+                        rm -rf "${_entry}"
+                    fi
+                fi
             done
         else
             resolve_directory_conflict "${APP_HOME}"
         fi
+    fi
+    # 零插件架构（2026-11-07）：制品包内的业务插件不参与合并——plugins/ 归用户/商店所有。
+    # 仅保留内核公共库壳 plugins/_base（缺失会让 manager._validate_shared_imports 拒绝
+    # 所有商店插件的安装/升级）。
+    if [ -d "${_stage}/plugins" ]; then
+        find "${_stage}/plugins" -mindepth 1 -maxdepth 1 ! -name '_base' \
+            -exec rm -rf {} + 2>/dev/null || true
     fi
     cp -a "${_stage}/." "${APP_HOME}/"
     rm -rf "${_stage}"
@@ -2579,6 +2702,11 @@ pull_release_artifact() {
         mkdir -p "${APP_HOME}/veroguard/dist"
         cp "${RELEASE_DIR}/verorun-guardian.bin" "${APP_HOME}/veroguard/dist/"
         chmod +x "${APP_HOME}/veroguard/dist/verorun-guardian.bin"
+    else
+        case "$(_edition_from_env_file)" in
+            official|enterprise) ;;
+            *) echo -e "${WARN} ${RELEASE_DIR}/verorun-guardian.bin 缺失 — guardian 未被恢复（仅当 veroguard/dist 内已有旧二进制时可用）" ;;
+        esac
     fi
     if [ ! -f "${APP_HOME}/.verorun-edition" ] || [ ! -f "${APP_HOME}/VERSION" ]; then
         echo -e "${FAIL} Extracted tarball is not a verorun edition package (.verorun-edition/VERSION missing) — aborting"
@@ -3178,14 +3306,22 @@ do_update() {
         if [ -z "${_cur_origin}" ]; then
             git remote add origin "${GIT_REPO}"
             echo -e "${INFO} origin set to ${GIT_REPO}"
-        elif [ "${_cur_origin}" != "${GIT_REPO}" ]; then
-            # WO-002：更新绝不静默换源。旧实现无条件 set-url，把生产站 origin 改成公开仓后
-            # merge --ff-only 必失败 → reset --hard 公开仓 → 站点被整体替换。
-            echo -e "${FAIL} origin mismatch — refusing to update." >&2
-            echo -e "${FAIL}   current : ${_cur_origin}" >&2
-            echo -e "${FAIL}   expected: ${GIT_REPO}" >&2
-            echo -e "${FAIL}   fix     : GIT_REPO='${_cur_origin}' 重跑，或改用对应 install-*.sh" >&2
-            exit 1
+        else
+            # L1-A：发行版 ↔ 公开仓白名单（只读；绝不 set-url）
+            _guard_repo_ownership "${_cur_origin}"
+            # L1-C：origin 变更熔断（与上次成功更新记录的 origin 比对）
+            _guard_repo_change "${_cur_origin}"
+            # L1-A0：两侧归一化后比较 —— _resolve_git_repo 会把 GIT_REPO 改写成镜像地址，
+            # 直接字符串比较会把"只能走镜像"的正常站点误判为 origin mismatch。
+            if [ "$(_norm_repo_url "${_cur_origin}")" != "$(_norm_repo_url "${GIT_REPO}")" ]; then
+                # WO-002：更新绝不静默换源。旧实现无条件 set-url，把生产站 origin 改成公开仓后
+                # merge --ff-only 必失败 → reset --hard 公开仓 → 站点被整体替换。
+                echo -e "${FAIL} origin mismatch — refusing to update." >&2
+                echo -e "${FAIL}   current : ${_cur_origin}" >&2
+                echo -e "${FAIL}   expected: ${GIT_REPO}" >&2
+                echo -e "${FAIL}   fix     : GIT_REPO='${_cur_origin}' 重跑，或改用对应 install-*.sh" >&2
+                exit 1
+            fi
         fi
         export GIT_TERMINAL_PROMPT=0
         # 无人值守加固 ①：pre-warm known_hosts (see do_install) — a fresh root env stalls git fetch on host-key verification.
@@ -3238,9 +3374,12 @@ do_update() {
                 exit 1
             }
         fi
+        # L1-C：fetch/merge/reset 全部成功后记录本次 origin，作为下次熔断的基线。
+        _env_set_kv VR_GIT_REPO_LAST "${_cur_origin}"
     fi
     if [ "${INSTALL_SOURCE:-git}" = "release" ]; then
-        # 制品通道：插件已随 tarball 内置，无需 sparse-checkout；无 .git → 跳过 commit 对比
+        # 制品通道：无 .git → 跳过 sparse-checkout 与 commit 对比；plugins/ 已在
+        # pull_release_artifact 保留（仅合并 plugins/_base），升级不覆盖站点已装插件。
         done_step "Code updated: ${_code_label}"
     else
         # Sparse-checkout 下发（含白名单守卫）：同 do_install —— 见 _apply_sparse_checkout。
@@ -3260,7 +3399,7 @@ do_update() {
     script_md5=$(md5sum "${APP_HOME}/deploy/${INSTALL_SCRIPT}" | awk '{print $1}')
     if [ "${UPDATE_MD5}" != "${script_md5}" ]; then
         echo -e "${INFO} ${INSTALL_SCRIPT} updated, re-running with new version..."
-        exec sudo APP_USER="${APP_USER}" APP_HOME="${APP_HOME}" VENV_DIR="${VENV_DIR}" REGION="${REGION}" FORCE_UPDATE="${FORCE_UPDATE:-0}" AUTO_DIR_CONFLICT="${AUTO_DIR_CONFLICT:-}" INSTALL_SOURCE="${INSTALL_SOURCE:-git}" RELEASE_DIR="${RELEASE_DIR:-}" bash "${APP_HOME}/deploy/${INSTALL_SCRIPT}" update
+        exec sudo APP_USER="${APP_USER}" APP_HOME="${APP_HOME}" VENV_DIR="${VENV_DIR}" REGION="${REGION}" FORCE_UPDATE="${FORCE_UPDATE:-0}" ACCEPT_REPO_CHANGE="${ACCEPT_REPO_CHANGE:-0}" AUTO_DIR_CONFLICT="${AUTO_DIR_CONFLICT:-}" INSTALL_SOURCE="${INSTALL_SOURCE:-git}" RELEASE_DIR="${RELEASE_DIR:-}" bash "${APP_HOME}/deploy/${INSTALL_SCRIPT}" update
         exit
     fi
 
@@ -3294,12 +3433,35 @@ do_update() {
     }
     # 审计 M16：prefer the hash-locked requirements.lock, fall back to requirements.txt when missing
     local _req_file="${APP_HOME}/requirements.txt"
-    [ -f "${APP_HOME}/requirements.lock" ] && _req_file="${APP_HOME}/requirements.lock"
+    if [ -f "${APP_HOME}/requirements.lock" ]; then
+        # 同源契约校验（2026-11-08 v2）：lock 必须声明它是由「当前这份 requirements.txt」
+        # 生成的，否则一律不信。声明格式（写入 lock 头部）：
+        #   # verorun-lock-source-md5: <requirements.txt 的 md5>
+        #
+        # 为什么废弃原 `-nt` 判断：publish-editions 用 `git archive` 打包，制品内
+        # 所有文件 mtime 被抹成同一时刻（实测 104 上 lock 与 txt 的 mtime 纳秒相同），
+        # 于是 `[ txt -nt lock ]` 在官方制品通道恒为假 —— lock 永久优先，导致
+        # numpy 2.x SIGILL 与 6 个插件依赖缺失反复复发（v0.67.2~v0.67.4 三次事故）。
+        local _txt_md5 _lock_md5
+        _txt_md5=$(md5sum "${APP_HOME}/requirements.txt" | awk '{print $1}')
+        _lock_md5=$(grep -m1 '^# verorun-lock-source-md5:' "${APP_HOME}/requirements.lock" 2>/dev/null | awk '{print $3}')
+        if [ -n "${_lock_md5}" ] && [ "${_lock_md5}" = "${_txt_md5}" ]; then
+            _req_file="${APP_HOME}/requirements.lock"
+        else
+            echo -e "${WARN} requirements.lock 与 requirements.txt 不同源（lock=${_lock_md5:-未标注}，txt=${_txt_md5}）— 本次用 txt 安装（请按 Python 3.12 重新生成并写入该标注）"
+        fi
+    fi
     req_hash=$(md5sum "${_req_file}" | awk '{print $1}')
     cached_hash=$(cat "${APP_HOME}/.requirements_hash" 2>/dev/null || echo "")
     if [ "${req_hash}" != "${cached_hash}" ]; then
-        _pip_install -r "${_req_file}"
-        echo "${req_hash}" > "${APP_HOME}/.requirements_hash"
+        # 依赖安装失败必须可重试（2026-11-08）：原实现无条件写回 hash，一次失败即被永久
+        # 固化，之后每次升级都打印 unchanged/skipping，缺包永不自愈。
+        if _pip_install -r "${_req_file}"; then
+            echo "${req_hash}" > "${APP_HOME}/.requirements_hash"
+        else
+            echo -e "${FAIL} Python 依赖安装失败 — .requirements_hash 未更新，下次 update 会重试"
+            exit 1
+        fi
     else
         echo -e "${INFO} ${_req_file} unchanged, skipping pip install"
     fi

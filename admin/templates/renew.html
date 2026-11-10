@@ -187,6 +187,35 @@ body::after {
 .tm-info-value.expired { color: var(--danger); }
 .tm-info-value.active { color: var(--success); }
 
+/* Deployment code activation */
+.tm-activate { margin-bottom: 24px; }
+.tm-activate-label {
+  font-size: 13px; color: var(--text-dim); margin-bottom: 8px;
+}
+.tm-activate-row { display: flex; gap: 10px; }
+.tm-input {
+  flex: 1; min-width: 0;
+  padding: 13px 14px;
+  background: rgba(6, 11, 24, 0.6);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text); font-size: 14px; font-family: inherit;
+  letter-spacing: 0.5px;
+  transition: border-color 0.25s, box-shadow 0.25s;
+}
+.tm-input:focus {
+  outline: none;
+  border-color: rgba(47, 107, 255, 0.5);
+  box-shadow: 0 0 0 3px rgba(47, 107, 255, 0.12);
+}
+.tm-input::placeholder { color: var(--text-dim); }
+.tm-activate-row .tm-btn-primary {
+  width: auto; flex: 0 0 auto; padding: 13px 20px; font-size: 14px;
+}
+.tm-activate-hint {
+  margin-top: 10px; font-size: 11px; color: var(--text-dim); line-height: 1.6;
+}
+
 /* Primary button */
 .tm-btn-primary {
   width: 100%; padding: 14px;
@@ -366,6 +395,17 @@ body::after {
       </div>
     </div>
 
+    <!-- Deployment Code -->
+    <div class="tm-activate">
+      <div class="tm-activate-label">{{ _('Deployment Code') }}</div>
+      <div class="tm-activate-row">
+        <input id="deploymentCode" class="tm-input" type="text" maxlength="64"
+               autocomplete="off" spellcheck="false" placeholder="请输入部署码">
+        <button class="tm-btn-primary" id="activateBtn" onclick="activateCode()">{{ _('Activate') }}</button>
+      </div>
+      <div class="tm-activate-hint">部署码由服务商提供；提交后需联网校验，通过即写入本机并立即生效。</div>
+    </div>
+
     <!-- Actions -->
     <div class="tm-btn-group">
       {% if license.status == 'expired' %}
@@ -415,6 +455,39 @@ async function refreshLicense() {
   } finally {
     btn.disabled = false;
     btn.innerHTML = "{{ _('⟳ Re-verify') }}";
+  }
+}
+
+async function activateCode() {
+  const input = document.getElementById('deploymentCode');
+  const btn = document.getElementById('activateBtn');
+  const code = (input.value || '').trim();
+  if (!code) {
+    toast({{ _('Deployment code is required') | tojson }}, 'error');
+    input.focus();
+    return;
+  }
+  btn.disabled = true;
+  try {
+    const r = await fetch('/admin/renew', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + {{ sso_token | tojson }}
+      },
+      body: JSON.stringify({ deployment_code: code })
+    });
+    const d = await r.json();
+    if (d.success) {
+      toast(d.message || "{{ _('Subscription active, redirecting...') }}", 'success');
+      setTimeout(() => { window.location.reload(); }, 1200);
+    } else {
+      toast(d.message || "{{ _('Please try again later') }}", 'error');
+    }
+  } catch (e) {
+    toast("{{ _('Network error, please try again') }}", 'error');
+  } finally {
+    btn.disabled = false;
   }
 }
 

@@ -42,10 +42,102 @@ function mpRefresh(){
   });
 }
 
+// ── 拉取该供应商最新模型 → 勾选 → 保存（provider_models）─────────────────
+window.mpFetchModels=function(pid,slug){
+  showToast('{{ _('Fetching models...') }}','');
+  fetch("/admin/ai-hub/models/sync?dry_run=0&include_offline=1&provider="+encodeURIComponent(slug),
+        {method:"POST",headers:{"Authorization":"Bearer "+T}})
+  .then(function(r){return r.json()})
+  .then(function(rep){
+    if(!rep||!rep.success){showToast((rep&&rep.message)||'{{ _('Sync failed') }}','error');return}
+    var pr=(rep.providers||{})[slug]||{};
+    if(pr.status==='skipped'){mpShowFetchNotice(pr.reason||'{{ _('Sync failed') }}');return}
+    if(!rep.run_id){showToast('{{ _('Sync failed') }}','error');return}
+    return fetch("/admin/ai-hub/models/sync/diffs?run_id="+encodeURIComponent(rep.run_id)+"&status=pending&limit=500",
+                 {headers:{"Authorization":"Bearer "+T}})
+      .then(function(r){return r.json()})
+      .then(function(dd){
+        var rows=((dd&&dd.data)||[]).filter(function(d){
+          return d.diff_type==='new' && d.provider_slug===slug;
+        });
+        if(!rows.length){showToast('{{ _('No new models upstream') }}','success');return}
+        mpShowFetchedModels(slug,rows);
+      });
+  }).catch(function(e){showToast('{{ _('Sync failed') }}: '+esc(String(e)),'error')});
+};
+
+function mpFetchOverlay(html){
+  var old=document.getElementById('mp-fetch-modal'); if(old) old.remove();
+  var o=document.createElement('div');
+  o.id='mp-fetch-modal'; o.className='modal-overlay'; o.innerHTML=html;
+  o.onclick=mpCloseFetchModal;
+  o.firstChild.onclick=function(e){e.stopPropagation()};
+  document.body.appendChild(o);
+}
+window.mpCloseFetchModal=function(){
+  var m=document.getElementById('mp-fetch-modal'); if(m) m.remove();
+};
+window.mpShowFetchNotice=function(msg){
+  mpFetchOverlay('<div class="modal-box" style="max-width:520px;width:92%">'
+    +'<h3 style="margin:0 0 12px;color:var(--accent)">{{ _('Fetch models') }}</h3>'
+    +'<p style="margin:0 0 18px;font-size:13px;line-height:1.7">'+esc(String(msg||''))+'</p>'
+    +'<div style="text-align:right"><button class="bo" onclick="mpCloseFetchModal()" style="padding:6px 16px">{{ _('Cancel') }}</button></div>'
+    +'</div>');
+};
+window.mpShowFetchedModels=function(slug,rows){
+  var h='<div class="modal-box" style="max-width:780px;width:94%">';
+  h+='<h3 style="margin:0 0 6px;color:var(--accent)">{{ _('Fetch models') }} · '+esc(slug)+'</h3>';
+  h+='<p style="margin:0 0 10px;font-size:12px;color:var(--dim)">'+rows.length+' {{ _('New upstream') }}</p>';
+  h+='<div style="max-height:48vh;overflow:auto;border:1px solid var(--border);border-radius:6px">';
+  h+='<table style="margin:0"><thead><tr>';
+  h+='<th style="width:110px"><label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="mpFetchAll" checked onchange="mpToggleAllFetched(this.checked)"> {{ _('Select all') }}</label></th>';
+  h+='<th>{{ _('Model ID') }}</th><th>{{ _('Capability') }}</th><th>{{ _('Context') }}</th></tr></thead><tbody>';
+  rows.forEach(function(d){
+    var pl=d.payload||{};
+    h+='<tr><td><input type="checkbox" class="mp-fetch-ck" data-diff="'+d.id+'" checked></td>';
+    h+='<td><code style="font-size:11px;color:var(--accent)">'+esc(d.remote_model||pl.remote_id||'')+'</code>';
+    if(pl.display_name && pl.display_name!==d.remote_model){
+      h+=' <span style="font-size:10px;color:var(--dim)">'+esc(pl.display_name)+'</span>';
+    }
+    h+='</td><td><span class="bdg off" style="font-size:9px">'+esc(mpCapsLabel(pl.caps||'text'))+'</span></td>';
+    h+='<td>'+(pl.context_tokens!=null?pl.context_tokens:'—')+'</td></tr>';
+  });
+  h+='</tbody></table></div>';
+  h+='<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">';
+  h+='<button class="bo" onclick="mpCloseFetchModal()" style="padding:6px 16px">{{ _('Cancel') }}</button>';
+  h+='<button class="bo" onclick="mpSaveFetched(false)" style="padding:6px 16px">{{ _('Save selected (disabled)') }}</button>';
+  h+='<button class="bp" onclick="mpSaveFetched(true)" style="padding:6px 16px">{{ _('Save and enable') }}</button>';
+  h+='</div></div>';
+  mpFetchOverlay(h);
+};
+window.mpToggleAllFetched=function(on){
+  var cks=document.querySelectorAll('.mp-fetch-ck');
+  for(var i=0;i<cks.length;i++) cks[i].checked=!!on;
+};
+window.mpSaveFetched=function(enable){
+  var cks=document.querySelectorAll('.mp-fetch-ck'), actions=[];
+  for(var i=0;i<cks.length;i++){
+    if(cks[i].checked){
+      actions.push({diff_id:parseInt(cks[i].getAttribute('data-diff'),10),action:'insert',enable:!!enable});
+    }
+  }
+  if(!actions.length){showToast('{{ _('No models selected') }}','error');return}
+  fetch("/admin/ai-hub/models/sync/apply",{method:"POST",
+    headers:{"Authorization":"Bearer "+T,"Content-Type":"application/json"},
+    body:JSON.stringify({actions:actions})
+  }).then(function(r){return r.json()}).then(function(res){
+    if(!res||!res.success){showToast((res&&res.message)||'{{ _('Sync failed') }}','error');return}
+    mpCloseFetchModal();
+    showToast(res.message||'','success');
+    mpRefresh();
+  }).catch(function(e){showToast('{{ _('Sync failed') }}: '+esc(String(e)),'error')});
+};
+
 function mpRender(caret){
   var d=MP_DATA||[];
   var h='<div class="cd" style="margin-bottom:12px">';
   h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px"><h3 style="margin:0;font-size:16px;color:var(--accent)">{{ _('Model Management') }}</h3><span style="flex:1"></span>';
+  h+='<button class="btn bo bs" onclick="aiHubSyncAll()">{{ _('Fetch models') }}</button>';
   h+='<button class="btn bp bs" onclick="mpShowProviderForm()">+ {{ _('New Provider') }}</button></div>';
   h+='<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">';
   h+='<input class="in" id="mpSearch" placeholder="{{ _('Search models') }}" value="'+escAttr(MP_STATE.qRaw)+'" style="flex:1;min-width:180px" oninput="mpSetQuery(this.value,this.selectionStart)">';
@@ -69,6 +161,7 @@ function mpRender(caret){
       h+='<div style="font-size:10px;color:var(--dim);margin-top:2px">{{ _('API Endpoint') }}: '+esc(p.endpoint_url||'—')+'</div>';
       h+='</div>';
       h+='<div style="display:flex;gap:6px;flex-shrink:0">';
+      h+='<button class="btn bp bs" onclick="mpFetchModels('+p.id+',\''+escJs(p.slug)+'\')">{{ _('Fetch models') }}</button>';
       h+='<button class="btn bo bs" onclick="mpShowProviderForm('+p.id+')">{{ _('Edit') }}</button>';
       h+='<button class="btn bo bs" style="color:#f85149" onclick="mpDeleteProvider('+p.id+',\''+escJs(p.name)+'\')">{{ _('Delete') }}</button>';
       h+='<button class="btn bp bs" onclick="mpShowAddModel('+p.id+',\''+escJs(p.name)+'\')">+ {{ _('Add Model') }}</button>';

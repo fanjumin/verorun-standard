@@ -166,7 +166,7 @@ function buildFormHTML(method, isActive) {
       html += ' placeholder="' + __(field.placeholder) + '"';
       if (field.autocomplete) html += ' autocomplete="' + field.autocomplete + '"';
       html += '>';
-      html += '<button type="button" class="lf-pwd-eye" data-target="' + fid + '-' + field.name + '">' + ICON_EYE + '</button>';
+      html += '<button type="button" class="lf-pwd-eye" data-target="' + fid + '-' + field.name + '" aria-label="' + __('Toggle password visibility') + '">' + ICON_EYE + '</button>';
       html += '</div>';
     } else if (method.type === 'sms' && field.name === 'phone') {
       // Phone field with send-code button

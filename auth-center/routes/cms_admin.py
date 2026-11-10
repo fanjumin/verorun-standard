@@ -119,9 +119,22 @@ def create_post():
 def update_post(post_id):
     a, e = _check()
     if e: return e
-    data = request.get_json(force=True)
-    data['id'] = post_id
-    return _ok(upsert_post(data))
+    # 2026-11-10 P0-01：异常统一返回业务 JSON，避免 Flask 裸 500，
+    # 前端（把响应当 JSON 解析）不再报 SyntaxError。
+    try:
+        data = request.get_json(force=True) or {}
+        data['id'] = post_id
+        return _ok(upsert_post(data))
+    except ValueError as ex:
+        if str(ex) == 'empty_title_and_body':
+            return _err(_('Refusing to overwrite existing content with an empty title and body'), 400)
+        return _err(str(ex), 400)
+    except Exception as ex:
+        import traceback
+        traceback.print_exc()
+        if ex.__class__.__name__ == 'IntegrityError':
+            return _err(_('Slug already exists, please use another one'), 409)
+        return _err(_('Failed to save post'), 500)
 
 
 @cms_admin_bp.route('/posts/<int:post_id>', methods=['DELETE'])

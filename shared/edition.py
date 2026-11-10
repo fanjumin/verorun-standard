@@ -11,17 +11,19 @@ agent_matrix/models.py 再导出本模块的全部公开符号，既有调用方
 **禁止**在其它位置重复定义归一化逻辑（第二处定义会导致口径分裂）。
 """
 import os
+import sys
 
 # ── 发行版 edition 归一化（单一事实源：VR_EDITION / RELEASE_EDITION / DEPLOY_TYPE）──
-# 现行发行版 ID 共 6 个（定稿后不再变更；显示名走 i18n，与 ID 解耦）：
+# 现行发行版 ID 共 7 个（定稿后不再变更；显示名走 i18n，与 ID 解耦）：
 #   enterprise 企业版 / standard 标准版 / tarka 塔卡投研 /
-#   finance 金融版 / research 科研版 / minipro 小程序版
+#   finance 金融版 / research 科研版 / minipro 小程序版 / omni-service 全网智能客服版
 # 2026-11-07 负责人裁决：pro（专业版）、edu（教育版）、edge（边缘版）三版现行均不存在，
 # 已物理删除（ID / 别名 / 桥接 / 种子 / 文案全部移除），不做兼容垫片。
 # tarka（2026-11-01 用户裁决）：公开产品「塔卡投研」的发行 ID。不用 standard 命名，
 # 因 standard 同时是发布仓库 fanjumin/verorun-standard 的名字，二者混用会产生误解；
 # 兼容口径由下文 _EDITION_COMPAT_UNION 承接（声明 standard 的插件在 tarka 下同样放行）。
-_EDITION_IDS = ('enterprise', 'standard', 'tarka', 'finance', 'research', 'minipro')
+_EDITION_IDS = ('enterprise', 'standard', 'tarka', 'finance', 'research', 'minipro',
+                'omni-service')
 
 # 已下架发行版及其历史旧名（**仅**用于 fail-loud 诊断，禁止在此恢复任何语义）。
 # 命中即报错：下架后若继续静默直传，<stem>.yaml 必然缺失 → include 白名单为空 →
@@ -56,9 +58,22 @@ def normalize_edition(e) -> str:
 
 
 def current_edition() -> str:
-    """全系统发行版唯一判定：VR_EDITION → RELEASE_EDITION → DEPLOY_TYPE。"""
-    return normalize_edition(os.getenv('VR_EDITION') or os.getenv('RELEASE_EDITION')
-                             or os.getenv('DEPLOY_TYPE') or '')
+    """全系统发行版唯一判定：VR_EDITION → RELEASE_EDITION → DEPLOY_TYPE（仅合法发行 ID）。
+
+    DEPLOY_TYPE 的本义是**部署形态**（install.sh：production / lan / dev / omni-service），
+    只有 omni-service 同时是发行版 ID。历史实现把它无条件当 edition 用，导致
+    `DEPLOY_TYPE=production` 的机器解析出非法发行版 `production`，所有插件的
+    compatible_editions 校验全部失败（真机现象：插件无法安装/启用）。故此处仅接受
+    能命中 _EDITION_IDS / _EDITION_ALIASES 的 DEPLOY_TYPE，其余按 standard 兜底。
+    """
+    for key in ('VR_EDITION', 'RELEASE_EDITION'):
+        value = (os.getenv(key) or '').strip()
+        if value:
+            return normalize_edition(value)
+    legacy = (os.getenv('DEPLOY_TYPE') or '').strip().lower()
+    if legacy in _EDITION_IDS or legacy in _EDITION_ALIASES:
+        return normalize_edition(legacy)
+    return 'standard'
 
 
 # ── 插件兼容判定的发行版并集（改名不改插件声明）──
@@ -78,7 +93,7 @@ def edition_compat_values(edition: str = None) -> tuple:
 
 
 # ── canonical ID → 磁盘产物名（**唯一**桥接点）──
-# canonical ID（_EDITION_IDS，6 个）与磁盘产物命名历史上分叉：
+# canonical ID（_EDITION_IDS，7 个）与磁盘产物命名历史上分叉：
 #   deploy/editions/<stem>.yaml、agent_matrix/roles/<stem>/
 # 磁盘侧仍沿用旧名 / 连字符名（official / finance-desktop / research-desktop）。
 # 二者必须显式桥接，**禁止**在各消费点自行字符串拼接：`f'{current_edition()}.yaml'`
@@ -126,3 +141,20 @@ _BETA_CHANNEL_VALUES = ('beta', 'insider')
 def is_beta_channel() -> bool:
     """是否内测通道（VERORUN_CHANNEL=beta）；正式版构建不注入该变量。"""
     return (os.getenv('VERORUN_CHANNEL') or '').strip().lower() in _BETA_CHANNEL_VALUES
+
+
+def assert_supported_edition() -> None:
+    """启动前置校验：已下架发行版直接单行报错退出。
+
+    edition_artifact_stem 的下架检查只在首次角色加载（agent_matrix.models）时才触达，
+    运维看到的是 traceback；把它提到启动入口，输出单行指引后以退出码 2 结束。
+    幂等，可在多个入口 / 多个 gunicorn worker 中重复调用。
+    """
+    e = current_edition()
+    if e not in _RETIRED_EDITION_IDS:
+        return
+    sys.stderr.write(
+        f"[verorun] 发行版已下架: {e!r}（pro / edu / edge 三版已移除）；"
+        f"请把 VR_EDITION / RELEASE_EDITION / DEPLOY_TYPE 改为: {', '.join(_EDITION_IDS)}\n"
+    )
+    raise SystemExit(2)

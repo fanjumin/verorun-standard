@@ -39,7 +39,7 @@ class ImGatewayPlugin(BasePlugin):
     description = ('IM Gateway — Unified IM messaging channel gateway '
                    '(Feishu / WeCom / DingTalk / QQ / Telegram / LINE) '
                    'plus web third-party login')
-    author = 'VeroRun'
+    author = 'Tarka'
 
     def on_install(self, registry):
         """安装时初始化独立数据库 + 从主库迁移已有频道配置"""
@@ -115,7 +115,7 @@ class ImGatewayPlugin(BasePlugin):
         """告警纯文本（各 IM 适配器均支持 text；长度截断由适配器各自负责）"""
         symbol = ev.get('symbol') or ''
         name = ev.get('name') or symbol
-        lines = [_('VeroRun Alert'), f'{name} ({symbol})'.strip()]
+        lines = [_('Tarka Alert'), f'{name} ({symbol})'.strip()]
         if ev.get('message'):
             lines.append(str(ev['message']))
         if ev.get('observed') is not None:

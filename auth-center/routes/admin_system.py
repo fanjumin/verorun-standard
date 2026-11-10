@@ -688,7 +688,15 @@ def admin_tickets_update(tid):
     data = request.get_json(force=True) or {}
     action = data.get('action', 'reply')  # reply / close / reopen
     with get_db() as conn:
+        row = conn.execute(
+            'SELECT status, admin_reply FROM user_tickets WHERE id=%s', (tid,)
+        ).fetchone()
+        if not row:
+            return jsonify({'success': False, 'error': _('Ticket not found')}), 404
         if action == 'reply':
+            # 幂等（2026-11-10 P1-02）：已回复的工单不再覆盖原回复
+            if row['status'] == 'replied' and (row['admin_reply'] or '').strip():
+                return jsonify({'success': False, 'error': _('Ticket already replied')}), 409
             reply = (data.get('admin_reply') or '').strip()
             if not reply:
                 return jsonify({'success': False, 'error': _('Reply content cannot be empty')}), 400
@@ -708,6 +716,8 @@ def admin_tickets_update(tid):
             )
         conn.commit()
     _log(admin['user_id'], 'ticket_update', detail=f'ticket={tid} action={action}')
+    # 2026-11-10 P1-02：此前缺少 return，视图函数无返回值 → Flask 抛 TypeError → 500
+    return jsonify({'success': True, 'data': {'id': tid, 'action': action}})
 
 
 # ══════════════════════════════════════════════

@@ -14,6 +14,10 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from dotenv import load_dotenv
 load_dotenv()
 
+# L5：启动前置校验（模块顶层，gunicorn 下 __main__ 不执行，必须放这里）
+from shared.edition import assert_supported_edition as _assert_edition
+_assert_edition()
+
 from flask import Flask, request, jsonify, render_template, send_from_directory, redirect, Response, g
 from werkzeug.middleware.proxy_fix import ProxyFix
 from models import init_db, get_db
@@ -279,6 +283,19 @@ try:
     from agent_matrix.models import init_agent_matrix_tables, seed_default_agents
     init_agent_matrix_tables()
     seed_default_agents()
+    # 审批库建表迁移：run_approval_migrations() 此前定义于 approval_db.py
+    # 但全仓库无任何调用方，新装环境必然缺 agent_tools schema ——
+    # 打开审批页即 UndefinedTable → 503 'Database unavailable'（2026-11-10 实测）。
+    # 自带 advisory lock + schema_migrations 记录，幂等可重入；失败不阻断启动。
+    from agent_matrix.approval_db import run_approval_migrations
+    run_approval_migrations()
+    # 模型同步两张表（model_sync_runs / model_sync_diffs）：ensure_tables() 原本只在
+    # run_sync 执行时调用，而「模型与智能体」页打开即调只读接口
+    # /admin/ai-hub/models/sync/diffs（get_pending_diffs）——新装库从未跑过同步，
+    # 表不存在 → UndefinedTable → 500「服务器内部错误」（2026-11-10 实测日志铁证）。
+    # ensure_tables 为幂等 CREATE TABLE IF NOT EXISTS，失败不阻断启动。
+    from services.model_sync import ensure_tables as _ms_ensure_tables
+    _ms_ensure_tables()
     print('[Agent Matrix] ✅ schema + roles ready (pre-plugin bootstrap)')  # i18n:tech — 启动诊断
 except Exception as e:
     print(f'[Agent Matrix] ❌ schema bootstrap failed: {e}')  # i18n:tech — 启动诊断
@@ -323,7 +340,19 @@ from shared.plugin_access import optional_import as _plugin_import
 
 _sched_mod = _plugin_import('plugins.subscription.scheduler', feature='subscription_scheduler')
 if _sched_mod is None:
-    print('[Subscription] ❌ 订阅插件缺失（plugins/subscription），自动续费/dunning/过期标记引擎未启动，需人工介入')
+    # 发行版 include 白名单刻意不含 subscription（如 finance-desktop 无订阅/支付场景）
+    # 属预期裁剪，不应报"需人工介入"；只有白名单包含该插件却仍导入失败才是真缺失。
+    try:
+        from agent_matrix.models import edition_plugin_includes, edition_runtime_whitelist
+        _sub_includes = edition_plugin_includes()
+        _sub_expected_absent = (bool(_sub_includes) and edition_runtime_whitelist()
+                                and 'subscription' not in _sub_includes)
+    except Exception:
+        _sub_expected_absent = False
+    if _sub_expected_absent:
+        print('[Subscription] ℹ️ 本发行版未包含订阅插件（plugins/subscription 不在 include），自动续费调度按设计跳过')
+    else:
+        print('[Subscription] ❌ 订阅插件缺失（plugins/subscription），自动续费/dunning/过期标记引擎未启动，需人工介入')
 else:
     try:
         run_renewal_scan = _sched_mod.run_renewal_scan
@@ -469,6 +498,10 @@ def _official_dev_exempt():
 
 
 def _license_enforced():
+    # 内测通道（VERORUN_CHANNEL=beta）免授权；正式版构建不注入该变量，行为不变。
+    from shared.edition import is_beta_channel
+    if is_beta_channel():
+        return False
     if os.environ.get('APP_MODE', 'main') == 'client':
         return True
     try:
@@ -532,15 +565,130 @@ if _LICENSE_ENFORCED:
             return redirect('/admin/renew')
         return _license_denied_payload()
 
-    @app.route('/admin/renew')
+    def _request_admin_token():
+        """从 query / Authorization / sso_token Cookie 提取管理员会话令牌。"""
+        token = request.args.get('token') or request.headers.get('Authorization', '').replace('Bearer ', '')
+        if not token:
+            token = request.cookies.get('sso_token')
+        return token or ''
+
+    def _mask_deployment_code(code):
+        """部署码脱敏（日志专用）：仅保留首尾各 2 位，绝不输出完整部署码。"""
+        code = code or ''
+        if len(code) <= 4:
+            return '*' * len(code)
+        return '%s%s%s' % (code[:2], '*' * (len(code) - 4), code[-2:])
+
+    @app.route('/admin/renew', methods=['GET', 'POST'])
     def admin_renew_page():
-        """续费/授权状态页（模板 renew.html 早已存在但全仓无路由 → 锁定后跳转会 404）。"""
+        """续费/授权状态页（GET）+ 部署码提交（POST）。
+
+        POST 契约：JSON ``{"deployment_code": "..."}``（兼容表单）。
+        必须先通过管理员会话校验；成功才写入 ``system_config.deployment_code``
+        并刷新内存缓存，失败一律不覆盖原有部署码与授权缓存。
+        """
         from i18n import _
-        status = (_ls.get_status() if _ls else
-                  {'valid': False, 'status': 'unknown', 'days_remaining': 0,
-                   'message': _('License service unavailable, please contact your vendor'),
-                   'cached_at': '', 'needs_refresh': False})
-        return render_template('renew.html', license=status)
+        if request.method != 'POST':
+            status = (_ls.get_status() if _ls else
+                      {'valid': False, 'status': 'unknown', 'days_remaining': 0,
+                       'message': _('License service unavailable, please contact your vendor'),
+                       'cached_at': '', 'needs_refresh': False})
+            return render_template('renew.html', license=status,
+                                   sso_token=_request_admin_token())
+
+        # —— 以下为部署码提交 ——
+        from services.jwt_service import validate_token
+        token = _request_admin_token()
+        payload = validate_token(token) if token else None
+        if not payload or not payload.get('is_admin'):
+            return jsonify({'success': False, 'error': 'unauthorized',
+                            'message': _('管理员会话无效或已过期，请重新登录')}), 401
+
+        body = request.get_json(silent=True) or {}
+        raw = body.get('deployment_code') if isinstance(body, dict) else None
+        if raw is None:
+            raw = request.form.get('deployment_code', '')
+        code = str(raw or '').strip()
+        if not re.fullmatch(r'[A-Za-z0-9_-]{4,64}', code):
+            return jsonify({'success': False, 'error': 'invalid_format',
+                            'message': _('部署码格式不正确（4-64 位字母、数字、- 或 _）')}), 400
+
+        if _ls is None:
+            return jsonify({'success': False, 'error': 'license_service_unavailable',
+                            'message': _('授权服务不可用，请联系服务商')}), 503
+
+        # 快照旧缓存：一次错误输入不能毁掉机器上已有的有效授权
+        try:
+            old_cache = _ls._get_config('license_status')
+        except Exception:
+            old_cache = None
+
+        try:
+            _ls.refresh(code)
+        except Exception as e:
+            app.logger.warning('[License] 部署码提交异常 (%s): %s',
+                               _mask_deployment_code(code), str(e)[:200])
+            return jsonify({'success': False, 'error': 'refresh_failed',
+                            'message': _('授权刷新失败，请稍后重试')}), 502
+
+        hb = getattr(_ls, 'last_heartbeat', None) or {}
+        if not hb.get('valid'):
+            # 心跳层已写入 valid=False 缓存 → 恢复旧值，保持原授权状态不变
+            try:
+                _ls._set_config('license_status', old_cache if old_cache is not None else '{}')
+                _ls._cache = {'result': None, 'timestamp': 0}
+            except Exception as e:
+                app.logger.warning('[License] 恢复旧授权缓存失败: %s', str(e)[:200])
+
+            try:
+                hb_days = int(hb.get('days_remaining'))
+            except (TypeError, ValueError):
+                hb_days = None
+
+            if hb.get('http_status') is None:
+                error, msg, http_code = ('unreachable',
+                                         _('无法连接授权服务器（网络不可达），请检查网络后重试'),
+                                         502)
+            elif not hb.get('ok'):
+                error, msg, http_code = ('heartbeat_error',
+                                         _('授权服务器返回异常（HTTP %s），请稍后重试')
+                                         % hb.get('http_status'), 502)
+            elif (hb.get('status') or '').lower() == 'expired' or (hb_days is not None and hb_days <= 0):
+                error, msg, http_code = ('expired',
+                                         _('该部署码已过期，请续费或联系服务商'), 400)
+            else:
+                error, msg, http_code = ('invalid_code',
+                                         _('部署码无效，请检查后重试'), 400)
+            app.logger.info('[License] 部署码提交失败 (%s): %s',
+                            _mask_deployment_code(code), error)
+            return jsonify({'success': False, 'error': error, 'message': msg}), http_code
+
+        try:
+            _ls._set_config('deployment_code', code)
+        except Exception as e:
+            app.logger.error('[License] 部署码已通过心跳但写入失败 (%s): %s',
+                             _mask_deployment_code(code), str(e)[:200])
+            return jsonify({'success': False, 'error': 'persist_failed',
+                            'message': _('部署码校验通过但保存失败，请检查数据库后重试')}), 500
+        _ls._cache = {'result': True, 'timestamp': _time.time()}
+        status = _ls.get_status()
+
+        expires_at = status.get('expires_at')
+        if isinstance(expires_at, (int, float)):
+            exp_text = _time.strftime('%Y-%m-%d %H:%M', _time.localtime(expires_at))
+        else:
+            exp_text = str(expires_at or _('未知'))
+        days = status.get('days_remaining', 0)
+        app.logger.info('[License] 部署码提交成功 (%s): status=%s days_remaining=%s',
+                        _mask_deployment_code(code), status.get('status'), days)
+        return jsonify({
+            'success': True,
+            'message': _('部署码验证成功（状态：%s，剩余 %s 天，到期时间：%s）')
+                       % (status.get('status', ''), days, exp_text),
+            'status': status.get('status'),
+            'days_remaining': days,
+            'expires_at': expires_at,
+        })
 
     @app.route('/admin/api/license-refresh', methods=['POST'])
     def admin_license_refresh_api():
@@ -1653,6 +1801,67 @@ def admin_update():
         except Exception:
             pass
 
+    # ── L3 预检（只读）：任一失败直接 400，不写状态、不启动子进程 ──
+    from shared.edition import normalize_edition, edition_artifact_stem
+    _env_path = os.path.join(_project_root, '.env')
+    if not os.path.isfile(_env_path) or not os.access(_env_path, os.R_OK):
+        return jsonify({'success': False, 'error': _('站点 .env 缺失或不可读，已拒绝更新')}), 400
+    _env_kv = {}
+    try:
+        with open(_env_path, 'r', encoding='utf-8', errors='replace') as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if not _line or _line.startswith('#') or '=' not in _line:
+                    continue
+                _k, _v = _line.split('=', 1)
+                _env_kv[_k.strip()] = _v.strip().strip('"').strip("'")
+    except OSError:
+        return jsonify({'success': False, 'error': _('站点 .env 不可读，已拒绝更新')}), 400
+
+    _edition_norm = normalize_edition(_env_kv.get('VR_EDITION', '') or 'standard')
+    try:
+        edition_artifact_stem(_edition_norm)
+    except RuntimeError:
+        return jsonify({'success': False, 'error': _('发行版已下架，请先修正 .env 的 VR_EDITION')}), 400
+
+    # 分派：官方版走 install-official.sh（install.sh 会直接拒绝官方版站点）
+    _script = 'install-official.sh' if _edition_norm in ('official', 'enterprise') else 'install.sh'
+    _install_sh = os.path.join(_project_root, 'deploy', _script)
+    if not os.path.isfile(_install_sh):
+        return jsonify({'success': False, 'error': _('更新脚本缺失：') + _install_sh}), 400
+
+    _has_git = os.path.isdir(os.path.join(_project_root, '.git'))
+    _origin = ''
+    if _has_git:
+        try:
+            _r = subprocess.run(['git', '-C', _project_root, 'remote', 'get-url', 'origin'],
+                                capture_output=True, text=True, timeout=5)
+            _origin = (_r.stdout or '').strip()
+        except Exception:
+            _origin = ''
+        if not _origin:
+            return jsonify({'success': False, 'error': _('git origin 不可解析，已拒绝更新')}), 400
+    elif not os.path.isfile(os.path.join(_project_root, '.verorun-edition')):
+        return jsonify({'success': False, 'error': _('.git 与 .verorun-edition 均不存在，无法判定通道')}), 400
+
+    # 服务运行用户 ≠ 安装用户时，install.sh 按 SUDO_USER 推导 APP_HOME 会指错路径 —— 显式透传。
+    _app_user = ''
+    try:
+        import pwd
+        _app_user = pwd.getpwuid(os.stat(_project_root).st_uid).pw_name
+    except Exception:
+        _app_user = ''
+    _install_source = _env_kv.get('INSTALL_SOURCE', 'git') or 'git'
+    _release_dir = _env_kv.get('RELEASE_DIR', '')
+    _argv = ['sudo', f'APP_HOME={_project_root}']
+    if _app_user:
+        _argv.append(f'APP_USER={_app_user}')
+    _argv.append(f'INSTALL_SOURCE={_install_source}')
+    if _release_dir:
+        _argv.append(f'RELEASE_DIR={_release_dir}')
+    # 每次后台触发都显式置 0：避免 .env 残留值意外关掉 origin 熔断。
+    _argv += ['FORCE_UPDATE=0', 'ACCEPT_REPO_CHANGE=0', 'bash', _install_sh, 'update']
+
     # Write initial status
     os.makedirs(_log_dir, exist_ok=True)
     _status = {'status': 'running', 'progress': 0, 'message': 'Starting update...', 'error': None}
@@ -1669,11 +1878,12 @@ def admin_update():
                 log.write(f"\n=== Update started at {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
                 log.flush()
 
-                install_sh = os.path.join(_project_root, 'deploy', 'install.sh')
-                _write_status('running', 10, 'Fetching updates from remote...')
+                _write_status('running', 10, f'Updating ({_edition_norm}) via {_script}...')
+                log.write(f"target: {_script} edition={_edition_norm} origin={_origin or 'n/a'}\n")
+                log.flush()
 
                 proc = subprocess.Popen(
-                    ['sudo', 'bash', install_sh, 'update'],
+                    _argv,
                     cwd=_project_root,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
@@ -1717,7 +1927,8 @@ def admin_update():
     admin_check_update._cache = None
     threading.Thread(target=_do_update, daemon=True).start()
 
-    return jsonify({'success': True, 'message': _('Update started'), 'log_file': _log_file})
+    return jsonify({'success': True, 'message': _('Update started'), 'log_file': _log_file,
+                    'edition': _edition_norm, 'origin': _origin})
 
 
 @app.route('/admin/api/update-status', methods=['GET'])

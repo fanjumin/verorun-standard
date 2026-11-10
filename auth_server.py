@@ -18,9 +18,13 @@ AUTH_DIR = os.path.join(_SCRIPT_DIR, 'auth-center')
 sys.path.insert(0, AUTH_DIR)
 sys.path.append(_SCRIPT_DIR)
 
+# L5：启动前置校验（已下架发行版单行退出，避免首次角色加载才抛 traceback）
+from shared.edition import assert_supported_edition as _assert_edition
+_assert_edition()
+
 from services.deployment_config import deploy
 
-from flask import Flask, render_template, make_response, request, jsonify
+from flask import Flask, render_template, make_response, request, jsonify, Response
 import urllib.request as _ur
 from auth_blueprint import register_auth
 
@@ -235,6 +239,39 @@ def site_features():
 def site_contact():
     site_plans = _get_site_plans()
     return render_template('public_home.html', LANG=deploy.LANG, site_plans=site_plans)
+
+
+@app.route('/robots.txt')
+def robots_txt():
+    """站点根 robots.txt（此前缺失，返回 404 且无 Sitemap 指引）"""
+    base = request.host_url.rstrip('/')
+    body = '\n'.join([
+        'User-agent: *',
+        'Allow: /',
+        'Disallow: /admin',
+        'Disallow: /api/',
+        'Disallow: /user-console/',
+        'Disallow: /orders',
+        'Disallow: /api-keys',
+        '',
+        'Sitemap: %s/sitemap.xml' % base,
+        '',
+    ])
+    return Response(body, mimetype='text/plain')
+
+
+@app.route('/sitemap.xml')
+def sitemap_xml():
+    """站点地图：仅列出无需登录即可访问的公开页面"""
+    base = request.host_url.rstrip('/')
+    paths = ['/', '/products', '/pricing', '/articles', '/news',
+             '/download', '/help', '/about', '/contact',
+             '/privacy_policy', '/terms_of_service']
+    urls = ''.join('  <url><loc>%s%s</loc></url>\n' % (base, p) for p in paths)
+    xml = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+           '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+           + urls + '</urlset>\n')
+    return Response(xml, mimetype='application/xml')
 
 
 @app.route('/login')

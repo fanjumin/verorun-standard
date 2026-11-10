@@ -1,11 +1,11 @@
-# VeroRun — 企业多核 AI 操作系统
+# Tarka — 企业多核 AI 操作系统
 
 [![Version](https://img.shields.io/badge/version-0.67.0-blue.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-EULA%20v1.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)]()
 [![Plugins](https://img.shields.io/badge/plugins-50-orange.svg)]()
 
-**VeroRun 是让智能执行可信、可验证、可追溯的多核 AI 操作系统——智能体协作、知识检索、内容生成与流程编排等核心能力并行驱动，部署在客户自有服务器上独立运转。**
+**Tarka 是让智能执行可信、可验证、可追溯的多核 AI 操作系统——智能体协作、知识检索、内容生成与流程编排等核心能力并行驱动，部署在客户自有服务器上独立运转。**
 
 引擎底座提供五类智能执行原语：**Multi-Agent 协作**（角色矩阵 + 任务分解 + 并行调度 + 自评重试 + Reflexion 记忆进化）、**知识检索**（RAG 混合检索：pgvector 向量 + pg_trgm 关键词 + RRF 融合 + 分层记忆）、**流程编排**（DAG 工作流引擎 + 事件总线触发 + Cron 调度）、**模型接入**（UnifiedLLM 网关，provider-agnostic，透明路由 + 自动故障转移）、**资产守护**（VeroGuard 完整性校验 + 离线 HMAC-SHA256 许可）。原语经 HTTP API、Cron 或事件总线触发，由 Master Agent 分解为子任务、分派专业 Agent 并行执行并汇总，产出 PPTX/DOCX/Markdown 文档、图像、结构化数据、知识库 embedding 或告警通知。业务能力以插件形式装配于内核之上——插件即应用，插件即行业。
 
@@ -121,7 +121,7 @@ flask run --port 8081
 
 ### AI 引擎 — 多角色 Agent 矩阵（Athena + 9 个子角色 = 10 个核心角色）
 
-VeroRun 将复杂任务交给一组有分工、可评审的 Agent 角色：主控分解任务，子角色各司其职，评审质疑方案，决策签署结论。
+Tarka 将复杂任务交给一组有分工、可评审的 Agent 角色：主控分解任务，子角色各司其职，评审质疑方案，决策签署结论。
 
 | 角色 | Slug | 类型 | 模型 | 职责 |
 |---|---|---|---|---|
@@ -309,7 +309,7 @@ v2 另外补齐一整套研究栈（源自专项实施方案）：`secmaster` �
 
 ## 商业模型与区域路由
 
-**分发与版本**：VeroRun 以单一代码库构建版本家族——标准企业包、finance-desktop、research-desktop、minipro、omni（版本组成由 `deploy/editions/*.yaml` 驱动；按 tag 以签名 Release 资产发布）。商业部署依据下方 EULA 授权。
+**分发与版本**：Tarka 以单一代码库构建版本家族——标准企业包、finance-desktop、research-desktop、minipro、omni（版本组成由 `deploy/editions/*.yaml` 驱动；按 tag 以签名 Release 资产发布）。商业部署依据下方 EULA 授权。
 
 **商业模型**：插件购买、订阅与商业授权构成主要收入来源；标准企业包按需装配插件，商业生产部署需有效商业授权。
 
@@ -372,7 +372,7 @@ verorun version
 ## 目录结构
 
 ```text
-VeroRun/
+Tarka/
 ├── admin/                  # 管理后台（8084）
 ├── auth-center/            # 共享鉴权/模型/服务/路由（共享代码库）
 ├── main_site/              # 平台控制台 / 用户后端（8083）
@@ -436,7 +436,7 @@ VeroRun/
 
 ## 许可证
 
-VeroRun 采用**源码可见（Source-Available）的专有许可**，依据 [VeroRun Base EULA v1.0](LICENSE) 分发。
+Tarka 采用**源码可见（Source-Available）的专有许可**，依据 [Tarka Base EULA v1.0](LICENSE) 分发。
 
 **分发矩阵**：
 
@@ -465,4 +465,4 @@ VeroRun 采用**源码可见（Source-Available）的专有许可**，依据 [Ve
 - **CI 新鲜度门禁**：`tests.yml` 每次运行都校验 `veroguard/data/manifest.json` 与 `VERSION` 一致，清单过期则 CI 直接失败（修复方式：GitHub Actions 手动触发 "Refresh VeroGuard Manifest"）。
 - **远程命令**（6 个）：`warn`、`lock_ai`、`lock_full`、`shutdown`、`self_destruct`、`update_config`；破坏性命令（`shutdown` / `self_destruct`）额外要求本地 ops-token 确认。
 
-Copyright (c) 2024-2026 VeroRun AI. All rights reserved. 详见 [LICENSE](LICENSE)。
+Copyright (c) 2024-2026 Tarka AI. All rights reserved. 详见 [LICENSE](LICENSE)。

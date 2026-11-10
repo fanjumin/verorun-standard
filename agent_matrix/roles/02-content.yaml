@@ -38,3 +38,10 @@ allowed_tools:
   - cms_list_channels
   - cms_create_post
   - cms_publish_post
+  - mcp__content_factory__content__get_stats
+  - mcp__content_factory__content__list_sources
+  - mcp__content_factory__content__list_pending
+  - mcp__content_factory__content__get_processed
+  - mcp__content_factory__content__get_content
+  - mcp__content_factory__content__create_source
+  - mcp__content_factory__content__trigger_crawl

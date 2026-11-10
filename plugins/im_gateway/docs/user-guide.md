@@ -7,7 +7,7 @@ third-party login.
 
 ## 1. Prerequisites
 
-- VeroRun app ≥ 0.10.0.
+- Tarka app ≥ 0.10.0.
 - Bot tokens / webhook URLs for the channels you want.
 
 ---

@@ -33,7 +33,7 @@ class EmailPlugin(BasePlugin):
         info = getattr(self, 'plugin_info', None)
         return getattr(info, 'version', None) or '0.1.0'
     description = 'Email Service — SMTP/IMAP email client with inbox, compose, attachments, and contact management'
-    author = 'VeroRun'
+    author = 'Tarka'
 
     def on_install(self, registry):
         """安装时初始化独立 PG schema: email"""
@@ -217,7 +217,7 @@ class EmailPlugin(BasePlugin):
         """告警邮件 (subject, body)，文案对齐 im_gateway._format_alert_text。"""
         symbol = ev.get('symbol') or ''
         name = ev.get('name') or symbol
-        subject = _("[VeroRun Alert] {name} ({symbol})", name=name, symbol=symbol).strip()
+        subject = _("[Tarka Alert] {name} ({symbol})", name=name, symbol=symbol).strip()
         lines = [subject, '',
                  _("Symbol: {name} ({symbol})", name=name, symbol=symbol).strip()]
         if ev.get('message'):
@@ -234,7 +234,7 @@ class EmailPlugin(BasePlugin):
         if ev.get('at'):
             lines.append(_("Time: {time}", time=ev['at']))
         lines.append('')
-        lines.append(_("— This email was sent automatically by the VeroRun alert engine. "
+        lines.append(_("— This email was sent automatically by the Tarka alert engine. "
                        "It is for research reference only and does not constitute investment advice."))
         return subject, '\n'.join(lines)
 
@@ -265,7 +265,7 @@ class EmailPlugin(BasePlugin):
     def _format_morning_mail(ev: dict):
         """晨报邮件 (subject, body)。"""
         td = ev.get('trade_date') or ''
-        subject = _("[VeroRun Morning Brief] Trading-day signal summary for {date}", date=td)
+        subject = _("[Tarka Morning Brief] Trading-day signal summary for {date}", date=td)
         lines = [subject, '',
                  _("Trading day: {date}", date=td),
                  _("Total signals: {count}", count=ev.get('total', 0))]
@@ -284,7 +284,7 @@ class EmailPlugin(BasePlugin):
                 lines.append('  - {} ({}){}'.format(
                     it.get('name') or it.get('symbol'), it.get('symbol'), conf_s))
         lines.append('')
-        lines.append(_("— This email was sent automatically by the VeroRun morning brief task. "
+        lines.append(_("— This email was sent automatically by the Tarka morning brief task. "
                        "It is for research reference only and does not constitute investment advice."))
         return subject, '\n'.join(lines)
 

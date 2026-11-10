@@ -20,6 +20,7 @@ ERROR_CODES = {
     'NOT_FOUND': 40401,
     'CONFLICT': 40901,
     'RATE_LIMITED': 42901,
+    'NEEDS_CONFIG': 42201,
     'INTERNAL': 50001,
     'PAYMENT_NOT_CONFIGURED': 50002,
 }
@@ -51,6 +52,22 @@ def api_err(msg, http_code=400, code=None, **extra):
     body = {'success': False, 'error': msg, 'code': code}
     body.update(extra)
     return jsonify(body), http_code
+
+
+def needs_config_response(msg, config_path=''):
+    """缺前置配置（非故障）统一响应：422 + 结构化标记。
+
+    为什么是 422 而不是 5xx：5xx 在桌面壳层被翻译成「程序坏了」（如 502 →
+    「服务器网关异常」），而「邮箱未配置 / 数据源缺 Key」是用户可自解的前置条件，
+    必须与故障在传输层就分开。error_code='NEEDS_CONFIG' 与 meta.needs_config
+    是桌面壳层 http.ts 拦截器的识别契约：命中即抑制全局故障红字，改走配置引导。
+    config_path 为壳层路由（如 '/mail?tab=config'），供引导跳转使用。
+    """
+    return api_err(
+        msg, 422, code=ERROR_CODES['NEEDS_CONFIG'],
+        error_code='NEEDS_CONFIG',
+        meta={'needs_config': True, 'config_path': config_path},
+    )
 
 
 def _parse_positive_int(name: str, default: int, lo: int = 1, hi: int = 100000) -> int:

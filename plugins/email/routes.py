@@ -19,6 +19,7 @@ from flask import Blueprint, request, jsonify, send_file
 
 from plugins.email.services import _MAIL_KEYS  # 修复 EM-D1: POST handler 使用（原仅 GET handler 内局部导入）
 from plugins.email.mail_providers import localized_providers, get_provider_by_domain  # 服务商预置清单（单一数据源）
+from shared.http import needs_config_response
 
 email_bp = Blueprint('email', __name__, url_prefix='/admin/email')
 
@@ -59,6 +60,10 @@ def admin_email_inbox():
         # fetch_inbox 失败时返回 {error, items: []}；旧实现仍包 success:True，
         # 于是"IMAP 连不上"在界面上表现为"收件箱为空"。
         if emails.get('error'):
+            # 未配置 ≠ 故障（2026-11-10）：502 会被壳层翻译成「服务器网关异常」，
+            # 误导用户以为程序坏了。缺配置走 422 NEEDS_CONFIG，壳层改弹配置引导。
+            if emails.get('needs_config'):
+                return needs_config_response(emails['error'], '/mail?tab=config')
             return jsonify({'success': False, 'error': emails['error'], 'data': emails}), 502
         return jsonify({'success': True, 'data': emails})
     except Exception:
@@ -75,6 +80,9 @@ def admin_email_read(uid):
     from plugins.email.services import read_email
     try:
         email_data = read_email(uid)
+        # 与 /inbox 契约对齐（2026-11-10）：未配置走 422 NEEDS_CONFIG，非故障
+        if email_data.get('error') and email_data.get('needs_config'):
+            return needs_config_response(email_data['error'], '/mail?tab=config')
         return jsonify({'success': True, 'data': email_data})
     except Exception:
         logger.exception('[email] read failed uid=%s', uid)
@@ -98,6 +106,13 @@ def admin_email_send():
     bcc = data.get('bcc')
     if not to_addr or not subject or (not body and not body_html):
         return jsonify({'success': False, 'error': _('Recipient, subject, and content cannot be empty')}), 400
+    # 未配置先行拦截（2026-11-10）：缺配置走 422 NEEDS_CONFIG 而非 400 故障文案，
+    # 壳层据此抑制红字、改弹配置引导；已配置但投递失败才落 400。
+    cfg_err = None
+    from plugins.email.services import mail_config_error
+    cfg_err = mail_config_error()
+    if cfg_err:
+        return needs_config_response(cfg_err, '/mail?tab=config')
     from plugins.email.services import send_email
     try:
         ok, msg = send_email(to_addr, subject, body or '',

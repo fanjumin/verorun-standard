@@ -24,6 +24,9 @@ plugins:
   include:
     - _base
     - oauth_config
+    # 注册/登录防刷：滑块验证码（2026-11-09 修复 P0-01；此前不在 tarka 白名单，
+    # 插件路由被 PluginManager 门卫统一拦截为 404）
+    - captcha_embedded
     # ── Web 呈现层（13）──
     - site_builder
     - chatbot
@@ -33,7 +36,11 @@ plugins:
     - survey
     - coupons
     # shop 已于 2026-11-03 移除：coupons v1.5.5 解除 order_items 硬绑定（优雅降级），
-    # 无商城 edition 不再需要 shop；此前补入系 coupons 未声明隐式依赖的临时兜底
+    # 无商城 edition 不再需要 shop；此前补入系 coupons 未声明隐式依赖的临时兜底。
+    # 2026-11-09 用户裁决「shop、1688 等都应作为商务中心」：tarka 重新纳入 shop 与 ali_api，
+    # 用于桌面「商务中心」的商品管理 / 1688 选品上架；coupons→order_items 仍走优雅降级，不构成硬依赖。
+    - shop
+    - ali_api
     - hr_recruit
     - ads
     - mini_app_builder

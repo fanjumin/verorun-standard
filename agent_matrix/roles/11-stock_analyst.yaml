@@ -23,3 +23,10 @@ model_name: deepseek-v4-flash
 system_prompt: prompts/sub_stock_analyst_prompt.md
 is_system: true
 is_active: 1
+allowed_tools:
+  - mcp__multi_asset__asset__resolve_symbol
+  - mcp__multi_asset__asset__get_bars
+  - mcp__multi_asset__asset__get_quote
+  - mcp__multi_asset__asset__search_instrument
+  - mcp__multi_asset__asset__get_profile
+  - mcp__multi_asset__asset__get_constants

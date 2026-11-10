@@ -415,7 +415,7 @@ def admin_downloads_create():
     uploaded_file = request.files.get('file') if not request.is_json else None
     if uploaded_file and uploaded_file.filename:
         import os
-        dl_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'static', 'downloads')
+        dl_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'admin', 'static', 'downloads')
         os.makedirs(dl_dir, exist_ok=True)
         ext = os.path.splitext(uploaded_file.filename)[1]
         safe_name = slug + ext
@@ -460,7 +460,7 @@ def admin_downloads_update(dl_id):
     uploaded_file = request.files.get('file') if not request.is_json else None
     if uploaded_file and uploaded_file.filename:
         import os
-        dl_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'static', 'downloads')
+        dl_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'admin', 'static', 'downloads')
         os.makedirs(dl_dir, exist_ok=True)
         slug = data.get('slug', '') or str(dl_id)
         ext = os.path.splitext(uploaded_file.filename)[1]
@@ -525,6 +525,19 @@ def admin_downloads_reorder():
 MEDIA_LIB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                '..', '..', 'admin', 'static', 'media')
 
+# 媒体库扩展名白名单：MIME 一律由服务端按扩展名判定，绝不信任客户端 content_type。
+# 历史缺陷：任意扩展名可入库（含 .html/.svg），nginx 只对 uploads 目录强制下载，
+# media 目录会以 text/html 同源返回 → 存储型 XSS。此处直接拒绝非媒体类型。
+_MEDIA_MIME_BY_EXT = {
+    '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.avi': 'video/x-msvideo',
+    '.webm': 'video/webm', '.mkv': 'video/x-matroska', '.flv': 'video/x-flv',
+    '.m4v': 'video/mp4',
+    '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg',
+    '.flac': 'audio/flac', '.m4a': 'audio/mp4', '.aac': 'audio/aac',
+    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+    '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp',
+}
+
 def _media_lib_ensure_dir():
     os.makedirs(MEDIA_LIB_DIR, exist_ok=True)
     os.makedirs(os.path.join(MEDIA_LIB_DIR, 'thumbs'), exist_ok=True)
@@ -539,9 +552,14 @@ def media_library_upload():
     f = request.files['file']
     if not f.filename:
         return jsonify({'success': False, 'error': _('File name is empty')}), 400
+    ext = os.path.splitext(f.filename)[1].lower()
+    mime = _MEDIA_MIME_BY_EXT.get(ext)
+    if not mime:
+        return jsonify({'success': False,
+                        'error': _('Unsupported file type: {ext}', ext=ext or '?')}), 400
     _media_lib_ensure_dir()
     import uuid as _uuid
-    safe_name = _uuid.uuid4().hex + os.path.splitext(f.filename)[1].lower()
+    safe_name = _uuid.uuid4().hex + ext
     save_path = os.path.join(MEDIA_LIB_DIR, safe_name)
     MAX_UPLOAD_SIZE = 100 * 1024 * 1024  # 100MB
     file_data = f.read()
@@ -550,15 +568,6 @@ def media_library_upload():
     with open(save_path, 'wb') as fout:
         fout.write(file_data)
     file_size = len(file_data)
-    mime = f.content_type or 'application/octet-stream'
-    # 兜底：浏览器可能不传正确 content_type，按扩展名补
-    if mime == 'application/octet-stream' or not mime:
-        ext = os.path.splitext(f.filename)[1].lower()
-        ext_map = {'.mp4':'video/mp4','.mov':'video/quicktime','.avi':'video/x-msvideo',
-                   '.webm':'video/webm','.mkv':'video/x-matroska','.flv':'video/x-flv','.m4v':'video/mp4',
-                   '.mp3':'audio/mpeg','.wav':'audio/wav','.ogg':'audio/ogg','.flac':'audio/flac',
-                   '.jpg':'image/jpeg','.jpeg':'image/jpeg','.png':'image/png','.gif':'image/gif','.webp':'image/webp'}
-        mime = ext_map.get(ext, mime)
     # 缩略图：视频缩略图由本地 FFmpeg 预生成后一并上传，服务器仅存储分发
     # 图片本身就是缩略图，不设 thumb_path，前端用 file_path 显示
     thumb_name = ''

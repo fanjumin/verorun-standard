@@ -622,6 +622,7 @@ _EDITION_CATALOG_SEED = (
     ('finance',    'Edition Finance',      'desktop', ()),
     ('research',   'Edition Research',     'desktop', ()),
     ('minipro',    'Edition Mini Program', 'web',     ()),
+    ('omni-service', 'Edition Omni Service', 'web',   ()),
 )
 
 

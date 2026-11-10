@@ -376,15 +376,44 @@ def sanitize_html(raw: str) -> str:
     return cleaned
 
 
-def upsert_post(data: dict):
+def _is_blank_html(html: str) -> bool:
+    """判断正文是否为空（仅剩空白 / &nbsp; / 空标签）。"""
     import re
+    text = re.sub(r'<[^>]*>', '', html or '')
+    return not text.replace('&nbsp;', ' ').replace('\u00a0', ' ').strip()
+
+
+def upsert_post(data: dict):
+    import re, uuid
     # HTML 内容净化（白名单式）
     content = data.get('content', '')
     data['content'] = sanitize_html(content)
+    # slug 规范化（2026-11-10 P0-01）：后台表单恒传空串，空值直接写库会与已有
+    # 空 slug 行撞 cms_posts.slug 唯一约束 → 未捕获 IntegrityError → 500。
+    # 规则：非空则去空格写库；更新时空值直接丢弃该字段（保留原 slug，避免改 URL）；
+    # 新建时才生成 article-xxxx。
+    if 'slug' in data:
+        _slug = str(data.get('slug') or '').strip()
+        if _slug:
+            data['slug'] = _slug
+        elif data.get('id'):
+            data.pop('slug')
+        else:
+            data['slug'] = 'article-' + uuid.uuid4().hex[:8]
     channels_json = json.dumps(data.get('publish_channels', []), ensure_ascii=False)
     tags_json = json.dumps(data.get('tags', []), ensure_ascii=False) if isinstance(data.get('tags'), list) else data.get('tags', '[]')
     with get_db() as conn:
         if data.get('id'):
+            # 服务端防护（2026-11-10 P1-03）：拒绝用「空标题 + 空正文」覆盖已有内容，
+            # 避免编辑器加载竞态导致静默清空文章。
+            if ('title' in data and 'content' in data
+                    and not str(data.get('title') or '').strip()
+                    and _is_blank_html(data.get('content'))):
+                row = conn.execute(
+                    'SELECT content FROM cms_posts WHERE id=%s', (data['id'],)
+                ).fetchone()
+                if row and not _is_blank_html(row['content']):
+                    raise ValueError('empty_title_and_body')
             # 动态 UPDATE：仅更新请求中显式提供的字段，避免 PUT 增量提交
             # 时未传字段被重置（content 清空 / category 回退 / is_published 归 0）。
             updates = []

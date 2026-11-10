@@ -24,4 +24,7 @@ sys.path = [p for p in sys.path if p != '']
 # Run gunicorn with remaining args
 from gunicorn.app.wsgiapp import run
 if __name__ == '__main__':
+    # L5：启动前置校验（在父进程执行，早于 worker fork）
+    from shared.edition import assert_supported_edition
+    assert_supported_edition()
     run()

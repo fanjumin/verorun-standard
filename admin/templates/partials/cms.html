@@ -34,9 +34,9 @@ function cmsTabArticle(){
   h+='<div id="cmsChannelSocial"><div style="font-size:10px;color:var(--dim);margin-bottom:3px">{{ _('Social Media Platform') }}</div><div id="cmsChSocialList"></div></div>';
   h+='</div>';
   h+='<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">';
-  h+='<button class="btn bo" onclick="cmsSaveDraft()">💾 {{ _('Save Draft') }}</button> ';
+  h+='<button class="btn bo" onclick="cmsSaveDraft()" id="cmsSaveDraftBtn">💾 {{ _('Save Draft') }}</button> ';
   h+='<button class="btn bo bs" onclick="cmsPreviewPost()" id="cmsPreviewBtn" style="display:none">👁 {{ _('Preview') }}</button> ';
-  h+='<button class="btn bp" onclick="cmsPublishPost()">📤 {{ _('Publish to Selected Channels') }}</button> ';
+  h+='<button class="btn bp" onclick="cmsPublishPost()" id="cmsPublishBtn">📤 {{ _('Publish to Selected Channels') }}</button> ';
   h+='<button class="btn bo" onclick="cmsGenerateStatic()">🗂 {{ _('Generate Static Pages') }}</button> ';
   h+='<button class="btn bo" onclick="cmsCloseForm()">{{ _('Cancel') }}</button><input type="hidden" id="cmsPEid"></div></div>';
   h+='<div class="cd"><div class="st">{{ _('Article List') }}</div><table><tr><th>ID</th><th>{{ _('Title') }}</th><th>{{ _('Column') }}</th><th>{{ _('Author') }}</th><th>{{ _('Status') }}</th><th>{{ _('Publish Channel') }}</th><th>👀</th><th>{{ _('Time') }}</th><th>{{ _('Actions') }}</th></tr><tbody id="cmsPostBody"></tbody></table></div>';
@@ -181,10 +181,24 @@ function cmsNewPost(){
   setTimeout(function(){cmsInitQuill("")},100);
 }
 
+var cmsFormLocked=false;
+// 2026-11-10 P1-03：编辑表单数据未填充完成前禁止保存/发布，避免空表单覆盖文章
+function cmsSetFormLocked(locked){
+  cmsFormLocked=!!locked;
+  var ids=["cmsSaveDraftBtn","cmsPublishBtn","cmsPreviewBtn"];
+  for(var i=0;i<ids.length;i++){
+    var b=document.getElementById(ids[i]);
+    if(!b)continue;
+    b.disabled=!!locked;
+    b.style.opacity=locked?"0.5":"";
+  }
+}
+
 function cmsEditPost(id){
   var p=null;
   for(var i=0;i<cmsPosts.length;i++){if(cmsPosts[i].id===id){p=cmsPosts[i];break}}
   if(!p){showToast("{{ _('Not found') }}","error");return}
+  cmsSetFormLocked(true);
   document.getElementById("cmsFormTitle").textContent="{{ _('Edit Article #') }}"+p.id;
   document.getElementById("cmsPEid").value=p.id;
   document.getElementById("cmsPTitle").value=p.title||"";
@@ -204,11 +218,12 @@ function cmsEditPost(id){
     document.querySelectorAll(".cmsChSocial").forEach(function(cb){
       cb.checked=saved.indexOf(cb.value)>=0;
     });
-    cmsInitQuill(p.content||"")
+    try{cmsInitQuill(p.content||"")}finally{cmsSetFormLocked(false)}
   },100);
 }
 
 function cmsCloseForm(){
+  cmsSetFormLocked(false);
   document.getElementById("cmsPostForm").style.display="none";
 }
 
@@ -264,6 +279,7 @@ function cmsGetSelectedChannels(){
 }
 
 function cmsSaveDraft(){
+  if(cmsFormLocked){showToast("{{ _('Loading...') }}","");return}
   var data=cmsGetFormData();
   if(!data.title||!data.content||data.content==="<p><br></p>"){showToast("{{ _('Title and body are required') }}","error");return}
   data.is_published=0;
@@ -286,6 +302,7 @@ function cmsSaveDraft(){
 }
 
 function cmsPublishPost(){
+  if(cmsFormLocked){showToast("{{ _('Loading...') }}","");return}
   var data=cmsGetFormData();
   if(!data.title||!data.content||data.content==="<p><br></p>"){showToast("{{ _('Title and body are required') }}","error");return}
   var channels=cmsGetSelectedChannels();

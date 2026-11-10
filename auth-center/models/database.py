@@ -438,7 +438,7 @@ def init_db():
             INSERT INTO system_config (key, value, description) VALUES
                 ('default_language', 'zh-CN', 'Default system language'),
                 ('default_timezone', 'Asia/Shanghai', 'Default timezone'),
-                ('site_name', 'VeroRun', 'Site display name'),
+                ('site_name', 'Tarka', 'Site display name'),
                 ('admin_email', '', 'Admin contact email'),
                 ('maintenance_mode', '0', 'System maintenance mode')
             ON CONFLICT (key) DO NOTHING;
@@ -640,6 +640,7 @@ def init_db():
                 endpoint_url    TEXT NOT NULL DEFAULT '',
                 api_key_ref     TEXT NOT NULL DEFAULT '',
                 capabilities    TEXT NOT NULL DEFAULT 'text',
+                embedding_dim   INTEGER NOT NULL DEFAULT 1536,
                 sort_order      BIGINT DEFAULT 0,
                 is_active       BIGINT DEFAULT 1,
                 created_at      TIMESTAMP DEFAULT NOW(),
@@ -2068,7 +2069,7 @@ def init_db():
         if cnt['c'] < 25:
             # i18n:tech:begin — 演示 FAQ 种子数据（入库后可由后台编辑），非 UI 文案
             faq_seeds_data = [
-                ('kb_faq_faq_p1', '你们的产品有哪些功能？', 'VeroRun(RuiCe AI)是生成式AI平台，支持智能对话（多模型）、AI建站、AI内容生成、数据清洗、知识库管理等。具体可查看官网产品页面或试用体验。', '功能,产品,能力,特性', 'faq', 6),
+                ('kb_faq_faq_p1', '你们的产品有哪些功能？', '塔卡投研（Tarka AI）是生成式AI平台，支持智能对话（多模型）、AI建站、AI内容生成、数据清洗、知识库管理等。具体可查看官网产品页面或试用体验。', '功能,产品,能力,特性', 'faq', 6),
                 ('kb_faq_faq_p2', '支持哪些AI模型？', '我们通过 Agent Matrix 体系支持多种AI模型，包括 DeepSeek（推荐）、阿里通义千问、以及 OpenAI 兼容接口。模型选择可在系统设置中配置。', '模型,AI,DeepSeek,千问,OpenAI', 'tech', 6),
                 ('kb_faq_faq_p3', '怎么收费？有哪些套餐？', '我们提供基础版(¥299/月)、专业版(¥899/月)、企业版(¥2999/月)三档套餐。每个套餐赠送不同额度的API调用量。具体价格请查看官网定价页面或联系商务获取最新报价。', '价格,多少钱,费用,报价,收费,套餐,月付', 'price', 7),
                 ('kb_faq_faq_p4', '有免费试用吗？', '是的！新用户注册即享免费体验额度。无需绑定支付方式即可试用。基础版可免费使用部分核心功能。', '免费,试用,体验,测试', 'price', 7),
@@ -2078,7 +2079,7 @@ def init_db():
                 ('kb_faq_faq_a2', '对话记录在哪里查看？', '登录用户控制台，在「对话历史」中可以查看和搜索所有历史对话记录。', '记录,历史,对话,查看,搜索', 'service', 5),
                 ('kb_faq_faq_a4', '忘记密码了怎么办？', '在登录页面点击「忘记密码」，输入注册时绑定的信息即可重置密码。如未绑定，请联系客服协助处理。', '密码,忘记,重置,找回', 'service', 6),
                 ('kb_faq_faq_o2', '数据安全吗？隐私如何保护？', '我们高度重视数据安全：对话内容加密传输和存储，不会用于模型训练，用户可随时管理自己的数据。详细请查看官网法律声明。', '安全,隐私,数据,加密,保护', 'company', 7),
-                ('kb_faq_whitepaper', 'VeroRun白皮书', 'VeroRun(RuiCe AI)是新一代AI驱动的智能建站与企业数字化平台。系统集成了AI聊天机器人、知识库管理（RAG）、数据清洗、内容工厂、CMS门户、订阅计费、多站点管理等完整功能。核心优势：AI原生架构、一体化SSO、开箱即用支付、强大的后台管理和灵活的主题系统。', '白皮书,产品介绍,技术架构,AI建站,功能概述', 'company', 10),
+                ('kb_faq_whitepaper', '塔卡投研白皮书', '塔卡投研（Tarka AI）是新一代AI驱动的智能建站与企业数字化平台。系统集成了AI聊天机器人、知识库管理（RAG）、数据清洗、内容工厂、CMS门户、订阅计费、多站点管理等完整功能。核心优势：AI原生架构、一体化SSO、开箱即用支付、强大的后台管理和灵活的主题系统。', '白皮书,产品介绍,技术架构,AI建站,功能概述', 'company', 10),
                 ('kb_faq_whitepaper_tech', '技术架构说明', '系统采用Python 3.12 + Flask多服务微架构，SQLite (WAL模式)数据库，Vanilla JS SPA前端。支持SSO统一登录、多种支付网关、SSE流式对话、RAG知识库检索、Agent矩阵智能体编排等核心技术。', '技术,架构,Flask,Python,SSO,支付', 'tech', 8),
             ]
             for s in faq_seeds_data:
@@ -2154,7 +2155,7 @@ def init_db():
     with get_db() as m:
         cols = get_table_columns(m, 'brand_settings')
         if 'software_name' not in cols:
-            m.execute("ALTER TABLE brand_settings ADD COLUMN software_name TEXT NOT NULL DEFAULT 'VeroRun 维洛智能'")
+            m.execute("ALTER TABLE brand_settings ADD COLUMN software_name TEXT NOT NULL DEFAULT '塔卡投研'")
             m.commit()
             logger.info('[Migration] brand_settings.software_name added')
         if 'software_slogan' not in cols:
@@ -2163,14 +2164,14 @@ def init_db():
             logger.info('[Migration] brand_settings.software_slogan added')
     # i18n:tech:end
 
-    # ── Migration: tm_brand_settings site_name_cn → VeroRun ──
+    # ── Migration: tm_brand_settings site_name_cn → 塔卡投研 ──
     with get_db() as m:
         try:
             row = m.execute("SELECT site_name_cn FROM tm_brand_settings WHERE id=1").fetchone()
             if row and row["site_name_cn"] == 'TradeMind':
-                m.execute("UPDATE tm_brand_settings SET site_name_cn='VeroRun' WHERE id=1")
+                m.execute("UPDATE tm_brand_settings SET site_name_cn='塔卡投研' WHERE id=1")
                 m.commit()
-                logger.info("[Migration] tm_brand_settings.site_name_cn updated to VeroRun")
+                logger.info("[Migration] tm_brand_settings.site_name_cn updated to 塔卡投研")
         except Exception:
             m.rollback()  # tm_brand_settings table no longer exists
 
@@ -2751,7 +2752,7 @@ except Exception:
 
 # 默认主页站点在 site_configs 中创建（如不存在）
 _default_domain = os.environ.get('DEPLOY_DOMAIN', 'localhost')
-_default_brand = os.environ.get('DEPLOY_BRAND', 'VeroRun 维洛智能')
+_default_brand = os.environ.get('DEPLOY_BRAND', '塔卡投研')
 try:
     with _safe_get_db_for_migration() as m:
         m.execute(

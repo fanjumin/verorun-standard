@@ -29,6 +29,7 @@ from shared.edition import (  # noqa: F401
     current_edition,
     edition_artifact_stem,
     edition_compat_values,
+    is_beta_channel,
 )
 
 # 兼容别名：早期调用方沿用下划线私有名（agent_matrix/routes.py 等）
@@ -100,7 +101,10 @@ def edition_requires_license() -> bool:
     决策，未显式声明的版（official / research / 未设版本键的老部署）一律不启用，
     否则一次改动会把所有发行版锁死。
     桌面金融版显式置 true（2026-09-11 产品决策：订阅到期即锁，fail-closed）。
+    内测通道（VERORUN_CHANNEL=beta）免授权：正式版构建不注入该变量，判定不变。
     """
+    if is_beta_channel():
+        return False
     path = _edition_yaml_path()
     if not os.path.isfile(path):
         return False
@@ -1396,7 +1400,17 @@ def register_capability_to_role(domain, name, capabilities, description='', syst
             (domain,)
         ).fetchone()
         if not role:
-            logger.warning(f'[Capability] ⚠️ No system role found for domain={domain}, skipping {name}')
+            # 区分两种"无归属"：本版角色集根本没有该 domain（发行版裁剪，属预期，
+            # 如 finance-desktop 无 content 域），与 domain 存在但缺少 sub 角色
+            # （真实配置缺陷，仍需告警）。
+            domain_role = conn.execute(
+                "SELECT 1 FROM agent_matrix WHERE domain=%s AND is_system=1 LIMIT 1",
+                (domain,)
+            ).fetchone()
+            if domain_role:
+                logger.warning(f'[Capability] ⚠️ No system role found for domain={domain}, skipping {name}')
+            else:
+                logger.info(f'[Capability] ℹ️ domain={domain} not in this edition role set, skip {name}')
             return False
 
         existing = json.loads(role['capabilities'] or '[]')

@@ -7,7 +7,7 @@ mail UI.
 
 ## 1. Prerequisites
 
-- VeroRun app ≥ 0.10.0.
+- Tarka app ≥ 0.10.0.
 - SMTP account (Gmail app password / Outlook / QQ / enterprise).
 - Optional: IMAP for inbox.
 

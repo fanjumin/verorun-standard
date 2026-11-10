@@ -228,6 +228,10 @@ def _ai_license_enforced():
     旧条件只看 APP_MODE，桌面包裹版（APP_MODE 默认 main、VR_EDITION=finance-desktop）
     直接 return None → 到期后 AI/Agent 功能照常可用，与"到期即锁"口径冲突。
     """
+    # 内测通道（VERORUN_CHANNEL=beta）免授权；正式版构建不注入该变量，判定不变。
+    from shared.edition import is_beta_channel
+    if is_beta_channel():
+        return False
     if os.environ.get('APP_MODE', 'main') == 'client':
         return True
     try:

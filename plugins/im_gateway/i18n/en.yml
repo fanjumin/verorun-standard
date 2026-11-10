@@ -172,7 +172,7 @@ WeCom webhook_url or corp credentials are required: WeCom webhook_url or corp cr
 'Discord send failed': 'Discord send failed'
 
 # ── 告警推送正文 ───────────────────────────────────────────
-'VeroRun Alert': 'VeroRun Alert'
+'Tarka Alert': 'Tarka Alert'
 'Current value: {observed} / threshold: {threshold}': 'Current value: {observed} / threshold: {threshold}'
 'Current value: {observed}': 'Current value: {observed}'
 'Time: {time}': 'Time: {time}'

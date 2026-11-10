@@ -172,7 +172,7 @@ WeCom webhook_url or corp credentials are required: 企业微信需要 webhook_u
 'Discord send failed': 'Discord 消息发送失败'
 
 # ── 告警推送正文 ───────────────────────────────────────────
-'VeroRun Alert': '【VeroRun 告警】'
+'Tarka Alert': '【塔卡投研 告警】'
 'Current value: {observed} / threshold: {threshold}': '当前值: {observed} / 阈值: {threshold}'
 'Current value: {observed}': '当前值: {observed}'
 'Time: {time}': '时间: {time}'

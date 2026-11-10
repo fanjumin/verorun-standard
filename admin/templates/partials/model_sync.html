@@ -1,4 +1,85 @@
 // Model Sync — AI Hub 模型目录自动对齐体检页（Phase C）
+
+// 人性化接线：供应商 / 密钥页保存后可直接拉取模型；仅在用户确认后才进入审核页。
+window.aiHubSyncProvider = function(slug){
+  return aiHubSyncRequest(slug ? ('&provider=' + encodeURIComponent(slug)) : '');
+};
+window.aiHubSyncAll = function(){ return aiHubSyncRequest(''); };
+
+function aiHubSyncRequest(extra){
+  showToast('{{ _('Fetching models...') }}', '');
+  return fetch("/admin/ai-hub/models/sync?dry_run=0" + extra, {
+    method: "POST", headers: {"Authorization": "Bearer " + T}
+  }).then(function(r){ return r.json(); }).then(function(rep){
+    if(!rep || !rep.success){
+      showToast((rep && rep.message) || '{{ _('Sync failed') }}', 'error');
+      return rep;
+    }
+    var st = rep.summary || {};
+    var nw = st.new_count || 0, ms = st.missing_count || 0;
+    var sk = rep.skipped || [];
+    if(!nw && !ms){
+      if(sk.length){ aiHubShowSyncNotice(sk); return rep; }
+      showToast('{{ _('Models are up to date') }}', 'success'); return rep;
+    }
+    aiHubShowSyncResult(nw, ms);
+    return rep;
+  }).catch(function(e){
+    showToast('{{ _('Sync failed') }}: ' + e, 'error');
+  });
+}
+
+function aiHubShowSyncResult(nw, ms){
+  var old = document.getElementById('aihub-sync-modal'); if(old) old.remove();
+  var h = '<div class="modal-box" style="max-width:440px;width:90%">';
+  h += '<h3 style="margin:0 0 12px;color:var(--accent)">{{ _('Model Sync') }}</h3>';
+  h += '<p style="margin:0 0 8px;font-size:14px">{{ _('New upstream') }}: <b>' + nw + '</b> · {{ _('Missing upstream') }}: <b>' + ms + '</b></p>';
+  h += '<p style="margin:0 0 18px;font-size:12px;color:var(--dim)">{{ _('Review the diffs before applying. Nothing is changed automatically.') }}</p>';
+  h += '<div style="display:flex;gap:8px;justify-content:flex-end">';
+  h += '<button class="bo" onclick="aiHubCloseSyncModal()" style="padding:6px 16px">{{ _('Cancel') }}</button>';
+  h += '<button class="bp" onclick="aiHubGoSync()" style="padding:6px 16px">{{ _('Review') }}</button>';
+  h += '</div></div>';
+  var overlay = document.createElement('div');
+  overlay.id = 'aihub-sync-modal';
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = h;
+  overlay.onclick = aiHubCloseSyncModal;
+  overlay.firstChild.onclick = function(e){ e.stopPropagation(); };
+  document.body.appendChild(overlay);
+}
+function aiHubShowSyncNotice(skipped){
+  var old = document.getElementById('aihub-sync-modal'); if(old) old.remove();
+  var h = '<div class="modal-box" style="max-width:560px;width:92%">';
+  h += '<h3 style="margin:0 0 12px;color:var(--accent)">{{ _('Model Sync') }}</h3>';
+  h += '<div style="max-height:40vh;overflow:auto;font-size:12px;line-height:1.7">';
+  skipped.forEach(function(s){
+    h += '<div style="margin-bottom:6px"><b>' + esc(s.provider) + '</b>: ' + esc(s.reason) + '</div>';
+  });
+  h += '</div>';
+  h += '<div style="display:flex;justify-content:flex-end;margin-top:14px">';
+  h += '<button class="bo" onclick="aiHubCloseSyncModal()" style="padding:6px 16px">{{ _('Cancel') }}</button>';
+  h += '</div></div>';
+  var overlay = document.createElement('div');
+  overlay.id = 'aihub-sync-modal';
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = h;
+  overlay.onclick = aiHubCloseSyncModal;
+  overlay.firstChild.onclick = function(e){ e.stopPropagation(); };
+  document.body.appendChild(overlay);
+}
+
+window.aiHubCloseSyncModal = function(){
+  var m = document.getElementById('aihub-sync-modal'); if(m) m.remove();
+};
+window.aiHubGoSync = function(){
+  aiHubCloseSyncModal();
+  if(document.querySelector('.ai-tab[data-tab="sync"]') && window.aiHubSwitchTab){
+    aiHubSwitchTab('sync'); return;
+  }
+  if(window.l_ai_hub){ l_ai_hub(); if(window.aiHubSwitchTab) aiHubSwitchTab('sync'); }
+  else if(window.l_model_sync){ l_model_sync('mc'); }
+};
+
 window.l_model_sync = function(targetId){
   if(!targetId) document.getElementById("pt").textContent="{{ _('Model Sync') }}";
   var target = document.getElementById(targetId||"mc");

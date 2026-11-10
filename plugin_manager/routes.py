@@ -1626,6 +1626,13 @@ def store_install(identifier: str):
     try:
         info = mgr.install(identifier)
     except PluginError as e:
+        # 依赖缺失属可修复的配置问题，不是权限问题：单独走 422 并给出可执行指引。
+        # 背景：python_dependencies 缺失原先与发行版门控共用 403，站点侧完全看不出
+        # 根因（三台站点实测：analytics 6 次安装全 403，实际只缺 user_agents）。
+        from .exceptions import PluginDependencyError
+        if isinstance(e, PluginDependencyError):
+            _hint = '请在服务器 venv 中执行 pip install 安装缺失依赖后重试'  # i18n:tech
+            return _json_result(False, error=f'{e}（{_hint}）', code=422)
         # 发行版门控（include 白名单 / compatible_editions）拒绝 → 403。
         # 原文案走下面 500 分支，前端会把「本版不提供该插件」显示成内部错误，
         # 预览版用户会误判成系统故障并上报。

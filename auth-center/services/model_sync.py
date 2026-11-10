@@ -690,8 +690,15 @@ def run_sync(dry_run=True, provider_slug=None, include_offline=False):
             run_id = row['id']
 
     try:
-        slugs = [provider_slug] if provider_slug else list(FETCH_SPECS.keys())
         with get_db() as conn:
+            if provider_slug:
+                slugs = [provider_slug]
+            else:
+                # 全量扫描以 providers 表为准（含用户自建/中转供应商），
+                # 不再局限于内置 FETCH_SPECS —— 否则新建供应商永远不在扫描集合。
+                slugs = [r['slug'] for r in conn.execute(
+                    "SELECT slug FROM providers WHERE is_active = 1 ORDER BY slug"
+                ).fetchall()]
             providers = conn.execute(
                 "SELECT id, slug, name FROM providers WHERE slug = ANY(%s) ORDER BY slug",
                 (slugs,),
@@ -707,7 +714,11 @@ def run_sync(dry_run=True, provider_slug=None, include_offline=False):
         for p in providers:
             slug = p['slug']
             provider_report = {'status': 'ok', 'local_rows': len(local_by_provider.get(slug, []))}
-            local_rows = [r for r in local_by_provider.get(slug, []) if r['is_active']]
+            # 全部本地行参与比对：已灰化(is_active=0)的模型若上游仍在，不能再被判为
+            # "new"（否则每轮都提示新增、保存时又被唯一约束挡回）。灰化行只在
+            # missing 侧剔除，避免反复灰化与噪音。
+            local_rows = local_by_provider.get(slug, [])
+            inactive_ids = {r['id'] for r in local_rows if not r['is_active']}
 
             # Overseas channels are unreachable from this network — never pay the
             # timeout cost unless the caller explicitly opts in.
@@ -736,6 +747,9 @@ def run_sync(dry_run=True, provider_slug=None, include_offline=False):
                 continue
 
             diff = diff_provider(local_rows, models)
+            if inactive_ids:
+                diff['missing'] = [m for m in diff['missing']
+                                   if m.get('local_model_id') not in inactive_ids]
             for item in diff['missing']:
                 item['confirmed'] = _confirmed_missing(slug, item['model_name'])
 
@@ -762,6 +776,7 @@ def run_sync(dry_run=True, provider_slug=None, include_offline=False):
                 'reason': _('Provider {provider} has no model-list endpoint; use the manual lane', provider=slug),
             })
 
+        report['run_id'] = run_id
         report['summary'] = totals
         report['skipped'] = skipped
         report['finished_at'] = _now_iso()
@@ -941,13 +956,15 @@ def _apply_insert(conn, diff, enable=False):
     display = payload.get('display_name') or remote_id
 
     prow = conn.execute(
-        'SELECT id, slug FROM providers WHERE slug = %s', (diff['provider_slug'],)
+        'SELECT id, slug, endpoint_url FROM providers WHERE slug = %s', (diff['provider_slug'],)
     ).fetchone()
     if not prow:
         return _('Unknown provider {provider}', provider=diff['provider_slug'])
 
     spec = FETCH_SPECS.get(diff['provider_slug'], {})
-    base_url = spec.get('base_url', '')
+    # 供应商行上的 endpoint_url 是运维实际填写的调用端点（自建/中转常见），
+    # 优先于内置 FETCH_SPECS；缺失时才回落到内置默认端点。
+    base_url = (prow['endpoint_url'] or '') or spec.get('base_url', '')
     existing = conn.execute(
         'SELECT endpoint_url, api_key_ref FROM provider_models '
         "WHERE provider_id = %s AND COALESCE(endpoint_url, '') <> '' "

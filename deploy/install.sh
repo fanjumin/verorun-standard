@@ -96,7 +96,7 @@ else
     _COMMON_REMOTE="${COMMON_REMOTE:-https://raw.githubusercontent.com/fanjumin/verorun-pro/master/deploy/lib/common.sh}"
     _COMMON_MIRROR="${COMMON_MIRROR:-https://ghfast.top/https://raw.githubusercontent.com/fanjumin/verorun-pro/master/deploy/lib/common.sh}"
     # Computed and backfilled at release time by deploy/scripts/sign_release.py (LF-normalized hash)
-    _COMMON_SHA256="${COMMON_SHA256:-261aa42e9bade1066e9388669b1198a8641fb8bc027f64d5a25131003e333d60}"
+    _COMMON_SHA256="${COMMON_SHA256:-93962449305bb0167a040b6779a35bcdb23a530a915f09efdd2a9be153ff42e4}"
     _tmp_common="$(mktemp)"
     # Audit P3-2: clean up the temp file on Ctrl+C interruption
     trap 'rm -f "${_tmp_common}"' EXIT
@@ -445,6 +445,7 @@ while [ $# -gt 0 ]; do
         --skip-deps) SKIP_DEPS=1 ;;
         --approve-migrate) APPROVE_MIGRATE=1 ;;
         --force) FORCE_UPDATE=1 ;;   # Audit C-3: allow overwriting local changes on update (back up the diff first)
+        --accept-repo-change) ACCEPT_REPO_CHANGE=1 ;;   # L1-C: explicitly accept an origin repo change
         --admin-user=*) VR_ADMIN_USERNAME="${1#*=}" ;;
         --admin-user) shift; [ $# -gt 0 ] && VR_ADMIN_USERNAME="${1}" || { echo -e "${FAIL} --admin-user requires a value"; exit 1; } ;;
         --admin-pass=*) VR_ADMIN_PASSWORD="${1#*=}" ;;

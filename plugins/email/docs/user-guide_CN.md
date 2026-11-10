@@ -6,7 +6,7 @@
 
 ## 1. 前置条件
 
-- VeroRun App ≥ 0.10.0。
+- Tarka App ≥ 0.10.0。
 - SMTP 账号（Gmail 应用密码 / Outlook / QQ / 企业邮箱）。
 - 可选：IMAP 收件。
 
