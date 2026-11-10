@@ -18,6 +18,15 @@ services:
   user_console: true
   main_site: true
 plugins:
+  # 2026-11-10 用户裁决：tarka.cn 不再使用运行期白名单。
+  # include 仅保留「发包裁剪」职责（sync 流程按它物理拷贝插件目录）；
+  # 运行期可见性 / 安装 / 启用回到插件自身 compatible_editions 判定。
+  # 副作用范围（服务器实测 28 个插件目录）：仅 social_push 因此从「不可见不可装」
+  # 转为可装；stock_analysis 仍被其 compatible_editions（无 standard）挡在 tarka 外。
+  # ⚠️ 位置必须在 include 之前：agent_matrix.models._parse_edition_plugin_lists 只在
+  #    plugins: 段的标量位置识别该键，写在 include 项之后会被归入 include 段而静默
+  #    失效（回落默认 true，实测 2026-11-10）。
+  runtime_whitelist: false
   # include 兼任两职（语义见 agent_matrix/models.edition_runtime_whitelist）：
   #   ① 发包裁剪：sync 流程按它物理拷贝插件目录；
   #   ② 运行时门控：plugin_manager 的可见性 / 安装 / 启用三层同口径。
@@ -60,4 +69,3 @@ plugins:
     - sms
     - vault
     - visitor_profile
-  runtime_whitelist: true
