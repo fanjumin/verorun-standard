@@ -24,7 +24,7 @@ APP_NAME = "verorun"
 # 这是**只读**文件访问，不 import 任何核心模块、不引入核心依赖，满足"零入侵"约束。
 # 若 CLI 被单独打包发布（脱离仓库树），则回退到下方 PACKAGED_VERSION 常量
 # （由构建流程在 sdist/wheel 阶段注入，保持与系统发版一致）。
-_PACKAGED_VERSION = "0.67.6"
+_PACKAGED_VERSION = "0.67.9"
 
 
 def _resolve_version() -> str:
